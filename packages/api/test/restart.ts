@@ -1,0 +1,41 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
+import { Servers } from '../../../tools/dev-environment/servers.ts';
+import { noteSchema, notesSchema } from '@starter/contracts';
+
+const state = mkdtempSync(path.join(os.tmpdir(), 'starter-persistence-'));
+const servers = new Servers(path.resolve(process.cwd(), '../..'), state);
+try {
+  const first = await servers.workers('api');
+  const note = noteSchema.parse(
+    await (
+      await fetch(`${first}/api/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'Survives real workerd restart' }),
+      })
+    ).json(),
+  );
+  const seed = notesSchema
+    .parse(await (await fetch(`${first}/api/notes`)).json())
+    .find((item) => item.text === 'A local sample note');
+  if (!seed) throw new Error('Initial D1 seed missing');
+  assert.equal((await fetch(`${first}/api/notes/${seed.id}`, { method: 'DELETE' })).status, 204);
+  await servers.stop();
+  const second = await servers.workers('api');
+  const notes = notesSchema.parse(await (await fetch(`${second}/api/notes`)).json());
+  assert.ok(
+    notes.some((item) => item.id === note.id),
+    'D1 data must survive workerd restart',
+  );
+  assert.ok(
+    !notes.some((item) => item.id === seed.id),
+    'Repeated setup must not reseed deleted data',
+  );
+  assert.equal((await fetch(`${second}/api/notes/${note.id}`, { method: 'DELETE' })).status, 204);
+  console.log('Real D1 migration reapply, seed and restart persistence passed');
+} finally {
+  await servers.stop();
+  rmSync(state, { recursive: true, force: true });
+}

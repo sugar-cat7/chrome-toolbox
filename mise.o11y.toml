@@ -1,0 +1,4 @@
+# Optional investigation tools; ordinary env:setup does not install these.
+[tools]
+"aqua:astral-sh/uv" = "0.13.0"
+"pypi:mcp-clickhouse" = { version = "0.7.0", uvx = true }

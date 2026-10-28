@@ -1,0 +1,36 @@
+{
+  "name": "__SCOPE__/__APP__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "starter": {
+    "runtime": "library",
+    "resultBoundaries": {
+      "src/index.tsx:reload": "React event owner consumes adapter Result and presents its state.",
+      "src/index.tsx:mutation": "React event owner consumes mutation Result and retains existing data."
+    }
+  },
+  "scripts": {
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts",
+    "build": "vp pack"
+  },
+  "dependencies": {
+    "__SCOPE__/contracts": "workspace:*",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "jsdom": "catalog:",
+    "react-dom": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "typescript": "catalog:"
+  }
+}

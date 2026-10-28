@@ -1,0 +1,30 @@
+{
+  "name": "__SCOPE__/observability",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts",
+    "build": "vp pack"
+  },
+  "dependencies": {
+    "__SCOPE__/contracts": "workspace:*",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "@opentelemetry/resources": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "starter": {
+    "runtime": "library",
+    "role": "observability"
+  }
+}

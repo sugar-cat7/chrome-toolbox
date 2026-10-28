@@ -1,0 +1,4 @@
+[tools]
+"aqua:aquasecurity/trivy" = "0.75.0"
+"aqua:astral-sh/uv" = "0.13.0"
+"pypi:semgrep" = { version = "1.180.0", uvx = true }

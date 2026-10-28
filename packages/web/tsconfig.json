@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node", "react", "vite-plus/client"]
+  },
+  "include": ["src", "test", "*.ts", ".cloudflare/types/index.d.ts"],
+  "exclude": ["dist", "node_modules"]
+}

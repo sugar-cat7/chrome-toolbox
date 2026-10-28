@@ -1,0 +1,23 @@
+rules:
+  - id: verified-tls
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Enable TLS certificate verification; use a trusted CA for local development.
+    patterns:
+      - pattern: '{ ..., rejectUnauthorized: $VALUE, ... }'
+      - metavariable-pattern:
+          metavariable: $VALUE
+          pattern: 'false'
+      - focus-metavariable: $VALUE
+    fix: 'true'
+    metadata:
+      category: security
+      cwe: CWE-295
+  - id: native-verified-tls
+    languages: [rust]
+    severity: ERROR
+    message: Keep native TLS certificate verification enabled.
+    pattern: $CLIENT.danger_accept_invalid_certs(true)
+    metadata:
+      category: security
+      cwe: CWE-295

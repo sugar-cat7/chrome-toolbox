@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "types": [
+      "node",
+      "react",
+      "vite-plus/client",
+      "mocha"
+    ]
+  },
+  "include": [
+    "src",
+    "test",
+    "*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "src-tauri/target",
+    "node_modules"
+  ]
+}

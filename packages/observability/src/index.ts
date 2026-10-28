@@ -1,0 +1,466 @@
+import {
+  ROOT_CONTEXT,
+  SpanKind,
+  SpanStatusCode,
+  TraceFlags,
+  trace,
+  type SpanContext,
+} from '@opentelemetry/api';
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+  type ReadableSpan,
+} from '@opentelemetry/sdk-trace-base';
+import { resourceFromAttributes } from '@opentelemetry/resources';
+import {
+  capture,
+  captureSync,
+  Err,
+  Ok,
+  failure,
+  publicFailure,
+  PUBLIC_ERRORS,
+  INTERNAL_ERRORS,
+  decodePublicError,
+  type Result,
+  type AppError,
+  type PublicError,
+} from '@starter/contracts';
+
+export const OPERATIONS = [
+  'notes.list',
+  'notes.add',
+  'notes.remove',
+  'notes.export',
+  'http.request',
+  'binding.kv.read',
+  'binding.kv.write',
+  'binding.r2.read',
+  'binding.r2.write',
+  'binding.d1.read',
+  'binding.d1.write',
+  'ui.initialize',
+] as const;
+export type OperationName = (typeof OPERATIONS)[number];
+export type TelemetryConfig = {
+  service: string;
+  instance: string;
+  environment?: string;
+  version?: string;
+  runId?: string;
+  endpoint?: string;
+  send?: typeof fetch;
+};
+export type TraceCarrier = { traceparent: string };
+const finiteId = /^[a-f0-9]{32}$/u;
+const safeResource = /^[a-zA-Z0-9._-]{1,128}$/u;
+const nano = (time: [number, number]): string =>
+  (BigInt(time[0]) * 1_000_000_000n + BigInt(time[1])).toString();
+const attr = (key: string, value: string | number) => ({
+  key,
+  value: typeof value === 'number' ? { doubleValue: value } : { stringValue: value },
+});
+
+export function parseTraceparent(value: string | null | undefined): SpanContext | undefined {
+  const match = /^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/u.exec(value ?? '');
+  if (!match || /^0+$/u.test(match[1]!) || /^0+$/u.test(match[2]!)) return;
+  return {
+    traceId: match[1]!,
+    spanId: match[2]!,
+    traceFlags: Number.parseInt(match[3]!, 16) & TraceFlags.SAMPLED,
+    isRemote: true,
+  };
+}
+export function collectorEndpoint(value: string): Result<string> {
+  const parsed = captureUrl(value);
+  if (!parsed.ok) return parsed;
+  const url = parsed.value;
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+  )
+    return Err(failure('input_invalid'));
+  return Ok(url.href.replace(/\/$/u, ''));
+}
+const captureUrl = (value: string): Result<URL> =>
+  captureSync(() => new URL(value), 'input_invalid');
+
+export function createTelemetry(config: TelemetryConfig) {
+  for (const field of [
+    config.service,
+    config.instance,
+    config.environment ?? 'local',
+    config.version ?? 'development',
+    config.runId ?? 'local',
+  ])
+    if (!safeResource.test(field)) throw new Error('Invalid finite telemetry resource');
+  const selected = config.endpoint ? collectorEndpoint(config.endpoint) : undefined;
+  if (selected && !selected.ok)
+    throw new Error(
+      'Invalid collector endpoint; use loopback HTTP or verified HTTPS without credentials/query',
+    );
+  const endpoint = selected?.ok ? selected.value : undefined;
+  const resource = {
+    'service.name': config.service,
+    'service.instance.id': config.instance,
+    'service.version': config.version ?? 'development',
+    'deployment.environment.name': config.environment ?? 'local',
+    'test.run.id': config.runId ?? 'local',
+  };
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    resource: resourceFromAttributes(resource),
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const tracer = provider.getTracer('application-boundary', '1.0.0');
+  const resources = {
+    attributes: Object.entries(resource).map(([key, value]) => attr(key, value)),
+  };
+  let lastExport: Result<void> = Ok(undefined);
+  let dropped = 0;
+  const pending: {
+    span?: ReadableSpan;
+    attributes: ReturnType<typeof attr>[];
+    traceId: string;
+    spanId: string;
+    start: string;
+    end: string;
+    duration: number;
+    failed: boolean;
+    cancelled: boolean;
+  }[] = [];
+  let draining: Promise<Result<void>> | undefined;
+  function start(operation: OperationName, carrier?: TraceCarrier, requestId?: string) {
+    if (!(OPERATIONS as readonly string[]).includes(operation))
+      throw new Error('Unknown finite operation');
+    const parent = parseTraceparent(carrier?.traceparent);
+    const context = parent ? trace.setSpanContext(ROOT_CONTEXT, parent) : ROOT_CONTEXT;
+    const span = tracer.startSpan(
+      operation,
+      {
+        kind: operation === 'http.request' ? SpanKind.SERVER : SpanKind.INTERNAL,
+        attributes: { 'operation.name': operation },
+      },
+      context,
+    );
+    const started = performance.now();
+    const id = span.spanContext();
+    const traceparent = `00-${id.traceId}-${id.spanId}-${(id.traceFlags & TraceFlags.SAMPLED).toString(16).padStart(2, '0')}`;
+    let finished = false;
+    return {
+      traceparent,
+      traceId: id.traceId,
+      spanId: id.spanId,
+      finish(result: Result<unknown, AppError | PublicError>): void {
+        if (finished) throw new Error('An operation may finish only once');
+        finished = true;
+        const attributes = [attr('operation.name', operation)];
+        if (requestId && finiteId.test(requestId.replaceAll('-', '')))
+          attributes.push(attr('app.request.id', requestId));
+        let cancelled = false;
+        if (!result.ok) {
+          const internal = 'internalCode' in result.error ? result.error : undefined;
+          const validInternal =
+            internal &&
+            Object.hasOwn(INTERNAL_ERRORS, internal.internalCode) &&
+            finiteId.test(internal.diagnosticId)
+              ? internal
+              : internal
+                ? failure('response_invalid')
+                : undefined;
+          const decoded = validInternal
+            ? Ok(publicFailure(validInternal))
+            : decodePublicError(result.error);
+          const problem = decoded.ok ? decoded.value : publicFailure(decoded.error);
+          const errorType = validInternal
+            ? validInternal.internalCode
+            : decoded.ok
+              ? problem.code
+              : decoded.error.internalCode;
+          cancelled = problem.failureClass === 'cancelled';
+          attributes.push(
+            attr('error.type', errorType),
+            attr('app.failure.class', problem.failureClass),
+            attr('app.diagnostic.id', problem.diagnosticId),
+          );
+          span.setStatus({
+            code: cancelled ? SpanStatusCode.UNSET : SpanStatusCode.ERROR,
+            message: problem.code,
+          });
+          span.addEvent(
+            'operation.failed',
+            Object.fromEntries(
+              attributes.map((entry) => [
+                entry.key,
+                'stringValue' in entry.value ? entry.value.stringValue : entry.value.doubleValue,
+              ]),
+            ),
+          );
+        }
+        for (const entry of attributes)
+          if ('stringValue' in entry.value) span.setAttribute(entry.key, entry.value.stringValue);
+        span.end();
+        if (!(id.traceFlags & TraceFlags.SAMPLED)) return;
+        const readable = exporter
+          .getFinishedSpans()
+          .find((entry) => entry.spanContext().spanId === id.spanId);
+        exporter.reset();
+        if (endpoint) {
+          if (pending.length >= 128) {
+            dropped += 1;
+            lastExport = Err(failure('network_failed'));
+          } else
+            pending.push({
+              ...(readable ? { span: readable } : {}),
+              attributes,
+              traceId: id.traceId,
+              spanId: id.spanId,
+              start: readable
+                ? nano(readable.startTime)
+                : (BigInt(Date.now()) * 1_000_000n).toString(),
+              end: readable ? nano(readable.endTime) : (BigInt(Date.now()) * 1_000_000n).toString(),
+              duration: performance.now() - started,
+              failed: !result.ok,
+              cancelled,
+            });
+        }
+      },
+    };
+  }
+  async function drain(): Promise<Result<void>> {
+    if (!endpoint) return Ok(undefined);
+    const records = pending.splice(0);
+    if (!records.length) return lastExport;
+    const spans = records.flatMap((record) =>
+      record.span
+        ? [
+            {
+              traceId: record.traceId,
+              spanId: record.spanId,
+              ...(record.span.parentSpanContext
+                ? { parentSpanId: record.span.parentSpanContext.spanId }
+                : {}),
+              name: record.span.name,
+              kind: record.span.kind + 1,
+              startTimeUnixNano: record.start,
+              endTimeUnixNano: record.end,
+              attributes: record.attributes,
+              status: { code: record.span.status.code },
+              events: record.span.events.map((event) => ({
+                name: event.name,
+                timeUnixNano: nano(event.time),
+                attributes: record.attributes,
+              })),
+            },
+          ]
+        : [],
+    );
+    const bounds = [5, 25, 100, 500, 2000];
+    const metrics = records.map((record) => ({
+      name: 'application.operation.duration',
+      unit: 'ms',
+      histogram: {
+        aggregationTemporality: 1,
+        dataPoints: [
+          {
+            startTimeUnixNano: record.start,
+            timeUnixNano: record.end,
+            count: '1',
+            sum: record.duration,
+            explicitBounds: bounds,
+            bucketCounts: bounds
+              .map((bound, index) =>
+                record.duration <= bound && (index === 0 || record.duration > bounds[index - 1]!)
+                  ? '1'
+                  : '0',
+              )
+              .concat([record.duration > bounds.at(-1)! ? '1' : '0']),
+            attributes: record.attributes.filter((entry) =>
+              ['operation.name', 'app.failure.class'].includes(entry.key),
+            ),
+            exemplars: [
+              {
+                timeUnixNano: record.end,
+                asDouble: record.duration,
+                traceId: record.traceId,
+                spanId: record.spanId,
+                filteredAttributes: [],
+              },
+            ],
+          },
+        ],
+      },
+    }));
+    const logs = records.map((record) => ({
+      timeUnixNano: record.end,
+      observedTimeUnixNano: record.end,
+      traceId: record.traceId,
+      spanId: record.spanId,
+      severityNumber: record.cancelled || !record.failed ? 9 : 17,
+      severityText: record.cancelled || !record.failed ? 'INFO' : 'ERROR',
+      body: { stringValue: record.failed ? 'operation.failed' : 'operation.completed' },
+      attributes: record.attributes,
+    }));
+    const scope = { name: 'application-boundary', version: '1.0.0' };
+    const payloads = [
+      ['traces', { resourceSpans: [{ resource: resources, scopeSpans: [{ scope, spans }] }] }],
+      [
+        'logs',
+        { resourceLogs: [{ resource: resources, scopeLogs: [{ scope, logRecords: logs }] }] },
+      ],
+      [
+        'metrics',
+        { resourceMetrics: [{ resource: resources, scopeMetrics: [{ scope, metrics }] }] },
+      ],
+    ] as const;
+    for (const [signal, payload] of payloads) {
+      const response = await capture(
+        () =>
+          (config.send ?? fetch)(`${endpoint}/v1/${signal}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(3000),
+          }),
+        'network_failed',
+      );
+      if (!response.ok) {
+        dropped += records.length;
+        lastExport = response;
+        return response;
+      }
+      const body = await capture(
+        () => response.value.json() as Promise<unknown>,
+        'response_invalid',
+      );
+      if (!response.value.ok || !body.ok || rejectsOtlp(body.value)) {
+        dropped += records.length;
+        lastExport = Err(failure('response_invalid'));
+        return lastExport;
+      }
+    }
+    lastExport = Ok(undefined);
+    return lastExport;
+  }
+  function flush(): Promise<Result<void>> {
+    if (draining)
+      return draining.then((result) => (result.ok && pending.length ? flush() : result));
+    draining = drain().finally(() => {
+      draining = undefined;
+    });
+    return draining.then((result) => (result.ok && pending.length ? flush() : result));
+  }
+  return {
+    start,
+    flush,
+    status: () => ({ enabled: Boolean(endpoint), pending: pending.length, dropped, lastExport }),
+    shutdown: () => provider.shutdown(),
+  };
+}
+export type Telemetry = ReturnType<typeof createTelemetry>;
+
+// HTTP/Service Binding adapter: preserve Response streaming and correlate the
+// incoming hop. Platform exceptions become the same public failure contract.
+export async function observeHttp(
+  request: Request,
+  config: TelemetryConfig,
+  handler: (request: Request) => Promise<Response>,
+): Promise<Response> {
+  const telemetry = createTelemetry(config);
+  const requestId = crypto.randomUUID();
+  const operation = telemetry.start(
+    'http.request',
+    { traceparent: request.headers.get('traceparent') ?? '' },
+    requestId,
+  );
+  const headers = new Headers(request.headers);
+  headers.set('traceparent', operation.traceparent);
+  const captured = await capture(
+    () => handler(new Request(request, { headers })),
+    'unexpected_failure',
+  );
+  const response = captured.ok
+    ? captured.value
+    : Response.json({ error: publicFailure(captured.error), requestId }, { status: 500 });
+  let outcome: Result<unknown, AppError | PublicError> = captured;
+  if (captured.ok && response.status >= 400) {
+    const publicCode = response.headers.get('x-error-code');
+    const policy = Object.entries(PUBLIC_ERRORS).find(
+      ([code, value]) => code === publicCode && value.status === response.status,
+    );
+    const id = response.headers.get('x-diagnostic-id');
+    const error = failure('unexpected_failure', id && finiteId.test(id) ? id : undefined);
+    outcome = Err(
+      policy
+        ? {
+            code: policy[0] as keyof typeof PUBLIC_ERRORS,
+            message: policy[1].message,
+            failureClass: policy[1].class,
+            retry: policy[1].retry,
+            remediation: policy[1].remediation,
+            diagnosticId: error.diagnosticId,
+          }
+        : error,
+    );
+  }
+  operation.finish(outcome);
+  const exported = await telemetry.flush();
+  await telemetry.shutdown();
+  const telemetryState = !telemetry.status().enabled
+    ? 'disabled'
+    : exported.ok
+      ? 'accepted'
+      : 'failed';
+  // Preserve runtime-owned Response flags (including manually encoded streaming bodies).
+  // Immutable platform responses are also preserved: copying can lose opaque
+  // runtime encoding flags. Their export state remains available in telemetry.
+  const annotated = captureSync(() => {
+    response.headers.set('traceparent', operation.traceparent);
+    response.headers.set('x-telemetry-state', telemetryState);
+    return response;
+  }, 'unexpected_failure');
+  if (annotated.ok) return annotated.value;
+  return response;
+}
+
+export async function observeAdapter<T>(
+  telemetry: Telemetry,
+  name: OperationName,
+  action: (carrier: TraceCarrier) => Promise<Result<T, PublicError>>,
+): Promise<Result<T, PublicError>> {
+  const operation = telemetry.start(name);
+  const captured = await capture(
+    () => action({ traceparent: operation.traceparent }),
+    'unexpected_failure',
+  );
+  const result = captured.ok ? captured.value : Err(publicFailure(captured.error));
+  operation.finish(result);
+  const exported = await telemetry.flush();
+  if (!exported.ok)
+    console.warn(
+      JSON.stringify({
+        event: 'telemetry.export.failed',
+        errorCode: exported.error.internalCode,
+        diagnosticId: exported.error.diagnosticId,
+      }),
+    );
+  return result;
+}
+
+export function rejectsOtlp(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return true;
+  if (!('partialSuccess' in body)) return false;
+  const partial = body.partialSuccess;
+  if (!partial || typeof partial !== 'object' || Array.isArray(partial)) return true;
+  return Object.entries(partial).some(([key, value]) =>
+    key === 'errorMessage'
+      ? value !== ''
+      : !['rejectedSpans', 'rejectedLogRecords', 'rejectedDataPoints'].includes(key) ||
+        ![0, '0'].includes(value),
+  );
+}

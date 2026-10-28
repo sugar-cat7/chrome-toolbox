@@ -1,0 +1,59 @@
+{
+  "name": "__SCOPE__/__APP__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {},
+  "starter": {
+    "runtime": "worker",
+    "resultBoundaries": {
+      "src/server.ts:fetch": "HTTP runtime ingress must return the platform Response.",
+      "src/assets.ts:compressAsset": "HTTP asset adapter must return the compressed platform Response.",
+      "src/notes.ts:handleNotes": "HTTP ingress projects a handled Result into a platform Response."
+    }
+  },
+  "scripts": {
+    "cf": "cf",
+    "dev": "vp dev --mode offline",
+    "preview": "node preview.ts",
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
+    "test:runtime": "node ../../tools/cloudflare/runtime.ts",
+    "test:e2e": "node ../../tools/quality/browser.ts",
+    "test:e2e:production": "node ../../tools/quality/browser.ts --preview",
+    "test:lighthouse": "node ../../tools/quality/lighthouse.ts",
+    "build": "node ../../tools/cloudflare/build.ts",
+    "typegen": "cf workers types -m local",
+    "db:migrate": "node ../../tools/cloudflare/database.ts migrate",
+    "db:seed": "node ../../tools/cloudflare/database.ts seed"
+  },
+  "dependencies": {
+    "__SCOPE__/contracts": "workspace:*",
+    "__SCOPE__/ui": "workspace:*",
+    "@tanstack/react-start": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:",
+    "__SCOPE__/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/config": "catalog:",
+    "@cloudflare/build-output-utils": "catalog:",
+    "@cloudflare/vite-plugin": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@playwright/test": "catalog:",
+    "@axe-core/playwright": "catalog:",
+    "lighthouse": "catalog:",
+    "cf": "catalog:",
+    "wrangler": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "typescript": "catalog:"
+  }
+}

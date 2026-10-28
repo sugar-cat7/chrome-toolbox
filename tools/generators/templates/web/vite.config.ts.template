@@ -1,0 +1,22 @@
+import { defineConfig } from 'vite-plus';
+import { cloudflare } from '@cloudflare/vite-plugin';
+import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import react from '@vitejs/plugin-react';
+import tailwind from '@tailwindcss/vite';
+import { fileURLToPath } from 'node:url';
+
+export default defineConfig({
+  plugins: [
+    cloudflare({ viteEnvironment: { name: 'ssr' }, inspectorPort: false, persistState: { path: `${process.env.STARTER_STATE_ROOT ?? fileURLToPath(new URL('../../.state', import.meta.url).href)}/__APP__` } }),
+    tanstackStart({ server: { build: { inlineCss: true } }, router: { quoteStyle: 'single', semicolons: true } }),
+    react(),
+    tailwind(),
+  ],
+  // Keep the framework runtime separately cacheable and avoid a single large initial script.
+  // Vite/TanStack generate preload links; SSR retains the SDK's own output settings.
+  environments: { client: { build: { rolldownOptions: { output: { codeSplitting: { groups: [
+    { name: 'react', test: /[\\/]node_modules[\\/]react[\\/]/ },
+    { name: 'react-dom', test: /[\\/]node_modules[\\/](?:react-dom|scheduler)[\\/]/ },
+  ] } } } } } },
+  server: { host: '127.0.0.1', port: Number(process.env.STARTER_PORT ?? 5173), strictPort: true },
+});

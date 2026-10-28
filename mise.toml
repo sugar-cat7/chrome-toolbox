@@ -1,0 +1,33 @@
+min_version = "2026.9.0"
+
+[settings.task]
+run_auto_install = false
+
+[tools]
+node = "24.21.0"
+"aqua:pnpm/pnpm" = "12.11.2"
+
+[tasks._node]
+hide = true
+run = "mise install node"
+
+[tasks.setup]
+description = "Select a preset before installing its dependencies"
+depends = ["_node"]
+run = "node tools/dev-environment/bootstrap.mjs"
+
+[tasks.doctor]
+description = "Read-only environment diagnosis"
+run = "node tools/dev-environment/doctor.ts"
+
+[tasks.dev]
+run = "pnpm dev"
+
+[tasks.check]
+run = "pnpm check"
+
+[tasks.test]
+run = "pnpm test"
+
+[tasks.build]
+run = "pnpm build"

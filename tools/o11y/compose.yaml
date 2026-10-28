@@ -1,0 +1,50 @@
+name: ${O11Y_PROJECT}
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.9.15.5-alpine@sha256:d7257f12046d99f72ff2691e40dc292c2d0f316ea06c60d6e6c5aef4683209b7
+    user: ${O11Y_UID}:${O11Y_GID}
+    restart: 'no'
+    mem_limit: 1536m
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    entrypoint: [clickhouse-server]
+    command: ['--config-file=/etc/clickhouse-server/config.xml']
+    tmpfs: [/tmp, /var/log/clickhouse-server]
+    ports: ['127.0.0.1:${O11Y_CLICKHOUSE_PORT}:8123']
+    environment:
+      CLICKHOUSE_USER: bootstrap
+      CLICKHOUSE_PASSWORD: ${O11Y_BOOTSTRAP_PASSWORD}
+      CLICKHOUSE_DB: otel
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    volumes:
+      - ${O11Y_STATE}/data:/var/lib/clickhouse
+      - ${O11Y_STATE}/resources.xml:/etc/clickhouse-server/config.d/resources.xml:ro
+      - ${O11Y_STATE}/users.xml:/etc/clickhouse-server/users.d/local.xml:ro
+      - ${O11Y_STATE}/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          'clickhouse-client --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "SELECT 1"',
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
+    user: ${O11Y_UID}:${O11Y_GID}
+    restart: 'no'
+    mem_limit: 256m
+    cpus: 1
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    command: ['--config=/etc/otel/config.yaml']
+    ports: ['127.0.0.1:${O11Y_OTLP_PORT}:4318', '127.0.0.1:${O11Y_HEALTH_PORT}:13133']
+    environment:
+      INGEST_PASSWORD: ${O11Y_INGEST_PASSWORD}
+    volumes:
+      - ./collector.yaml:/etc/otel/config.yaml:ro
+      - ${O11Y_STATE}/native:/native:ro

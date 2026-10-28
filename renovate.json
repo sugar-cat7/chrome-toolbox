@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "automerge": false,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "automerge": false,
+    "labels": ["security"],
+    "vulnerabilityFixStrategy": "lowest"
+  },
+  "minimumReleaseAge": "1 day",
+  "enabledManagers": ["npm", "cargo", "github-actions", "mise", "custom.regex", "docker-compose"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/rust-toolchain\\.toml(?:\\.template)?$/"],
+      "matchStrings": ["channel\\s*=\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "rust-version"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "groupName": "compatible JavaScript toolchain",
+      "matchPackageNames": [
+        "vite-plus",
+        "@voidzero-dev/vite-plus-core",
+        "vitest",
+        "@cloudflare/vite-plugin",
+        "cf",
+        "wrangler"
+      ]
+    }
+  ]
+}

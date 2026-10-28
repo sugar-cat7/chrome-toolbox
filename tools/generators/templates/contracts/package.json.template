@@ -1,0 +1,12 @@
+{
+  "name": "__SCOPE__/__APP__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": { ".": "./src/index.ts" },
+  "starter": { "runtime": "library" },
+  "scripts": { "check": "vp check .", "test": "node ../../tools/quality/vitest.ts", "build": "vp pack" },
+  "dependencies": { "zod": "catalog:" },
+  "devDependencies": { "vite-plus": "catalog:", "vitest": "catalog:", "typescript": "catalog:" }
+}

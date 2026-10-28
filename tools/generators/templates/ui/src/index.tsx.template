@@ -1,0 +1,156 @@
+import { useCallback, useEffect, useState } from 'react';
+import { noteInput, Ok, launch, type AppError, type PublicError, type Result, type Note, type NoteInput } from '__SCOPE__/contracts';
+
+export type NotesAdapter = {
+  list(this: void): Promise<Result<Note[], PublicError>>;
+  add(this: void, input: NoteInput): Promise<Result<Note, PublicError>>;
+  remove(this: void, id: string): Promise<Result<void, PublicError>>;
+  export(this: void, notes: readonly Note[]): Promise<Result<void, PublicError>>;
+};
+
+export function NotesPanel({ adapter, storage }: { adapter: NotesAdapter; storage: string }) {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const reportUnexpected = useCallback((_failure: AppError | PublicError) => {
+    setError('The operation failed. Your existing notes have been kept.');
+    setBusy(false);
+    setLoading(false);
+  }, []);
+  const reload = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError('');
+    const result = await adapter.list();
+    if (result.ok) setNotes(result.value);
+    else setError('Notes could not be loaded. Try again.');
+    setLoading(false);
+  }, [adapter]);
+
+  useEffect(() => {
+    let current = true;
+    launch(async () => {
+      const result = await adapter.list();
+      if (!current) return;
+      if (result.ok) setNotes(result.value);
+      else setError('Notes could not be loaded. Try again.');
+      setLoading(false);
+    }, (failure) => { if (current) reportUnexpected(failure); });
+    return () => { current = false; };
+  }, [adapter, reportUnexpected]);
+
+  const mutation = async (operation: () => Promise<Result<void, PublicError>>): Promise<void> => {
+    setBusy(true);
+    setError('');
+    const result = await operation();
+    if (!result.ok) reportUnexpected(result.error);
+    setBusy(false);
+  };
+
+  return (
+    <section aria-label="Notes" className="mx-auto max-w-2xl rounded-xl border p-6">
+      <h1 className="text-3xl font-semibold">Notes</h1>
+      <p className="my-3 text-sm">{storage}</p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const parsed = noteInput.safeParse({ text });
+          if (!parsed.success) {
+            setError('Enter a note between 1 and 1000 characters.');
+            return;
+          }
+          launch(() => mutation(async () => {
+            const result = await adapter.add(parsed.data);
+            if (!result.ok) return result;
+            const note = result.value;
+            setNotes((current) => [...current, note]);
+            setText('');
+            setAnnouncement('Note added.');
+            return Ok(undefined);
+          }), reportUnexpected);
+        }}
+      >
+        <label htmlFor="note-text" className="block font-medium">
+          New note
+        </label>
+        <textarea
+          id="note-text"
+          name="text"
+          readOnly={loading}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          maxLength={1000}
+          aria-describedby="note-hint"
+          className="my-2 w-full rounded border p-2"
+        />
+        <p id="note-hint" className="text-sm">
+          Up to 1000 characters. Data is private to this local sample.
+        </p>
+        <button
+          type="submit"
+          disabled={loading || busy}
+          className="my-3 rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
+        >
+          Add note
+        </button>
+      </form>
+      {loading && <output className="block">Loading notes…</output>}
+      {error && (
+        <div role="alert">
+          <p>{error}</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              launch(reload, reportUnexpected);
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!loading && notes.length === 0 && !error && <p>No notes yet. Add your first note.</p>}
+      <ul aria-label="Saved notes">
+        {notes.map((note) => (
+          <li
+            key={note.id}
+            className="my-3 flex items-center justify-between gap-4 rounded border p-3"
+          >
+            <p className="whitespace-pre-wrap break-all">{note.text}</p>
+            <button
+              type="button"
+              aria-label={`Delete ${note.text}`}
+              disabled={busy}
+              onClick={() => {
+                launch(() => mutation(async () => {
+                  const result = await adapter.remove(note.id);
+                  if (!result.ok) return result;
+                  setNotes((current) => current.filter((item) => item.id !== note.id));
+                  setAnnouncement('Note deleted.');
+                  return Ok(undefined);
+                }), reportUnexpected);
+              }}
+            >
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled={loading || busy}
+        onClick={() => {
+          launch(() => mutation(() => adapter.export(notes)), reportUnexpected);
+        }}
+        className="rounded border px-4 py-2"
+      >
+        Export JSON
+      </button>
+      <output aria-live="polite" className="sr-only">
+        {announcement}
+      </output>
+    </section>
+  );
+}

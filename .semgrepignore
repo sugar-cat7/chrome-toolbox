@@ -1,0 +1,2 @@
+# No default source/test exclusions. Build/cache exclusions live in the scanner
+# command, and executable-language parsing failures remain blocking.

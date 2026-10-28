@@ -1,0 +1,58 @@
+import { createTelemetry, observeAdapter, type TraceCarrier } from '__SCOPE__/observability';
+import { noteSchema, notesSchema, apiErrorSchema, capture, captureSync, decode, decodePublicError, Err, Ok, failure, publicFailure, type Result, type Note, type PublicError } from '__SCOPE__/contracts';
+import type { NotesAdapter } from '__SCOPE__/ui';
+
+async function request(path: string, carrier: TraceCarrier, init?: RequestInit): Promise<Result<Response, PublicError>> {
+  const headers = new Headers(init?.headers);
+  headers.set('traceparent', carrier.traceparent);
+  const received = await capture(() => fetch(path, {...init, headers}), 'network_failed');
+  if (!received.ok) return Err(publicFailure(received.error));
+  if (received.value.ok) return Ok(received.value);
+  const body = await capture(() => received.value.json(), 'response_invalid');
+  const parsed = body.ok ? apiErrorSchema.safeParse(body.value) : undefined;
+  const error = parsed?.success ? decodePublicError(parsed.data.error) : Err(failure('response_invalid'));
+  return Err(error.ok ? error.value : publicFailure(error.error));
+}
+
+const telemetry = createTelemetry({service: '__PROJECT__-web-browser', instance: '__PROJECT__', runId: import.meta.env.VITE_OTEL_RUN_ID ?? 'local', version: import.meta.env.VITE_OTEL_VERSION ?? 'development', ...(import.meta.env.VITE_OTEL_ENDPOINT ? {endpoint: import.meta.env.VITE_OTEL_ENDPOINT} : {})});
+
+export const browserNotes: NotesAdapter = {
+  async list() {
+    return observeAdapter(telemetry, 'notes.list', async (carrier) => {
+    const response = await request('/api/notes', carrier);
+    if (!response.ok) return response;
+    const body = await capture(() => response.value.json(), 'response_invalid');
+    if (!body.ok) return Err(publicFailure(body.error));
+    const parsed = decode(notesSchema, body.value);
+    return parsed.ok ? parsed : Err(publicFailure(parsed.error));
+    });
+  },
+  async add(input) {
+    return observeAdapter(telemetry, 'notes.add', async (carrier) => {
+    const response = await request('/api/notes', carrier, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    if (!response.ok) return response;
+    const body = await capture(() => response.value.json(), 'response_invalid');
+    if (!body.ok) return Err(publicFailure(body.error));
+    const parsed = decode(noteSchema, body.value);
+    return parsed.ok ? parsed : Err(publicFailure(parsed.error));
+    });
+  },
+  async remove(id) {
+    return observeAdapter(telemetry, 'notes.remove', async (carrier) => {
+    const response = await request(`/api/notes/${encodeURIComponent(id)}`, carrier, { method: 'DELETE' });
+    return response.ok ? Ok(undefined) : response;
+    });
+  },
+  async export(notes: readonly Note[]) {
+    return observeAdapter(telemetry, 'notes.export', async () => {
+    const result = captureSync(() => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      // Cleanup is scheduled before the browser side effect, including if click throws.
+      setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+      link.href = url; link.download = 'notes.json'; document.body.appendChild(link); link.click(); link.remove();
+    }, 'export_failed');
+    return result.ok ? result : Err(publicFailure(result.error));
+    });
+  },
+};

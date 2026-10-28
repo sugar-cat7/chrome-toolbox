@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src", "test", "*.ts", ".cloudflare/types/index.d.ts"],
+  "exclude": ["dist", "node_modules"]
+}

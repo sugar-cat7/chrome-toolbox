@@ -1,0 +1,70 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size: 1048576
+        cors:
+          allowed_origins:
+            [
+              'http://127.0.0.1:*',
+              'http://localhost:*',
+              'http://tauri.localhost',
+              'tauri://localhost',
+            ]
+  otlp_json_file/traces:
+    include: [/native/**/*.traces.jsonl]
+    start_at: beginning
+  otlp_json_file/logs:
+    include: [/native/**/*.logs.jsonl]
+    start_at: beginning
+  otlp_json_file/metrics:
+    include: [/native/**/*.metrics.jsonl]
+    start_at: beginning
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 192
+    spike_limit_mib: 32
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000
+    username: ingest
+    password: ${env:INGEST_PASSWORD}
+    database: otel
+    ttl: 24h
+    create_schema: true
+    timeout: 5s
+    sending_queue:
+      enabled: true
+      queue_size: 128
+      batch:
+        min_size: 1
+        max_size: 128
+        flush_timeout: 200ms
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 3s
+      max_elapsed_time: 30s
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp, otlp_json_file/traces]
+      processors: [memory_limiter]
+      exporters: [clickhouse]
+    logs:
+      receivers: [otlp, otlp_json_file/logs]
+      processors: [memory_limiter]
+      exporters: [clickhouse]
+    metrics:
+      receivers: [otlp, otlp_json_file/metrics]
+      processors: [memory_limiter]
+      exporters: [clickhouse]

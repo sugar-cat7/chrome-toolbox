@@ -1,0 +1,56 @@
+{
+  "name": "@starter/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "cf": "cf",
+    "dev": "vp dev --mode offline",
+    "preview": "node preview.ts",
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
+    "test:runtime": "node ../../tools/cloudflare/runtime.ts",
+    "test:e2e": "node ../../tools/quality/browser.ts",
+    "test:e2e:production": "node ../../tools/quality/browser.ts --preview",
+    "test:lighthouse": "node ../../tools/quality/lighthouse.ts",
+    "build": "node ../../tools/cloudflare/build.ts",
+    "typegen": "cf workers types -m local"
+  },
+  "dependencies": {
+    "@starter/contracts": "workspace:*",
+    "@starter/observability": "workspace:*",
+    "@starter/ui": "workspace:*",
+    "@tanstack/react-router": "catalog:",
+    "@tanstack/react-start": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "catalog:",
+    "@cloudflare/build-output-utils": "catalog:",
+    "@cloudflare/config": "catalog:",
+    "@cloudflare/vite-plugin": "catalog:",
+    "@playwright/test": "catalog:",
+    "@starter/api": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "cf": "catalog:",
+    "lighthouse": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "starter": {
+    "runtime": "worker",
+    "resultBoundaries": {
+      "src/server.ts:fetch": "HTTP runtime ingress must return the platform Response.",
+      "src/assets.ts:compressAsset": "HTTP asset adapter must return the compressed platform Response."
+    }
+  }
+}

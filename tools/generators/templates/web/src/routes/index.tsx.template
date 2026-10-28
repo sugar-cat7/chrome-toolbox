@@ -1,0 +1,5 @@
+import { createFileRoute } from '@tanstack/react-router';
+import { NotesPanel } from '__SCOPE__/ui';
+import { browserNotes } from '../client/notes';
+
+export const Route = createFileRoute('/')({ component: () => <NotesPanel adapter={browserNotes} storage="__STORAGE_LABEL__" /> });

@@ -1,0 +1,53 @@
+{
+  "name": "__SCOPE__/__APP__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {},
+  "starter": {
+    "runtime": "desktop"
+  },
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:renderer": "vp dev --host 127.0.0.1 --strictPort",
+    "build:renderer": "vp build",
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
+    "test:rust": "node ../../tools/quality/native.ts rust",
+    "test:native": "node ../../tools/quality/native.ts e2e",
+    "test:release": "node ../../tools/quality/native.ts release",
+    "build": "node ../../tools/quality/native.ts build",
+    "build:bundle": "tauri build"
+  },
+  "dependencies": {
+    "__SCOPE__/contracts": "workspace:*",
+    "__SCOPE__/ui": "workspace:*",
+    "@tauri-apps/api": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "__SCOPE__/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "tailwindcss": "catalog:",
+    "@wdio/cli": "catalog:",
+    "@wdio/local-runner": "catalog:",
+    "@wdio/mocha-framework": "catalog:",
+    "@wdio/spec-reporter": "catalog:",
+    "@wdio/json-reporter": "catalog:",
+    "@wdio/tauri-service": "catalog:",
+    "@wdio/tauri-plugin": "catalog:",
+    "@wdio/globals": "catalog:",
+    "webdriverio": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "typescript": "catalog:",
+    "@wdio/types": "catalog:",
+    "@types/mocha": "catalog:"
+  }
+}

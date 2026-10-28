@@ -1,0 +1,41 @@
+{
+  "name": "__SCOPE__/__APP__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {},
+  "starter": {
+    "runtime": "worker",
+    "resultBoundaries": {
+      "src/notes.ts:handleNotes": "HTTP ingress projects a handled Result into a platform Response."
+    }
+  },
+  "scripts": {
+    "cf": "cf",
+    "dev": "cf dev --mode offline",
+    "preview": "node preview.ts",
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
+    "test:runtime": "node ../../tools/cloudflare/runtime.ts",
+    "build": "node ../../tools/cloudflare/build.ts",
+    "typegen": "cf workers types -m local",
+    "db:migrate": "node ../../tools/cloudflare/database.ts migrate",
+    "db:seed": "node ../../tools/cloudflare/database.ts seed"
+  },
+  "dependencies": {
+    "__SCOPE__/contracts": "workspace:*",
+    "zod": "catalog:",
+    "__SCOPE__/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/config": "catalog:",
+    "@cloudflare/build-output-utils": "catalog:",
+    "@cloudflare/vite-plugin": "catalog:",
+    "cf": "catalog:",
+    "wrangler": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "typescript": "catalog:"
+  }
+}
