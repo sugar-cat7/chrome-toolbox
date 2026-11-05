@@ -707,6 +707,29 @@ describe('side panel', () => {
     });
   });
 
+  it('says that a Twitch channel keeps its genre until the category changes (R69)', async () => {
+    const twitch = {
+      site: 'twitch',
+      partition: 'fixturechannel',
+      streamer: 'fixturechannel',
+      title: 'Fixture night',
+    };
+    const { api } = fakeApi({
+      'comments/stream': () => Ok({ stream: twitch }),
+      'comments/genre': () => Ok({ persisted: true }),
+    });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture night');
+    const panel = await openTab('フィルター');
+    await userEvent.selectOptions(
+      await within(panel).findByLabelText('この配信のジャンル'),
+      '雑談',
+    );
+    expect(
+      await within(panel).findByText('この配信用に保存しました（カテゴリが変わるまで）'),
+    ).toBeTruthy();
+  });
+
   it('says when the genre could not be saved', async () => {
     const { api } = fakeApi({ 'comments/genre': () => Ok({ persisted: false }) });
     render(<App port={panelPort(api)} />);

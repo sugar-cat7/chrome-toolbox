@@ -356,13 +356,14 @@ export function FilterTab({
         この配信だけに使います（同じ配信者の次の配信には引き継ぎません）。
       </span>
       <output aria-live="polite" className="text-xs text-slate-500">
-        {statusText(status, stream.streamer !== undefined)}
+        {statusText(status, stream)}
       </output>
     </form>
   );
 }
 
-function statusText(status: Status, byStreamer: boolean): string {
+function statusText(status: Status, stream: StreamContext): string {
+  const byStreamer = stream.streamer !== undefined;
   switch (status.kind) {
     case 'idle':
       return byStreamer
@@ -371,8 +372,12 @@ function statusText(status: Status, byStreamer: boolean): string {
     case 'saved':
       return byStreamer ? 'この配信者用に保存しました' : 'この配信用に保存しました';
     case 'noteSaved':
-    case 'genreSaved':
       return 'この配信用に保存しました';
+    case 'genreSaved':
+      // A Twitch channel's choice lasts while its category does (R69).
+      return stream.site === 'twitch'
+        ? 'この配信用に保存しました（カテゴリが変わるまで）'
+        : 'この配信用に保存しました';
     case 'genreUnsaved':
       return 'ジャンルを保存できませんでした（一時的に使います）';
     case 'unreadable':

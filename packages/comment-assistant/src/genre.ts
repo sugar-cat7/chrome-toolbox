@@ -14,6 +14,7 @@ import { GAME_GENRES } from './game-genres.ts';
 import { isRulesHeading } from './sites/rules.ts';
 import type { Site } from './sites/types.ts';
 import {
+  contextHash,
   DETECTED_REASONS,
   MAX_GAME,
   relaxationsIn,
@@ -164,8 +165,13 @@ const genreRecordSchema = z.strictObject({
   game: z.optional(z.string().check(z.maxLength(MAX_GAME))),
   /** The model's one guess for the stream, kept whatever decides later. */
   guess: z.optional(streamGenreSchema),
+  /** On Twitch, the category and the title (`contextHash`) the guess was made for (R69). */
+  guessGame: z.optional(z.string().check(z.maxLength(MAX_GAME))),
+  guessTitle: z.optional(z.string().check(z.maxLength(16))),
   /** The genre the viewer chose for the stream. */
   override: z.optional(streamGenreSchema),
+  /** On Twitch, the category the viewer chose it under (R69). */
+  overrideGame: z.optional(z.string().check(z.maxLength(MAX_GAME))),
 });
 /** One stream's genre as kept (R63): detected, guessed once and chosen by the viewer. */
 export type GenreRecord = Readonly<z.infer<typeof genreRecordSchema>>;
@@ -195,8 +201,37 @@ const same = (a: GenreRecord, b: GenreRecord): boolean =>
   a.reason === b.reason &&
   a.game === b.game &&
   a.guess === b.guess &&
+  a.guessGame === b.guessGame &&
+  a.guessTitle === b.guessTitle &&
   a.override === b.override &&
+  a.overrideGame === b.overrideGame &&
   a.relaxations.join() === b.relaxations.join();
+/** A title as a guess remembers it: a short hash, not the title. */
+const titleKey = (title: string | undefined): string => contextHash(title ?? '');
+/**
+ * Whether the viewer's choice and the guess still hold for what the page shows (R69). On
+ * YouTube a stream is one video: they hold for it. A Twitch login streams many broadcasts, so a
+ * choice holds while the category it was made under lasts, and a guess while its category lasts
+ * and, under a category the table does not list (which the guess stands in for), its title.
+ */
+const choiceHolds = (site: Site, record: GenreRecord, source: GenreSource): boolean =>
+  site !== 'twitch' || record.overrideGame === source.game;
+const guessHolds = (site: Site, record: GenreRecord, source: GenreSource): boolean =>
+  site !== 'twitch' ||
+  (record.guessGame === source.game &&
+    ((source.game !== undefined && gameGenre(source.game) !== undefined) ||
+      record.guessTitle === titleKey(source.title)));
+/** The guess of a record with what it was made for. */
+const guessOf = ({ guess, guessGame, guessTitle }: GenreRecord): Partial<GenreRecord> => ({
+  ...(guess === undefined ? {} : { guess }),
+  ...(guessGame === undefined ? {} : { guessGame }),
+  ...(guessTitle === undefined ? {} : { guessTitle }),
+});
+/** The viewer's choice of a record with what it was made under. */
+const choiceOf = ({ override, overrideGame }: GenreRecord): Partial<GenreRecord> => ({
+  ...(override === undefined ? {} : { override }),
+  ...(overrideGame === undefined ? {} : { overrideGame }),
+});
 
 export type GenreBook = {
   /** Reads the saved genres once; unreadable ones count as none. Resolves once they are known. */
@@ -205,14 +240,16 @@ export type GenreBook = {
   get(this: void, site: Site, partition: string): GenreRecord | undefined;
   /**
    * Detects the genre again from what the page shows (`detectGenre`, else the stream's guess,
-   * else `other`) and its relaxations; returns whether the kept record changed (it is saved).
+   * else `other`) and its relaxations; on Twitch a choice or a guess made for another category
+   * (or a guess for another title under an unlisted one) goes (R69). Returns whether the kept
+   * record changed (it is saved).
    */
   observe(this: void, site: Site, partition: string, source: GenreSource): boolean;
   /**
    * What the stream's one guess reads (its title and game), when it needs one: nothing decided
-   * its genre, it was never guessed, the viewer chose none and its title or game is known. Asked
-   * once per stream in a service worker; a guess that got no answer is not kept, so a later
-   * service worker may ask again.
+   * its genre, it was never guessed (or its guess went, R69), the viewer chose none and its
+   * title or game is known. Asked once per stream, title and game in a service worker; a guess
+   * that got no answer is not kept, so a later service worker may ask again.
    */
   guessInput(
     this: void,
@@ -220,11 +257,22 @@ export type GenreBook = {
     partition: string,
     title: string | undefined,
   ): GenreSource | undefined;
-  /** Keeps the stream's guess (it decides while nothing else does); returns whether it changed. */
-  guessed(this: void, site: Site, partition: string, genre: StreamGenre): boolean;
+  /**
+   * Keeps the stream's guess for what it was asked from (`guessInput`), which decides while
+   * nothing else does; on Twitch not when the page shows another category or title by now (R69).
+   * Returns whether the record changed.
+   */
+  guessed(
+    this: void,
+    site: Site,
+    partition: string,
+    genre: StreamGenre,
+    asked: GenreSource,
+  ): boolean;
   /**
    * The viewer's genre for the stream, or none (`undefined`): in effect at once whatever the
-   * storage does; `persisted: false` when it could not be saved.
+   * storage does, on Twitch while the category shown now lasts (R69); `persisted: false` when it
+   * could not be saved.
    */
   choose(
     this: void,
@@ -235,15 +283,17 @@ export type GenreBook = {
 };
 
 /**
- * Every stream's genre (R63) under `STREAM_GENRES_KEY` in `area` and in memory, the newest
+ * Every stream's genre (R63, R69) under `STREAM_GENRES_KEY` in `area` and in memory, the newest
  * `MAX_STREAM_GENRES`: a restarted service worker or a stream back after its context was
  * evicted keeps its genre, its guess and the viewer's choice. Each write reads the saved list
  * and replaces the stream's entry, one write after another.
  */
 export function createGenreBook(area: StorageArea): GenreBook {
   const records = new Map<string, GenreRecord>();
-  /** Streams whose guess was handed out in this service worker. */
+  /** Streams, titles and games whose guess was handed out in this service worker. */
   const asked = createLruCache<string, true>({ max: MAX_STREAM_GENRES });
+  /** The title each stream's page showed last (`titleKey`): a guess for another is stale. */
+  const titles = createLruCache<string, string>({ max: MAX_STREAM_GENRES });
   let reading: Promise<Result<void>> | undefined;
   let writing: Promise<Result<void>> = Promise.resolve(Ok(undefined));
   const keyOf = (site: Site, stream: string): string => `${site}:${stream}`;
@@ -304,20 +354,24 @@ export function createGenreBook(area: StorageArea): GenreBook {
     get: (site, partition) => records.get(keyOf(site, streamOf(partition))),
     observe(site, partition, source) {
       const stream = streamOf(partition);
-      const before = records.get(keyOf(site, stream));
+      const key = keyOf(site, stream);
+      if (source.title !== undefined) titles.set(key, titleKey(source.title));
+      const before = records.get(key);
+      const guess =
+        before !== undefined && guessHolds(site, before, source) ? before.guess : undefined;
       const detected: Detected =
         detectGenre(source) ??
-        (before?.guess === undefined
+        (guess === undefined
           ? { genre: 'other', reason: 'none' }
-          : { genre: before.guess, reason: 'guess' });
+          : { genre: guess, reason: 'guess' });
       return update(before, {
         site,
         stream,
         ...detected,
         relaxations: pageRelaxations(source),
         ...(source.game === undefined ? {} : { game: source.game }),
-        ...(before?.guess === undefined ? {} : { guess: before.guess }),
-        ...(before?.override === undefined ? {} : { override: before.override }),
+        ...(before === undefined || guess === undefined ? {} : guessOf(before)),
+        ...(before !== undefined && choiceHolds(site, before, source) ? choiceOf(before) : {}),
       });
     },
     guessInput(site, partition, title) {
@@ -328,36 +382,61 @@ export function createGenreBook(area: StorageArea): GenreBook {
         record.reason !== 'none' ||
         record.guess !== undefined ||
         record.override !== undefined ||
-        (title === undefined && record.game === undefined) ||
-        asked.get(key) !== undefined
+        (title === undefined && record.game === undefined)
       )
         return undefined;
-      asked.set(key, true);
+      const question = `${key}\u0000${titleKey(title)}\u0000${record.game ?? ''}`;
+      if (asked.get(question) !== undefined) return undefined;
+      asked.set(question, true);
       return {
         ...(title === undefined ? {} : { title }),
         ...(record.game === undefined ? {} : { game: record.game }),
       };
     },
-    guessed(site, partition, genre) {
-      const before = records.get(keyOf(site, streamOf(partition)));
+    guessed(site, partition, genre, question) {
+      const key = keyOf(site, streamOf(partition));
+      const before = records.get(key);
       // Forgotten meanwhile (a hundred newer streams): nothing to keep it for.
       if (before === undefined) return false;
+      const twitch = site === 'twitch';
+      // Asked for a category or title the Twitch page no longer shows: a new guess comes.
+      const shown = titles.get(key);
+      if (
+        twitch &&
+        (before.game !== question.game ||
+          (shown !== undefined && shown !== titleKey(question.title)))
+      )
+        return false;
       return update(before, {
         ...before,
         guess: genre,
+        ...(twitch
+          ? {
+              ...(question.game === undefined ? {} : { guessGame: question.game }),
+              guessTitle: titleKey(question.title),
+            }
+          : {}),
         ...(before.reason === 'none' ? { genre, reason: 'guess' } : {}),
       });
     },
     async choose(site, partition, genre): Promise<Result<{ persisted: boolean }>> {
       const stream = streamOf(partition);
-      const { override: _previous, ...before } = records.get(keyOf(site, stream)) ?? {
+      const {
+        override: _previous,
+        overrideGame: _under,
+        ...before
+      } = records.get(keyOf(site, stream)) ?? {
         site,
         stream,
         genre: 'other',
         reason: 'none',
         relaxations: [],
       };
-      const after: GenreRecord = genre === undefined ? before : { ...before, override: genre };
+      // On Twitch the choice lasts while the category shown now does (R69).
+      const under =
+        site === 'twitch' && before.game !== undefined ? { overrideGame: before.game } : {};
+      const after: GenreRecord =
+        genre === undefined ? before : { ...before, override: genre, ...under };
       remember(after);
       const written = await persist(after);
       return Ok({ persisted: written.ok });

@@ -436,7 +436,7 @@ export function startBackground(): () => void {
         const guessed = await pipeline.value.guessGenre(input);
         // No answer (llama.cpp down): nothing is kept, and a later service worker may ask again.
         if (!guessed.ok) return;
-        const kept = book.guessed(site, partition, guessed.value);
+        const kept = book.guessed(site, partition, guessed.value, input);
         if (genres.apply(site, partition) || kept) announceStreamChange();
       },
       () => undefined,

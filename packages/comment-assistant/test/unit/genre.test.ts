@@ -255,7 +255,12 @@ describe('createGenreBook', () => {
       game: 'Fixture Quest',
     });
     expect(book.guessInput('youtube', 'fixture0001', 'Fixture Quest Part 3')).toBeUndefined();
-    expect(book.guessed('youtube', 'fixture0001', 'story')).toBe(true);
+    expect(
+      book.guessed('youtube', 'fixture0001', 'story', {
+        title: 'Fixture Quest Part 3',
+        game: 'Fixture Quest',
+      }),
+    ).toBe(true);
     expect(genreOf(book.get('youtube', 'fixture0001'))).toMatchObject({
       genre: 'story',
       reason: 'guess',
@@ -305,6 +310,101 @@ describe('createGenreBook', () => {
     book.observe('twitch', 'chosenchannel', { title: 'Fixture night' });
     await book.choose('twitch', 'chosenchannel', 'singing');
     expect(book.guessInput('twitch', 'chosenchannel', 'Fixture night')).toBeUndefined();
+  });
+
+  it('keeps a Twitch choice only while the category it was made under lasts (R69)', async () => {
+    const book = createGenreBook(fakeBrowser.storage.local);
+    await book.load();
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night', game: 'phasmophobia' });
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({ genre: 'horror' });
+    await book.choose('twitch', 'fixturechannel', 'chat');
+    expect(book.get('twitch', 'fixturechannel')).toMatchObject({
+      override: 'chat',
+      overrideGame: 'phasmophobia',
+    });
+    // A new title under the same category keeps it.
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night 2', game: 'phasmophobia' });
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({ reason: 'viewer' });
+    // Another category is another stream for it: detected again.
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night 2', game: 'apex-legends' });
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toEqual({
+      genre: 'fps',
+      reason: 'game',
+      relaxations: [],
+    });
+    await vi.waitFor(async () =>
+      expect(await read()).toEqual([
+        {
+          site: 'twitch',
+          stream: 'fixturechannel',
+          genre: 'fps',
+          reason: 'game',
+          relaxations: [],
+          game: 'apex-legends',
+        },
+      ]),
+    );
+  });
+
+  it('keeps a YouTube choice for the video whatever game it shows', async () => {
+    const book = createGenreBook(fakeBrowser.storage.local);
+    await book.load();
+    book.observe('youtube', 'fixture0001', { title: 'Fixture night', game: 'Phasmophobia' });
+    await book.choose('youtube', 'fixture0001', 'chat');
+    book.observe('youtube', 'fixture0001', { title: 'Fixture night', game: 'Apex Legends' });
+    expect(genreOf(book.get('youtube', 'fixture0001'))).toMatchObject({
+      genre: 'chat',
+      reason: 'viewer',
+    });
+  });
+
+  it('drops a Twitch guess when the category changes, or the title under an unlisted one, and asks again (R69)', async () => {
+    const book = createGenreBook(fakeBrowser.storage.local);
+    await book.load();
+    const first = { title: 'Fixture night 1', game: 'fixture-quest' };
+    book.observe('twitch', 'fixturechannel', first);
+    expect(book.guessInput('twitch', 'fixturechannel', first.title)).toEqual(first);
+    expect(book.guessed('twitch', 'fixturechannel', 'story', first)).toBe(true);
+    expect(book.get('twitch', 'fixturechannel')).toMatchObject({
+      guess: 'story',
+      guessGame: 'fixture-quest',
+    });
+    // The same page again keeps it.
+    expect(book.observe('twitch', 'fixturechannel', first)).toBe(false);
+    // A new title under a category the table does not list: guessed again.
+    const second = { title: 'Fixture night 2', game: 'fixture-quest' };
+    book.observe('twitch', 'fixturechannel', second);
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({
+      genre: 'other',
+      reason: 'none',
+    });
+    expect(book.guessInput('twitch', 'fixturechannel', second.title)).toEqual(second);
+    expect(book.guessed('twitch', 'fixturechannel', 'horror', second)).toBe(true);
+    // Another unlisted category: guessed again.
+    const third = { title: 'Fixture night 2', game: 'fixture-other' };
+    book.observe('twitch', 'fixturechannel', third);
+    expect(book.guessInput('twitch', 'fixturechannel', third.title)).toEqual(third);
+    // A guess that answers for a page no longer shown is not kept.
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night 3', game: 'fixture-other' });
+    expect(book.guessed('twitch', 'fixturechannel', 'fps', third)).toBe(false);
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({ reason: 'none' });
+    expect(book.guessInput('twitch', 'fixturechannel', 'Fixture night 3')).toEqual({
+      title: 'Fixture night 3',
+      game: 'fixture-other',
+    });
+    // Saved without the guess that went.
+    await vi.waitFor(async () =>
+      expect(await read()).toEqual([
+        {
+          site: 'twitch',
+          stream: 'fixturechannel',
+          genre: 'other',
+          reason: 'none',
+          relaxations: [],
+          game: 'fixture-other',
+        },
+      ]),
+    );
   });
 
   it("keeps the viewer's choice per stream over every detection, and clears it", async () => {

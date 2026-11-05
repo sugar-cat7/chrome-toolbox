@@ -1062,6 +1062,90 @@ describe('extension runtime wiring', () => {
     again();
   });
 
+  it('drops a Twitch choice and guess made under another category, and guesses again (R69)', async () => {
+    const sent = stubLlama(Promise.resolve(), 3, { genre: 'story' });
+    const shown = {
+      site: 'twitch',
+      partition: 'fixturechannel',
+      streamer: 'fixturechannel',
+      title: 'Fixture night',
+      game: 'phasmophobia',
+    };
+    const toTab = vi.fn<(tabId: number, message: unknown, options?: unknown) => Promise<unknown>>(
+      async (_tabId, message) =>
+        (message as { type?: string }).type === 'comments/ping' ? shown : undefined,
+    );
+    const original = fakeBrowser.tabs.sendMessage;
+    Object.assign(fakeBrowser.tabs, { sendMessage: toTab });
+    onTestFinished(() => void Object.assign(fakeBrowser.tabs, { sendMessage: original }));
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue(undefined);
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => listener?.(message, sender, resolve));
+    const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/fixturechannel' });
+    const frame = { tab, frameId: 0, url: 'https://www.twitch.tv/fixturechannel' };
+    const report = (title: string, game: string) =>
+      ask({ type: 'comments/context', payload: { ...shown, title, game } }, frame);
+    const stream = { type: 'comments/stream', payload: { tabId: tab.id ?? -1 } };
+    let comment = 0;
+    const ingest = (title: string) => {
+      comment += 1;
+      return ask(
+        {
+          type: 'comments/ingest',
+          payload: {
+            site: 'twitch',
+            channel: 'fixturechannel',
+            streamer: 'fixturechannel',
+            title,
+            comments: [raw(String(comment), `hello ${comment}`)],
+          },
+        },
+        frame,
+      );
+    };
+    // Under a horror category the viewer chooses another genre ...
+    await report('Fixture night', 'phasmophobia');
+    expect(
+      await ask(
+        {
+          type: 'comments/genre',
+          payload: { site: 'twitch', partition: 'fixturechannel', genre: 'chat' },
+        },
+        panel,
+      ),
+    ).toEqual(Ok({ persisted: true }));
+    expect(await ask(stream, panel)).toMatchObject(
+      Ok({ genre: { genre: 'chat', reason: 'viewer' } }),
+    );
+    // ... which no longer applies once the channel streams an FPS.
+    Object.assign(shown, { game: 'apex-legends' });
+    await report('Fixture night', 'apex-legends');
+    expect(await ask(stream, panel)).toMatchObject(
+      Ok({
+        genre: { genre: 'fps', reason: 'game', categories: expect.arrayContaining(['ghosting']) },
+      }),
+    );
+    // Under a category the table does not list, the stream is guessed once ...
+    Object.assign(shown, { title: 'Fixture night: part 1', game: 'fixture-quest' });
+    await report('Fixture night: part 1', 'fixture-quest');
+    await ingest('Fixture night: part 1');
+    await vi.waitFor(() => expect(sent.filter(isGenreGuess)).toHaveLength(1));
+    await vi.waitFor(async () =>
+      expect(await ask(stream, panel)).toMatchObject(Ok({ genre: { reason: 'guess' } })),
+    );
+    await ingest('Fixture night: part 1');
+    // ... and guessed again for a new title there: the old guess is stale.
+    Object.assign(shown, { title: 'Fixture night: part 2' });
+    await report('Fixture night: part 2', 'fixture-quest');
+    await ingest('Fixture night: part 2');
+    await vi.waitFor(() => expect(sent.filter(isGenreGuess)).toHaveLength(2));
+    expect(userTurn(sent.filter(isGenreGuess)[1])).toContain('Fixture night: part 2');
+    stop();
+  });
+
   it("keeps the viewer's genre for one stream, for extension pages only (R63)", async () => {
     stubLlama();
     const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/fixturechannel' });
