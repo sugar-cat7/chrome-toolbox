@@ -211,11 +211,12 @@ const titleKey = (title: string | undefined): string => contextHash(title ?? '')
 /**
  * Whether the viewer's choice and the guess still hold for what the page shows (R69). On
  * YouTube a stream is one video: they hold for it. A Twitch login streams many broadcasts, so a
- * choice holds while the category it was made under lasts, and a guess while its category lasts
- * and, under a category the table does not list (which the guess stands in for), its title.
+ * choice holds while the category it was made under lasts (one made before the page showed a
+ * category takes the first it shows, `choiceOf`), and a guess while its category lasts and,
+ * under a category the table does not list (which the guess stands in for), its title.
  */
 const choiceHolds = (site: Site, record: GenreRecord, source: GenreSource): boolean =>
-  site !== 'twitch' || record.overrideGame === source.game;
+  site !== 'twitch' || record.overrideGame === undefined || record.overrideGame === source.game;
 const guessHolds = (site: Site, record: GenreRecord, source: GenreSource): boolean =>
   site !== 'twitch' ||
   (record.guessGame === source.game &&
@@ -228,10 +229,19 @@ const guessOf = ({ guess, guessGame, guessTitle }: GenreRecord): Partial<GenreRe
   ...(guessTitle === undefined ? {} : { guessTitle }),
 });
 /** The viewer's choice of a record with what it was made under. */
-const choiceOf = ({ override, overrideGame }: GenreRecord): Partial<GenreRecord> => ({
-  ...(override === undefined ? {} : { override }),
-  ...(overrideGame === undefined ? {} : { overrideGame }),
-});
+/**
+ * The viewer's choice of a record with what it was made under; a Twitch choice made before the
+ * page showed a category takes the first one it shows (`shown`).
+ */
+const choiceOf = (
+  site: Site,
+  { override, overrideGame }: GenreRecord,
+  shown: string | undefined,
+): Partial<GenreRecord> => {
+  if (override === undefined) return {};
+  const under = overrideGame ?? (site === 'twitch' ? shown : undefined);
+  return { override, ...(under === undefined ? {} : { overrideGame: under }) };
+};
 
 export type GenreBook = {
   /** Reads the saved genres once; unreadable ones count as none. Resolves once they are known. */
@@ -373,7 +383,9 @@ export function createGenreBook(area: StorageArea): GenreBook {
         relaxations: pageRelaxations(source),
         ...(source.game === undefined ? {} : { game: source.game }),
         ...(before === undefined || guess === undefined ? {} : guessOf(before)),
-        ...(before !== undefined && choiceHolds(site, before, source) ? choiceOf(before) : {}),
+        ...(before !== undefined && choiceHolds(site, before, source)
+          ? choiceOf(site, before, source.game)
+          : {}),
       });
     },
     guessInput(site, partition, title) {

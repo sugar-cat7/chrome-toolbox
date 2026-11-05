@@ -346,6 +346,36 @@ describe('createGenreBook', () => {
     );
   });
 
+  it('gives a Twitch choice made before any category the first one shown, then holds it to it', async () => {
+    const book = createGenreBook(fakeBrowser.storage.local);
+    await book.load();
+    await book.choose('twitch', 'fixturechannel', 'chat');
+    expect(book.get('twitch', 'fixturechannel')).not.toHaveProperty('overrideGame');
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night', game: 'phasmophobia' });
+    expect(book.get('twitch', 'fixturechannel')).toMatchObject({
+      override: 'chat',
+      overrideGame: 'phasmophobia',
+    });
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({ reason: 'viewer' });
+    book.observe('twitch', 'fixturechannel', { title: 'Fixture night', game: 'apex-legends' });
+    expect(genreOf(book.get('twitch', 'fixturechannel'))).toMatchObject({
+      genre: 'fps',
+      reason: 'game',
+    });
+    await vi.waitFor(async () =>
+      expect(await read()).toEqual([
+        {
+          site: 'twitch',
+          stream: 'fixturechannel',
+          genre: 'fps',
+          reason: 'game',
+          relaxations: [],
+          game: 'apex-legends',
+        },
+      ]),
+    );
+  });
+
   it('keeps a YouTube choice for the video whatever game it shows', async () => {
     const book = createGenreBook(fakeBrowser.storage.local);
     await book.load();
