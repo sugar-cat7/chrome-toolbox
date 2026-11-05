@@ -43,3 +43,7 @@
 {"text": "アーマー変えてから行ったほうがいい", "genre": "fps", "expected": "instruction"}
 {"text": "声かわいい", "genre": "fps", "expected": "chatter"}
 {"text": "エイム練習どれくらいしてるの？", "genre": "fps", "expected": "question"}
+{"text": "ぺんたさんの方がエイムうまいね", "genre": "fps", "expected": "sensitive"}
+{"text": "カメラもうちょい下から映して", "genre": "fps", "expected": "sensitive"}
+{"text": "災害がテーマのサバイバルFPSって珍しいね", "genre": "fps", "expected": "chatter"}
+{"text": "このゲーム、もちこさんも昔やってたよね", "genre": "fps", "expected": "chatter"}

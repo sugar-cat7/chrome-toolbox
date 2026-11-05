@@ -6,6 +6,7 @@ import {
   commentBatchPrompt,
   commentCategorySchema,
   createLlamaClient,
+  genreEvalLineSchema,
   cutByMaxTokens,
   isStreamCategory,
   needsTranslation,
@@ -14,8 +15,8 @@ import {
   STREAM_CATEGORIES,
   STREAM_GENRES,
   streamCategories,
-  streamGenreSchema,
   type CommentCategory,
+  type GenreEvalLine,
   type LlamaClient,
   type StreamGenre,
 } from '@chrome-toolbox/extension-core';
@@ -47,14 +48,8 @@ const GENRE_TITLES = {
   other: 'Fixture stream',
 } as const satisfies Record<StreamGenre, string>;
 
-/** One line of a set: a comment and the category it should get in a stream of `genre`. */
-export type GenreSample = {
-  text: string;
-  genre: StreamGenre;
-  expected: CommentCategory;
-  /** The `*.jsonl` file it came from. */
-  file?: string;
-};
+/** One line of a set (`GenreEvalLine`) and the `*.jsonl` file it came from. */
+export type GenreSample = GenreEvalLine & { file?: string };
 /** A line as the model classified it; `predicted` is absent when its reply line failed. */
 export type GenreRow = GenreSample & { predicted?: CommentCategory; error?: string; ms: number };
 export type CategoryScore = {
@@ -82,19 +77,16 @@ export type GenreReport = {
   score: GenreScore & { genres: Partial<Record<StreamGenre, GenreScore>> };
 };
 
-type Fields = Record<string, unknown>;
-const GENRES: ReadonlySet<string> = new Set(STREAM_GENRES);
-
-function parseLine(fields: Fields, where: string, fileGenre: string): GenreSample {
-  const { text, genre, expected } = fields;
-  if (typeof text !== 'string' || text === '') throw new Error(`${where}: text must be a string`);
-  const known = streamGenreSchema.safeParse(genre);
-  if (!known.success) throw new Error(`${where}: genre must be one of ${[...GENRES].join(', ')}`);
-  if (known.data !== fileGenre)
-    throw new Error(`${where}: ${known.data} is not the genre of ${fileGenre}`);
-  const category = commentCategorySchema.safeParse(expected);
-  if (!category.success) throw new Error(`${where}: expected must be a category`);
-  return { text, genre: known.data, expected: category.data };
+/** One line, checked with the shape test's schema (`genreEvalLineSchema`). */
+function parseLine(value: unknown, where: string, fileGenre: string): GenreSample {
+  const line = genreEvalLineSchema.safeParse(value);
+  if (!line.success)
+    throw new Error(
+      `${where}: not a genre eval line ({text: 1-200 characters, genre: ${STREAM_GENRES.join('|')}, expected: a category}, no other key)`,
+    );
+  if (line.data.genre !== fileGenre)
+    throw new Error(`${where}: ${line.data.genre} is not the genre of ${fileGenre}`);
+  return line.data;
 }
 
 /** Reads every `<genre>.jsonl` in `dir` (sorted by name); one non-blank line is one sample. */
@@ -114,22 +106,24 @@ export function loadGenreSamples(dir: string): GenreSample[] {
         } catch {
           throw new Error(`${where}: invalid JSON`);
         }
-        if (typeof value !== 'object' || value === null) throw new Error(`${where}: not an object`);
-        return [
-          { ...parseLine(value as Fields, where, name.replace(/\.jsonl$/u, '')), file: name },
-        ];
+        return [{ ...parseLine(value, where, name.replace(/\.jsonl$/u, '')), file: name }];
       }),
   );
 }
 
 const ratio = (part: number, whole: number): number | undefined =>
   whole === 0 ? undefined : part / whole;
+/**
+ * How many of `rows` the model put in a stream category, of those it judged: a failed line was
+ * never judged, so it neither lowers nor raises the share (it counts under `failed`).
+ */
 const flaggedAmong = (rows: readonly GenreRow[]): FalsePositives => {
-  const flagged = rows.filter(
+  const judged = rows.filter((row) => row.predicted !== undefined);
+  const flagged = judged.filter(
     (row) => row.predicted !== undefined && isStreamCategory(row.predicted),
   ).length;
-  const rate = ratio(flagged, rows.length);
-  return { flagged, total: rows.length, ...(rate === undefined ? {} : { rate }) };
+  const rate = ratio(flagged, judged.length);
+  return { flagged, total: judged.length, ...(rate === undefined ? {} : { rate }) };
 };
 function scoreOf(rows: readonly GenreRow[]): GenreScore {
   const categories: Partial<Record<CommentCategory, CategoryScore>> = {};

@@ -1,43 +1,22 @@
 import { z } from 'zod/mini';
 import type { ChatMessage } from './llm.ts';
+import {
+  COMMENT_CATEGORIES,
+  GENRE_NAMES,
+  isStreamCategory,
+  STREAM_CATEGORIES,
+  STREAM_CATEGORY_DEFINITIONS,
+  type BaseCategory,
+  type CommentCategory,
+  type StreamCategory,
+  type StreamGenre,
+} from './stream-categories.ts';
 
 export type GlossaryEntry = Readonly<{ source: string; target: string }>;
 type Prompt = Readonly<{ messages: ChatMessage[]; jsonSchema: Record<string, unknown> }>;
 /** A prompt whose reply is constrained by a GBNF grammar (llama-server `grammar`). */
 type GrammarPrompt = Readonly<{ messages: ChatMessage[]; grammar: string }>;
 
-const COMMENT_CATEGORIES = [
-  'abusive',
-  'spam',
-  'spoiler',
-  'question',
-  'important',
-  'chatter',
-  'instruction',
-  'relay',
-  'ghosting',
-  'privacy',
-  'sensitive',
-] as const;
-export const commentCategorySchema = z.enum(COMMENT_CATEGORIES);
-export type CommentCategory = z.infer<typeof commentCategorySchema>;
-/**
- * The categories a stream turns on or off (R62), defined in its batch prompts' user turn and
- * allowed by their grammar only when on: spoilers (R31) and the genre categories. Every other
- * category is in every prompt.
- */
-export const STREAM_CATEGORIES = [
-  'spoiler',
-  'instruction',
-  'relay',
-  'ghosting',
-  'privacy',
-  'sensitive',
-] as const satisfies readonly CommentCategory[];
-export type StreamCategory = (typeof STREAM_CATEGORIES)[number];
-const STREAM_CATEGORY_SET: ReadonlySet<CommentCategory> = new Set(STREAM_CATEGORIES);
-export const isStreamCategory = (category: CommentCategory): category is StreamCategory =>
-  STREAM_CATEGORY_SET.has(category);
 /**
  * The one-letter code that stands for each category in a compact comment batch reply: the
  * category's first letter, or a later one when that is taken (spoiler `p`, instruction `n`,
@@ -59,8 +38,6 @@ export const COMMENT_CATEGORY_CODES = {
 const CATEGORY_BY_CODE = new Map<string, CommentCategory>(
   COMMENT_CATEGORIES.map((category) => [COMMENT_CATEGORY_CODES[category], category]),
 );
-/** A category every prompt has. */
-type BaseCategory = Exclude<CommentCategory, StreamCategory>;
 /** The meaning of each category every prompt has, in the fixed system turn. */
 const BASE_MEANINGS = {
   abusive: 'insults, harassment, hate speech toward people',
@@ -70,105 +47,6 @@ const BASE_MEANINGS = {
     'information a viewer would want to know (schedule, announcements, answers to common questions)',
   chatter: 'everything else (reactions, jokes, greetings)',
 } as const satisfies Record<BaseCategory, string>;
-/**
- * The definition of each stream category, in the user turn of a stream that has it on (R62).
- * Each one names what it is not: the reactions and questions that look like it (the research
- * behind R62 lists them per type).
- */
-const STREAM_DEFINITIONS = {
-  spoiler:
-    'reveals what happens later in what the stream plays or watches (the spoiler targets in the stream context when it has them, else what the stream title names): story events, twists, deaths, the ending, a hidden answer, a result seen ahead on a faster broadcast, or a hint that something big is coming ("次の章、泣く準備しといて", "the mentor dies in the last chapter"). Not spoiler: guesses, tier lists, votes, opinions, and talk about what the stream already showed.',
-  instruction:
-    'tells the streamer how to play right now without being asked, as an order or as advice (〜して, 〜したほうがいい, 〜しないで): what to do, where to go, which option to pick, how to solve a puzzle or which tile to discard ("左の通路を先に調べて", "reload before you peek", "ここは索子を切るべき"). Not instruction: questions about the plan ("この後どうするの？"), shouts of a word or two in the moment ("走れ！", "いけ！"), praise or criticism of play that already happened, and answers to what the streamer asked.',
-  relay:
-    'brings another streamer or another stream into this chat: what someone else is doing or did on their stream, "I came from X\'s stream", or a streamer who is not part of this stream ("○○くんの配信ではこのボスもう倒してた", "○○ちゃんの所から来ました"). A name with さん, ちゃん or くん that the title does not name, playing or streaming on their own, is another streamer. Not relay: people named in the stream title, characters of the game or show, and talk about this streamer.',
-  ghosting:
-    'relays what the streamer must not know during a match, or snipes them: where opponents are now or what they plan, seen on another stream, window or view (別窓, 他視点); other players\' hidden hands, waits or roles ("敵、北の倉庫に固まってるよ、他視点で見た", "インポスターは赤の人", "下家は筒子待ち"); or stream sniping: saying they joined or will join the streamer\'s match or table on purpose, or asking for the server or queue to do so ("ロビー合わせたから今から狙いに行く"). Not ghosting: guesses ("〜っぽい", "〜そう", "〜怪しくない？"), questions about the streamer\'s own play, and talk about a match or hand that is over ("さっきの試合", "〜だったね").',
-  privacy:
-    'pries into or reveals private information the streamer has not made public: real name, face, age, address or where they live, school or workplace, family, partner or love life, or the person behind a VTuber: who they were before or a claim to recognize them (前世, 中の人, "声で誰だかわかる"). Not privacy: ordinary questions about the stream, the game or the streamer\'s tastes and day, and the cast or characters of a game or show.',
-  sensitive:
-    'raises politics, religion or another divisive social issue, or baits the streamer into a statement on one: elections, parties, politicians, territorial disputes (asking the streamer to say a region is or is not a country), wars, or spreading a religion. Not sensitive: games, films, songs or shows about war or politics, idol popularity votes (総選挙), national teams in sports, and 神 as praise (神ゲー).',
-} as const satisfies Record<StreamCategory, string>;
-
-/** What kind of stream it is (R62); `other` while unknown. Task G2 detects it. */
-export const STREAM_GENRES = [
-  'fps',
-  'story',
-  'horror',
-  'puzzle_rta',
-  'chat',
-  'singing',
-  'watchalong',
-  'sports_viewing',
-  'board',
-  'deduction',
-  'other',
-] as const;
-export const streamGenreSchema = z.enum(STREAM_GENRES);
-export type StreamGenre = z.infer<typeof streamGenreSchema>;
-/** Each genre as the prompt names it, after its id. */
-const GENRE_NAMES = {
-  fps: 'FPS, battle royale, PvP or fighting game',
-  story: 'story game, RPG or adventure',
-  horror: 'horror game',
-  puzzle_rta: 'puzzle game or speedrun (RTA)',
-  chat: 'just chatting (雑談)',
-  singing: 'singing stream (歌枠)',
-  watchalong: 'watch-along of an anime, a film or a show (同時視聴)',
-  sports_viewing: 'sports or esports viewing (観戦)',
-  board: 'mahjong, board or card game',
-  deduction: 'social deduction game (人狼, Among Us)',
-  other: 'unknown',
-} as const satisfies Record<StreamGenre, string>;
-/** The stream categories a stream's own rules may turn off (R62): 【参加型】, ネタバレOK … */
-export const RELAXABLE_CATEGORIES = [
-  'instruction',
-  'spoiler',
-] as const satisfies readonly StreamCategory[];
-export type RelaxableCategory = (typeof RELAXABLE_CATEGORIES)[number];
-const INSTRUCTION_GENRES: ReadonlySet<StreamGenre> = new Set([
-  'fps',
-  'story',
-  'horror',
-  'puzzle_rta',
-  'board',
-]);
-const GHOSTING_GENRES: ReadonlySet<StreamGenre> = new Set(['fps', 'board', 'deduction']);
-const SPOILER_GENRES: ReadonlySet<StreamGenre> = new Set([
-  'story',
-  'horror',
-  'puzzle_rta',
-  'watchalong',
-  'sports_viewing',
-]);
-/**
- * The stream categories a stream has on, in `STREAM_CATEGORIES` order (R62):
- * - relay, privacy and sensitive always;
- * - instruction in fps, story, horror, puzzle_rta and board streams, unless relaxed;
- * - ghosting in fps, board and deduction streams;
- * - spoiler with the viewer's spoiler targets (R31), whatever the stream's rules say: the viewer
- *   asked for it. Without them in story, horror, puzzle_rta, watchalong and sports_viewing
- *   streams, unless relaxed.
- */
-export function streamCategories(
-  input: Readonly<{
-    genre: StreamGenre;
-    relaxations: readonly RelaxableCategory[];
-    /** The viewer wrote spoiler targets for the stream. */
-    spoilerTargets: boolean;
-  }>,
-): StreamCategory[] {
-  const relaxed = (category: RelaxableCategory): boolean => input.relaxations.includes(category);
-  const on: Record<StreamCategory, boolean> = {
-    spoiler: input.spoilerTargets || (SPOILER_GENRES.has(input.genre) && !relaxed('spoiler')),
-    instruction: INSTRUCTION_GENRES.has(input.genre) && !relaxed('instruction'),
-    relay: true,
-    ghosting: GHOSTING_GENRES.has(input.genre),
-    privacy: true,
-    sensitive: true,
-  };
-  return STREAM_CATEGORIES.filter((category) => on[category]);
-}
 
 export const subtitleOutputSchema = z.strictObject({ ja: z.string(), en: z.optional(z.string()) });
 
@@ -556,7 +434,7 @@ export const commentBatchPrompt = (
           `Stream categories (only for this stream):\n${categories
             .map(
               (category) =>
-                `- ${COMMENT_CATEGORY_CODES[category]} = ${category}: ${STREAM_DEFINITIONS[category]}`,
+                `- ${COMMENT_CATEGORY_CODES[category]} = ${category}: ${STREAM_CATEGORY_DEFINITIONS[category]}`,
             )
             .join('\n')}`,
         ]),

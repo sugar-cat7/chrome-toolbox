@@ -3,21 +3,16 @@ import {
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentBatchPrompt,
-  isStreamCategory,
   parseCommentBatch,
   parseSummary,
-  STREAM_CATEGORIES,
-  STREAM_GENRES,
-  streamCategories,
   subtitleOutputSchema,
   subtitlePrompt,
   summaryLimits,
   summaryLine,
   summaryLines,
   summaryPrompt,
-  type StreamCategory,
-  type StreamGenre,
 } from './prompts.ts';
+import { STREAM_CATEGORIES } from './stream-categories.ts';
 
 const user = (p: { messages: { content: string }[] }): string => p.messages.at(-1)?.content ?? '';
 const system = (p: { messages: { content: string }[] }): string => p.messages[0]?.content ?? '';
@@ -203,7 +198,7 @@ describe('commentBatchPrompt', () => {
     expect(index('- g = ghosting: ')).toBeLessThan(index('Viewer corrections'));
     expect(index('Viewer corrections')).toBeLessThan(index('Comments'));
     // The definitions name what is not the category: the tricky negatives (R62).
-    expect(lines[index('- n = instruction: ')]).toMatch(/Not instruction: questions about/u);
+    expect(lines[index('- n = instruction: ')]).toMatch(/Not instruction: emotional shouts/u);
     expect(lines[index('- g = ghosting: ')]).toMatch(/Not ghosting: /u);
   });
 
@@ -225,7 +220,8 @@ describe('commentBatchPrompt', () => {
       .find((text) => text.startsWith('- p = spoiler: '));
     expect(line).toMatch(/the spoiler targets in the stream context when it has them/u);
     expect(line).toMatch(/what the stream title names/u);
-    expect(line).toMatch(/Not spoiler: guesses, tier lists, votes, opinions/u);
+    expect(line).toMatch(/Not spoiler: a viewer's guess, prediction or wondering/u);
+    expect(line).toMatch(/tier lists, votes, opinions/u);
   });
 
   it('pins the compact line grammar of a mixed batch: id, code and a bounded ja where translated', () => {
@@ -354,78 +350,6 @@ describe('commentBatchPrompt', () => {
     expect(headerLines(user(p), 'Comments')).toHaveLength(1);
     expect(user(p)).toContain(`Stream context: ${JSON.stringify(forged)}`);
     expect(user(p)).toContain(JSON.stringify({ id: 1, lang: 'en', translate: true, text: forged }));
-  });
-});
-
-describe('streamCategories (R62)', () => {
-  const always = ['relay', 'privacy', 'sensitive'] as const;
-  const table: readonly { genre: StreamGenre; expected: readonly StreamCategory[] }[] = [
-    { genre: 'fps', expected: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'] },
-    { genre: 'story', expected: ['spoiler', 'instruction', ...always] },
-    { genre: 'horror', expected: ['spoiler', 'instruction', ...always] },
-    { genre: 'puzzle_rta', expected: ['spoiler', 'instruction', ...always] },
-    { genre: 'chat', expected: always },
-    { genre: 'singing', expected: always },
-    { genre: 'watchalong', expected: ['spoiler', ...always] },
-    { genre: 'sports_viewing', expected: ['spoiler', ...always] },
-    { genre: 'board', expected: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'] },
-    { genre: 'deduction', expected: ['relay', 'ghosting', 'privacy', 'sensitive'] },
-    { genre: 'other', expected: always },
-  ];
-
-  it('covers every genre once', () => {
-    expect(table.map((row) => row.genre).toSorted()).toEqual([...STREAM_GENRES].toSorted());
-  });
-
-  it.each(table)(
-    'enables for a $genre stream without spoiler targets: $expected',
-    ({ genre, expected }) => {
-      expect(streamCategories({ genre, relaxations: [], spoilerTargets: false })).toEqual(expected);
-    },
-  );
-
-  it.each(table)(
-    'enables spoilers for a $genre stream with spoiler targets (R31)',
-    ({ genre, expected }) => {
-      const categories = streamCategories({ genre, relaxations: [], spoilerTargets: true });
-      expect(categories).toEqual(
-        STREAM_CATEGORIES.filter((c) => c === 'spoiler' || expected.includes(c)),
-      );
-    },
-  );
-
-  it.each([
-    // The stream's own rules invite advice (【参加型】, 指示OK): instructions are fine there.
-    { genre: 'fps', relaxations: ['instruction'], without: ['instruction'] },
-    { genre: 'board', relaxations: ['instruction'], without: ['instruction'] },
-    // ネタバレOK, 2周目: the genre's spoilers are off; never the always-on categories.
-    { genre: 'story', relaxations: ['spoiler'], without: ['spoiler'] },
-    {
-      genre: 'horror',
-      relaxations: ['instruction', 'spoiler'],
-      without: ['spoiler', 'instruction'],
-    },
-    { genre: 'chat', relaxations: ['instruction', 'spoiler'], without: [] },
-  ] as const)(
-    'turns off $without for a $genre stream that relaxes $relaxations',
-    ({ genre, relaxations, without }) => {
-      const strict = streamCategories({ genre, relaxations: [], spoilerTargets: false });
-      expect(streamCategories({ genre, relaxations, spoilerTargets: false })).toEqual(
-        strict.filter((category) => !(without as readonly string[]).includes(category)),
-      );
-    },
-  );
-
-  it("keeps the viewer's own spoiler targets over a stream that allows spoilers", () => {
-    expect(
-      streamCategories({ genre: 'story', relaxations: ['spoiler'], spoilerTargets: true }),
-    ).toContain('spoiler');
-  });
-
-  it('tells the stream categories from the base ones', () => {
-    expect(STREAM_CATEGORIES.every(isStreamCategory)).toBe(true);
-    const base = ['abusive', 'spam', 'question', 'important', 'chatter'] as const;
-    expect(base.some((category) => isStreamCategory(category))).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-import { commentReplyBudget } from '@chrome-toolbox/extension-core';
+import { commentReplyBudget, streamCategories } from '@chrome-toolbox/extension-core';
 
 /**
  * Fixed generation settings for every translation request a bench sends. They are written to
@@ -18,4 +18,14 @@ export const GENERATION = {
    * translated one, 3 tokens per character its grammar allows the translation (R46).
    */
   maxTokens: { subtitle: 256, comment: commentReplyBudget, judge: 16 },
+} as const;
+
+/**
+ * The stream a comment-batch bench poses as: genre `other` with the categories it has on
+ * (relay, privacy, sensitive, R62), as every real batch of a stream not yet classified, so the
+ * user turn is as long as the extension's.
+ */
+export const BENCH_STREAM = {
+  genre: 'other',
+  categories: streamCategories({ genre: 'other', relaxations: [], spoilerTargets: false }),
 } as const;

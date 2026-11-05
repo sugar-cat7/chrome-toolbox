@@ -33,6 +33,9 @@ type Seen = {
   temperature: unknown;
   maxTokens: unknown;
   templateKwargs: unknown;
+  /** A comment batch's grammar code class and whether its user turn names a genre. */
+  codes?: string | undefined;
+  genre?: string | undefined;
 };
 
 function fakeClock() {
@@ -73,6 +76,7 @@ function fakeServer(
         temperature?: number;
         max_tokens?: number;
         chat_template_kwargs?: unknown;
+        grammar?: string;
         messages: { role: string; content: string }[];
       };
       const system = body.messages[0]?.content;
@@ -86,6 +90,10 @@ function fakeServer(
         temperature: body.temperature,
         maxTokens: body.max_tokens,
         templateKwargs: body.chat_template_kwargs,
+        codes: body.grammar?.split('\n')[1],
+        genre: body.messages[1]?.content
+          .split('\n')
+          .find((line) => line.startsWith('Stream genre: ')),
       });
       if (kind === 'comment')
         return options.failComments
@@ -125,6 +133,17 @@ describe('runSlotBench', () => {
     expect(server.seen.length).toBeGreaterThan(0);
     expect(server.seen.every((s) => s.model === 'gemma4-e4b')).toBe(true);
     expect(new Set(server.seen.map((s) => s.kind))).toEqual(new Set(['subtitle', 'comment']));
+  });
+
+  it('sends comment batches with the categories every real batch has (genre other, R62)', async () => {
+    const server = fakeServer(2);
+    await runSlotBench(options(server, true));
+    const comment = server.seen.filter((s) => s.kind === 'comment');
+    expect(comment.length).toBeGreaterThan(0);
+    expect(new Set(comment.map((s) => s.codes))).toEqual(new Set(['code ::= [asqicrve]']));
+    expect(new Set(comment.map((s) => s.genre))).toEqual(
+      new Set(['Stream genre: other (unknown)']),
+    );
   });
 
   it('pins subtitles to slot 0 and comment batches to slot 1 on separate clients', async () => {

@@ -1,5 +1,5 @@
 import * as z from 'zod/mini';
-import { commentCategorySchema } from './prompts.ts';
+import { commentCategorySchema } from './stream-categories.ts';
 
 export const commentLimits = {
   batcher: { maxItems: 3, maxWaitMs: 500, maxBuffered: 200 },

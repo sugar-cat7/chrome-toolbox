@@ -12,7 +12,7 @@ import {
   type LlamaClient,
 } from '@chrome-toolbox/extension-core';
 import { loadTextSamples, type TextSample } from './datasets.ts';
-import { GENERATION } from './generation.ts';
+import { BENCH_STREAM, GENERATION } from './generation.ts';
 import { percentile } from './metrics.ts';
 
 export type Stats = {
@@ -155,7 +155,7 @@ export async function runSlotBench(options: SlotBenchOptions): Promise<SlotRepor
       return { text: sample.text, lang: sample.lang, translate: true };
     });
     comments += commentBatchSize;
-    const prompt = commentBatchPrompt({ comments: batch, context: '' });
+    const prompt = commentBatchPrompt({ comments: batch, context: '', ...BENCH_STREAM });
     const maxTokens = commentBatchMaxTokens(batch);
     const result = await commentClient.chat({
       ...prompt,

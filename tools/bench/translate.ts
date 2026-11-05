@@ -11,7 +11,7 @@ import {
   type LlamaClient,
 } from '@chrome-toolbox/extension-core';
 import { loadTextSamples, type TextSample } from './datasets.ts';
-import { GENERATION } from './generation.ts';
+import { BENCH_STREAM, GENERATION } from './generation.ts';
 import { percentile } from './metrics.ts';
 import { benchMeta, writeResults } from './results.ts';
 
@@ -99,7 +99,7 @@ async function translateChat(
   common: Common,
 ): Promise<Outcome[]> {
   const comments = batch.map((s) => ({ text: s.text, lang: s.lang, translate: true }));
-  const prompt = commentBatchPrompt({ comments, context: '' });
+  const prompt = commentBatchPrompt({ comments, context: '', ...BENCH_STREAM });
   const maxTokens = commentBatchMaxTokens(comments);
   const result = await client.chat({ ...prompt, ...common, ...pinned, maxTokens });
   if (!result.ok) return batch.map(() => ({ ok: false, code: result.error.internalCode }));

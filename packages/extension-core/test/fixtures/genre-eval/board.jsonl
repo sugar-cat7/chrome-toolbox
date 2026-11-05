@@ -38,3 +38,5 @@
 {"text": "聴牌してる？", "genre": "board", "expected": "question"}
 {"text": "ラス回避できてよかった", "genre": "board", "expected": "chatter"}
 {"text": "ドラ多いね", "genre": "board", "expected": "chatter"}
+{"text": "ぺんたさんより打ち方下手だね", "genre": "board", "expected": "sensitive"}
+{"text": "このアプリ、たくさんの配信者が使ってるよね", "genre": "board", "expected": "chatter"}

@@ -38,3 +38,5 @@
 {"text": "迷子になってて草", "genre": "story", "expected": "chatter"}
 {"text": "主人公かっこいい", "genre": "story", "expected": "chatter"}
 {"text": "宝箱いっぱいあるね", "genre": "story", "expected": "chatter"}
+{"text": "ぬいまるちゃんの実況の方が面白かったな", "genre": "story", "expected": "sensitive"}
+{"text": "このゲーム、配信者に人気だよね", "genre": "story", "expected": "chatter"}

@@ -144,6 +144,9 @@ describe('runTranslationBench', () => {
     expect(server.sent[0]?.grammar?.split('\n')[0]).toBe(
       String.raw`root ::= "1\t" code "\t" ja1 "\n" "2\t" code "\t" ja2 "\n"`,
     );
+    // The categories every real batch has (genre other, R62), so the prompt is as long as one.
+    expect(server.sent[0]?.grammar?.split('\n')[1]).toBe('code ::= [asqicrve]');
+    expect(server.sent[0]?.messages.at(-1)?.content).toContain('Stream genre: other (unknown)');
     expect(report.rows.map((row) => [row.id, row.output, row.batchSize])).toEqual([
       ['es-1', 'やあ', 2],
       ['es-2', 'なに', 2],

@@ -33,3 +33,7 @@
 {"text": "今日喉の調子良さそう", "genre": "singing", "expected": "chatter"}
 {"text": "この曲カラオケでよく歌う", "genre": "singing", "expected": "chatter"}
 {"text": "待機してた", "genre": "singing", "expected": "chatter"}
+{"text": "もちこちゃんの方が歌うまいよね", "genre": "singing", "expected": "sensitive"}
+{"text": "声えろすぎ、もっと吐息多めで歌って", "genre": "singing", "expected": "sensitive"}
+{"text": "透き通った声好き", "genre": "singing", "expected": "chatter"}
+{"text": "この曲、ぺんたさんも昔歌ってたよね", "genre": "singing", "expected": "chatter"}

@@ -60,10 +60,11 @@ describe('loadGenreSamples', () => {
 
   it('reads every set of the repository', () => {
     const samples = loadGenreSamples(GENRE_EVAL_DIR);
-    expect(samples.length).toBeGreaterThanOrEqual(180);
-    expect(new Set(samples.map((s) => s.genre))).toEqual(
-      new Set(['fps', 'story', 'horror', 'chat', 'singing', 'board']),
-    );
+    expect(samples.length).toBeGreaterThanOrEqual(300);
+    // At least these genres; a set added later must not break the bench.
+    const genres = new Set(samples.map((s) => s.genre));
+    for (const genre of ['fps', 'story', 'horror', 'chat', 'singing', 'board'] as const)
+      expect(genres).toContain(genre);
   });
 
   it('reads {text, genre, expected} per line, in file order', () => {
@@ -84,10 +85,19 @@ describe('loadGenreSamples', () => {
   });
 
   it.each([
-    { line: '{"text":"x","genre":"fps"}', error: /fps\.jsonl:1: expected must be a category/u },
-    { line: '{"text":"x","genre":"rpg","expected":"chatter"}', error: /genre must be one of/u },
+    // One schema with the shape test (genreEvalLineSchema): strict keys, at most 200 characters.
+    { line: '{"text":"x","genre":"fps"}', error: /fps\.jsonl:1: not a genre eval line/u },
+    { line: '{"text":"x","genre":"rpg","expected":"chatter"}', error: /not a genre eval line/u },
+    { line: '{"text":"","genre":"fps","expected":"chatter"}', error: /not a genre eval line/u },
+    {
+      line: `{"text":"${'x'.repeat(201)}","genre":"fps","expected":"chatter"}`,
+      error: /not a genre eval line/u,
+    },
+    {
+      line: '{"text":"x","genre":"fps","expected":"chatter","note":"n"}',
+      error: /not a genre eval line/u,
+    },
     { line: '{"text":"x","genre":"chat","expected":"chatter"}', error: /not the genre of fps/u },
-    { line: '{"text":"","genre":"fps","expected":"chatter"}', error: /text must be a string/u },
     { line: 'not json', error: /fps\.jsonl:1: invalid JSON/u },
   ])('rejects $line', ({ line, error }) => {
     expect(() => loadGenreSamples(dir({ 'fps.jsonl': line }))).toThrow(error);
@@ -133,6 +143,19 @@ describe('scoreGenreRows', () => {
     // Chatter, questions and important lines together: 2 of 5 flagged.
     expect(score.ordinaryFalsePositives).toEqual({ flagged: 2, total: 5, rate: 0.4 });
     expect(score.failed).toBe(1);
+  });
+
+  it('leaves failed lines out of the false-positive shares', () => {
+    const score = scoreGenreRows([
+      row('chatter', 'relay'),
+      row('chatter', 'chatter'),
+      row('chatter', undefined),
+      row('question', undefined),
+    ]);
+    // A failed line was never judged: it neither lowers nor raises the share.
+    expect(score.chatterFalsePositives).toEqual({ flagged: 1, total: 2, rate: 0.5 });
+    expect(score.ordinaryFalsePositives).toEqual({ flagged: 1, total: 2, rate: 0.5 });
+    expect(score.failed).toBe(2);
   });
 
   it('scores each genre on its own rows', () => {

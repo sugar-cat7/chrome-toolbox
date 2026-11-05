@@ -37,3 +37,8 @@
 {"text": "季節の変わり目だから体調気をつけてね", "genre": "chat", "expected": "chatter"}
 {"text": "わたしも同じことあった", "genre": "chat", "expected": "chatter"}
 {"text": "そのゲームの話もっと聞きたい", "genre": "chat", "expected": "chatter"}
+{"text": "ぬいまるさんよりトーク面白いね", "genre": "chat", "expected": "sensitive"}
+{"text": "今日の服、もっと胸元見せてよ", "genre": "chat", "expected": "sensitive"}
+{"text": "あの事故の犠牲者でネタ作ってよw", "genre": "chat", "expected": "sensitive"}
+{"text": "このゲーム、いろんな配信者がやってるよね", "genre": "chat", "expected": "chatter"}
+{"text": "声に癒される", "genre": "chat", "expected": "chatter"}

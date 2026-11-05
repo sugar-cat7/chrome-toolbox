@@ -1,0 +1,34 @@
+{"text": "2-1で勝つと予想", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "地上波だともう試合終わってて3-1だったよ", "genre": "sports_viewing", "expected": "spoiler"}
+{"text": "ゴール！！", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "ぬいまるさんの観戦枠ではもうハーフタイムの話してた", "genre": "sports_viewing", "expected": "relay"}
+{"text": "今のシュート惜しい", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "速報アプリで延長戦の勝敗出てた、青チームの勝ち", "genre": "sports_viewing", "expected": "spoiler"}
+{"text": "準決勝は青が2-0で勝ってたね", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "スタジアムの近くに住んでるの？最寄りどこ？", "genre": "sports_viewing", "expected": "privacy"}
+{"text": "審判きびしい", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "相手国の政治やばいよね、どう思う？", "genre": "sports_viewing", "expected": "sensitive"}
+{"text": "代表のユニフォームかっこいい", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "このチーム何連覇中？", "genre": "sports_viewing", "expected": "question"}
+{"text": "the official stream is ahead, they already scored again", "genre": "sports_viewing", "expected": "spoiler"}
+{"text": "国歌斉唱のとこ鳥肌", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "もちこちゃんのウォッチパーティーから来た", "genre": "sports_viewing", "expected": "relay"}
+{"text": "延長ってあるの？", "genre": "sports_viewing", "expected": "question"}
+{"text": "一緒に見てる人誰？彼女？", "genre": "sports_viewing", "expected": "privacy"}
+{"text": "いけー！", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "別の中継だともうPK戦始まってる", "genre": "sports_viewing", "expected": "spoiler"}
+{"text": "誰推し？", "genre": "sports_viewing", "expected": "question"}
+{"text": "このキーパー神", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "この試合より選挙の方が大事でしょ、どの政党支持？", "genre": "sports_viewing", "expected": "sensitive"}
+{"text": "what a save!", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "who's the top scorer this season?", "genre": "sports_viewing", "expected": "question"}
+{"text": "点入りそう", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "ハーフタイム何分？", "genre": "sports_viewing", "expected": "question"}
+{"text": "去年の決勝も見てた", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "次で決まる気がする", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "配信遅延どれくらい？", "genre": "sports_viewing", "expected": "question"}
+{"text": "応援歌いいね", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "スタメン発表いつ？", "genre": "sports_viewing", "expected": "question"}
+{"text": "観戦ありがとう", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "昔の墜落事故ネタでこの選手いじろうぜ", "genre": "sports_viewing", "expected": "sensitive"}
+{"text": "他の配信者さんもこの試合見てるらしいね", "genre": "sports_viewing", "expected": "chatter"}

@@ -37,3 +37,5 @@
 {"text": "こんばんは、初見です", "genre": "horror", "expected": "chatter"}
 {"text": "声震えてて草", "genre": "horror", "expected": "chatter"}
 {"text": "見てるだけで怖い", "genre": "horror", "expected": "chatter"}
+{"text": "被災地の心霊スポット凸してみてよ、不謹慎なほど伸びるって", "genre": "horror", "expected": "sensitive"}
+{"text": "災害から脱出するホラー、リアルで怖い", "genre": "horror", "expected": "chatter"}

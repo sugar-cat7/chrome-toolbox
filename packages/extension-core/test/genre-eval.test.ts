@@ -1,13 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod/mini';
 import { describe, expect, it } from 'vitest';
 import {
-  commentCategorySchema,
+  genreEvalLineSchema,
   isStreamCategory,
+  STREAM_GENRES,
   streamCategories,
   streamGenreSchema,
-} from '../src/prompts.ts';
+} from '../src/stream-categories.ts';
 
 /**
  * The self-written evaluation sets of the genre categories (R62): one JSONL file per genre,
@@ -16,13 +16,8 @@ import {
  * against a real server. Every line is made up: no real chat, streamer, agency or viewer name.
  */
 const DIRECTORY = path.join(import.meta.dirname, 'fixtures', 'genre-eval');
-const lineSchema = z.strictObject({
-  text: z.string().check(z.minLength(1), z.maxLength(200)),
-  genre: streamGenreSchema,
-  expected: commentCategorySchema,
-});
-/** The genres the sets must cover at least (R62). */
-const REQUIRED = ['fps', 'story', 'horror', 'chat', 'singing', 'board'] as const;
+/** Every genre a stream can be detected as (R62); `other` (unknown) needs no set. */
+const REQUIRED = STREAM_GENRES.filter((genre) => genre !== 'other');
 
 const files = readdirSync(DIRECTORY)
   .filter((name) => name.endsWith('.jsonl'))
@@ -31,7 +26,7 @@ const linesOf = (name: string) =>
   readFileSync(path.join(DIRECTORY, name), 'utf8')
     .split('\n')
     .filter((line) => line.trim() !== '')
-    .map((line) => lineSchema.parse(JSON.parse(line)));
+    .map((line) => genreEvalLineSchema.parse(JSON.parse(line)));
 
 describe('genre evaluation sets', () => {
   it('has a set for every required genre, named after a known genre', () => {
