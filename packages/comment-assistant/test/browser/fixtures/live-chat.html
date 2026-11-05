@@ -1,0 +1,139 @@
+<!doctype html>
+<!--
+  A made-up YouTube live chat that keeps posting, for the chat flow and soak tests. The element
+  path from the body to #items and the text message renderer's inner structure are those of
+  test/fixtures/youtube-live-chat.html (observed on a live stream on 2026-10-28).
+  `?rate=<n>` posts n messages a second (default 5). Like YouTube, only the newest 250 lines
+  stay in the list, which scrolls inside the frame and follows the newest line, so the lines on
+  screen are the newest ones. Authors and texts rotate through the made-up lists below, each
+  text with the message number so no two are the same; nothing is fetched. A test may set
+  `window.fixturePaused = true` to stop posting (and so hold the lines on screen) until it sets
+  it back to false.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>live chat generator fixture</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #item-scroller {
+        height: 100vh;
+        overflow-y: auto;
+      }
+      yt-live-chat-text-message-renderer {
+        display: block;
+        padding: 4px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <yt-live-chat-app>
+      <div id="contents">
+        <yt-live-chat-renderer>
+          <tp-yt-iron-pages id="content-pages">
+            <div id="chat-messages">
+              <div id="contents">
+                <div id="chat">
+                  <div id="item-list">
+                    <yt-live-chat-item-list-renderer id="live-chat-item-list-panel">
+                      <div id="contents">
+                        <div id="item-scroller">
+                          <div id="item-offset">
+                            <div
+                              id="items"
+                              class="style-scope yt-live-chat-item-list-renderer"
+                            ></div>
+                          </div>
+                        </div>
+                      </div>
+                    </yt-live-chat-item-list-renderer>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </tp-yt-iron-pages>
+        </yt-live-chat-renderer>
+      </div>
+    </yt-live-chat-app>
+    <template id="line"
+      ><yt-live-chat-text-message-renderer author-type=""
+        ><yt-img-shadow id="author-photo"
+          ><img id="img" alt="" height="24" width="24"
+        /></yt-img-shadow>
+        <div id="content">
+          <span id="timestamp"></span
+          ><yt-live-chat-author-chip
+            ><span id="prepend-chat-badges"></span
+            ><span id="author-name" dir="auto"><span id="chip-badges"></span></span
+            ><span id="chat-badges"></span></yt-live-chat-author-chip
+          ><span id="message" dir="auto"></span>
+        </div>
+        <div id="menu"></div></yt-live-chat-text-message-renderer
+    ></template>
+    <script>
+      (() => {
+        const requested = Number(new URLSearchParams(location.search).get('rate') ?? '5');
+        const rate = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 100) : 5;
+        /** YouTube keeps a few hundred lines; older ones are removed as new ones arrive. */
+        const KEEP = 250;
+        const AUTHORS = [
+          '@sample-viewer-one',
+          '@sample-viewer-two',
+          '@sample-viewer-three',
+          '@sample-viewer-four',
+          '@sample-viewer-five',
+          '@sample-viewer-six',
+          '@sample-viewer-seven',
+        ];
+        // English is translated, Japanese only classified, a text ending in "?" is a question
+        // and "lol" is a stock reaction answered by rule. The llama.cpp stub's model calls a text
+        // with "BAD" or "ROUGH" abusive and its Clef scores one with "BAD" or "HARSH" as abusive;
+        // "idiot" is an abuse cue, so the HARSH line goes to Clef while the model runs.
+        const TEXTS = [
+          (n) => `that dodge was clean ${n}`,
+          (n) => `which level is this ${n}?`,
+          (n) => `今のは上手い ${n}`,
+          (n) => `BAD sample line ${n}`,
+          () => 'lol',
+          (n) => `次はどのボスに行くの ${n}?`,
+          (n) => `ROUGH sample line ${n}`,
+          (n) => `the music fits this area ${n}`,
+          (n) => `HARSH idiot line ${n}`,
+          (n) => `初見です ${n}`,
+        ];
+        const items = document.getElementById('items');
+        const scroller = document.getElementById('item-scroller');
+        const line = document.getElementById('line').content.firstElementChild;
+        const started = performance.now();
+        let posted = 0;
+        /** One line: a clone of the template with its id, author and text (a few DOM writes). */
+        function post() {
+          const n = posted;
+          posted += 1;
+          const node = line.cloneNode(true);
+          node.id = `fixture-line-${n}`;
+          node.querySelector('#author-name').prepend(AUTHORS[n % AUTHORS.length]);
+          node.querySelector('#message').textContent = TEXTS[n % TEXTS.length](n);
+          items.append(node);
+          if (items.childElementCount > KEEP) items.firstElementChild.remove();
+        }
+        // Lines due by the clock, so a throttled timer keeps the rate; at most one second's
+        // worth per tick, skipping numbers the page could not post in time.
+        setInterval(() => {
+          if (window.fixturePaused === true) return;
+          const due = Math.floor(((performance.now() - started) * rate) / 1000);
+          if (due - posted > rate) posted = due - Math.ceil(rate);
+          if (posted >= due) return;
+          while (posted < due) post();
+          // The list follows the newest line, as YouTube's does while the viewer is at its end.
+          scroller.scrollTop = scroller.scrollHeight;
+        }, 1000 / rate);
+      })();
+    </script>
+  </body>
+</html>

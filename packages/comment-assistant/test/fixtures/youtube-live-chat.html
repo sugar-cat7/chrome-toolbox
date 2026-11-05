@@ -1,0 +1,215 @@
+<!doctype html>
+<!--
+  YouTube live chat (popout /live_chat?is_popout=1&v=… and the watch page's iframe#chatframe).
+  The element path from the body to #items and the text message renderer's inner structure were
+  observed on a live stream on 2026-10-28; yt-live-chat-paid-message-renderer follows its known
+  layout but was not seen live (unverified). Author roles, seen on live streams on 2026-10-29: a
+  member and a moderator have author-type="member" / "moderator" on the renderer, a matching
+  class on #author-name and yt-live-chat-author-badge-renderer[type] badges in #chat-badges (a
+  moderator who is a member has both); a verified channel has no author-type, `is-verified` on
+  the author chip and its type="verified" badge inside #author-name > #chip-badges. The owner's
+  author-type="owner" was not seen live (unverified). Every id, name and text below is made up.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>live chat fixture</title>
+  </head>
+  <body>
+    <yt-live-chat-app>
+      <div id="contents">
+        <yt-live-chat-renderer>
+          <tp-yt-iron-pages id="content-pages">
+            <div id="chat-messages">
+              <div id="contents">
+                <div id="chat">
+                  <div id="item-list">
+                    <yt-live-chat-item-list-renderer id="live-chat-item-list-panel">
+                      <div id="contents">
+                        <div id="item-scroller">
+                          <div id="item-offset">
+                            <div id="items" class="style-scope yt-live-chat-item-list-renderer">
+                              <yt-live-chat-viewer-engagement-message-renderer
+                                id="fixture-engagement"
+                                ><div id="content">
+                                  <span id="message">Chat rules: be kind to everyone.</span>
+                                </div></yt-live-chat-viewer-engagement-message-renderer
+                              >
+                              <yt-live-chat-text-message-renderer
+                                id="fixture-live-01"
+                                author-type=""
+                                ><yt-img-shadow id="author-photo"
+                                  ><img id="img" alt="" height="24" width="24"
+                                /></yt-img-shadow>
+                                <div id="content">
+                                  <span id="timestamp">9:00</span
+                                  ><yt-live-chat-author-chip
+                                    ><span id="prepend-chat-badges"></span
+                                    ><span id="author-name" dir="auto"
+                                      >@sample-viewer-one<span id="chip-badges"></span></span
+                                    ><span id="chat-badges"></span></yt-live-chat-author-chip
+                                  ><span id="message" dir="auto"
+                                    >What game is this stream playing today?</span
+                                  >
+                                </div>
+                                <div id="menu"></div
+                              ></yt-live-chat-text-message-renderer>
+                              <yt-live-chat-text-message-renderer
+                                id="fixture-live-02"
+                                author-type="member"
+                                ><yt-img-shadow id="author-photo"
+                                  ><img id="img" alt="" height="24" width="24"
+                                /></yt-img-shadow>
+                                <div id="content">
+                                  <span id="timestamp">9:00</span
+                                  ><yt-live-chat-author-chip
+                                    ><span id="prepend-chat-badges"></span
+                                    ><span id="author-name" dir="auto" class="member"
+                                      >@sample-viewer-two<span id="chip-badges"></span></span
+                                    ><span id="chat-badges"
+                                      ><yt-live-chat-author-badge-renderer
+                                        aria-label="Member (1 year)"
+                                        type="member"
+                                        shared-tooltip-text="Member (1 year)"
+                                        ><div id="image">
+                                          <img
+                                            src="data:,"
+                                            alt="Member (1 year)"
+                                          /></div></yt-live-chat-author-badge-renderer></span></yt-live-chat-author-chip
+                                  ><span id="message" dir="auto"
+                                    >nice jump
+                                    <img
+                                      class="emoji yt-formatted-string style-scope yt-live-chat-text-message-renderer"
+                                      src="data:,"
+                                      alt="😀"
+                                      shared-tooltip-text=":grinning:"
+                                      id="emoji-1"
+                                    />
+                                    again</span
+                                  >
+                                </div>
+                                <div id="menu"></div
+                              ></yt-live-chat-text-message-renderer>
+                              <yt-live-chat-text-message-renderer
+                                id="fixture-live-03"
+                                author-type=""
+                                ><yt-img-shadow id="author-photo"
+                                  ><img id="img" alt="" height="24" width="24"
+                                /></yt-img-shadow>
+                                <div id="content">
+                                  <span id="timestamp">9:01</span
+                                  ><yt-live-chat-author-chip is-verified
+                                    ><span id="prepend-chat-badges"></span
+                                    ><span id="author-name" dir="auto"
+                                      >@sample-viewer-three<span id="chip-badges"
+                                        ><yt-live-chat-author-badge-renderer
+                                          aria-label="Verified"
+                                          type="verified"
+                                          shared-tooltip-text="Verified"
+                                          ><div id="image">
+                                            <yt-icon></yt-icon></div></yt-live-chat-author-badge-renderer></span></span
+                                    ><span id="chat-badges"></span></yt-live-chat-author-chip
+                                  ><span id="message" dir="auto"
+                                    >初見です、よろしくお願いします</span
+                                  >
+                                </div>
+                                <div id="menu"></div
+                              ></yt-live-chat-text-message-renderer>
+                              <yt-live-chat-text-message-renderer
+                                id="fixture-live-04"
+                                author-type="owner"
+                                ><yt-img-shadow id="author-photo"
+                                  ><img id="img" alt="" height="24" width="24"
+                                /></yt-img-shadow>
+                                <div id="content">
+                                  <span id="timestamp">9:01</span
+                                  ><yt-live-chat-author-chip
+                                    ><span id="prepend-chat-badges"></span
+                                    ><span id="author-name" dir="auto" class="owner"
+                                      >@sample-streamer<span id="chip-badges"></span></span
+                                    ><span id="chat-badges"></span></yt-live-chat-author-chip
+                                  ><span id="message" dir="auto"
+                                    ><img
+                                      class="emoji yt-formatted-string style-scope yt-live-chat-text-message-renderer"
+                                      src="data:,"
+                                      alt="👏"
+                                      shared-tooltip-text=":clapping_hands:"
+                                      id="emoji-2"
+                                  /></span>
+                                </div>
+                                <div id="menu"></div
+                              ></yt-live-chat-text-message-renderer>
+                              <yt-live-chat-paid-message-renderer id="fixture-live-05"
+                                ><div id="card">
+                                  <div id="header">
+                                    <yt-img-shadow id="author-photo"
+                                      ><img id="img" alt="" height="40" width="40"
+                                    /></yt-img-shadow>
+                                    <div id="header-content">
+                                      <div id="header-content-primary-column">
+                                        <div id="author-name-chip">
+                                          <yt-live-chat-author-chip
+                                            ><span id="author-name" dir="auto"
+                                              >@sample-supporter<span id="chip-badges"></span></span
+                                          ></yt-live-chat-author-chip>
+                                        </div>
+                                        <div id="purchase-amount-column">
+                                          <div id="purchase-amount">¥500</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div id="content">
+                                    <div id="message" dir="auto">Thanks for the fun stream!</div>
+                                  </div>
+                                </div></yt-live-chat-paid-message-renderer
+                              >
+                              <yt-live-chat-text-message-renderer
+                                id="fixture-live-06"
+                                author-type="moderator"
+                                ><yt-img-shadow id="author-photo"
+                                  ><img id="img" alt="" height="24" width="24"
+                                /></yt-img-shadow>
+                                <div id="content">
+                                  <span id="timestamp">9:02</span
+                                  ><yt-live-chat-author-chip
+                                    ><span id="prepend-chat-badges"></span
+                                    ><span id="author-name" dir="auto" class="moderator"
+                                      >@sample-moderator<span id="chip-badges"></span></span
+                                    ><span id="chat-badges"
+                                      ><yt-live-chat-author-badge-renderer
+                                        aria-label="Moderator"
+                                        type="moderator"
+                                        shared-tooltip-text="Moderator"
+                                        ><div id="image">
+                                          <yt-icon></yt-icon></div></yt-live-chat-author-badge-renderer
+                                      ><yt-live-chat-author-badge-renderer
+                                        aria-label="Member (1 year)"
+                                        type="member"
+                                        shared-tooltip-text="Member (1 year)"
+                                        ><div id="image">
+                                          <img
+                                            src="data:,"
+                                            alt="Member (1 year)"
+                                          /></div></yt-live-chat-author-badge-renderer></span></yt-live-chat-author-chip
+                                  ><span id="message" dir="auto"
+                                    >Please keep the chat friendly, everyone.</span
+                                  >
+                                </div>
+                                <div id="menu"></div
+                              ></yt-live-chat-text-message-renderer>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </yt-live-chat-item-list-renderer>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </tp-yt-iron-pages>
+        </yt-live-chat-renderer>
+      </div>
+    </yt-live-chat-app>
+  </body>
+</html>
