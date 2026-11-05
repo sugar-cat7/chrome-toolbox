@@ -378,8 +378,12 @@ describe('startChat', () => {
     vi.useFakeTimers();
     const { contexts, send } = stubWorker();
     const doc = load('/watch?v=fixture0002', 'youtube-comments');
-    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
-    if (!description) throw new Error('fixture changed');
+    const description = doc.querySelector(
+      'ytd-expandable-video-description-body-renderer [id="snippet-text"] yt-attributed-string',
+    );
+    const inline = doc.querySelector('ytd-watch-metadata [id="attributed-snippet-text"]');
+    if (!description || !inline) throw new Error('fixture changed');
+    inline.textContent = '【お約束】';
     description.textContent = '';
     const stop = startPage(doc, [youtubeLiveChat, youtubeComments], { send });
     await vi.advanceTimersByTimeAsync(FLUSH);

@@ -32,8 +32,10 @@ import { byAttribute, clip, ID_ATTRIBUTE, rawComment, type SiteAdapter } from '.
 // channel with the name as aria-label, in the page language (エーペックスレジェンズ, Apex
 // Legends). The collapsed description shows its first lines only; the whole of it (links as
 // chips) is the snippet of the hidden structured description engagement panel
-// (target-id="engagement-panel-structured-description"). On a navigation the title and the
-// card change with video-id; the description was seen empty there and filled about 20 ms later.
+// (target-id="engagement-panel-structured-description"). On a navigation the title, the card and
+// the collapsed description change with video-id; the panel was seen empty there and filled about
+// 20 ms later. On ten live pages the panel's text, whitespace aside, started with the collapsed
+// description (`#attributed-snippet-text` under ytd-watch-metadata): that ties it to the video.
 const SELECTORS = {
   container: 'ytd-comments#comments #sections > #contents',
   scope: 'ytd-comments#comments',
@@ -55,6 +57,8 @@ const SELECTORS = {
   descriptionPanel:
     'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"]',
   description: 'ytd-expandable-video-description-body-renderer [id="snippet-text"]',
+  // An attribute, not #id: the panel's expander has a #snippet-text of its own.
+  collapsed: 'ytd-watch-metadata [id="attributed-snippet-text"]',
 } as const;
 /** The attribute of ytd-watch-flexy that names the video its metadata shows. */
 const WATCH_VIDEO = 'video-id';
@@ -99,10 +103,20 @@ function gameOf(doc: Document): string | undefined {
   }
   return undefined;
 }
-/** The whole description, from the hidden description panel; empty until YouTube fills it in. */
-const descriptionOf = (doc: Document): string =>
-  doc.querySelector(SELECTORS.descriptionPanel)?.querySelector(SELECTORS.description)
-    ?.textContent ?? '';
+const squeezed = (text: string): string => text.replace(/\s+/gu, '');
+/**
+ * The whole description, from the hidden description panel, while it is the one of the video
+ * the page shows: it starts with the collapsed description under the metadata (whitespace
+ * aside; the panel shows links as chips), which YouTube changes with `video-id`. Empty until
+ * YouTube fills it in, while it still shows the previous video's, and for a video without one.
+ */
+function descriptionOf(doc: Document): string {
+  const collapsed = squeezed(doc.querySelector(SELECTORS.collapsed)?.textContent ?? '');
+  const whole =
+    doc.querySelector(SELECTORS.descriptionPanel)?.querySelector(SELECTORS.description)
+      ?.textContent ?? '';
+  return collapsed !== '' && squeezed(whole).startsWith(collapsed) ? whole : '';
+}
 
 /** Comments under a YouTube video (top-level only). */
 export const youtubeComments: SiteAdapter = {

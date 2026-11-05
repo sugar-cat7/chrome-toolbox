@@ -12,7 +12,10 @@
   with the game's name as aria-label (and in its h1; the name follows the page language); the
   whole description, links as chips, is the snippet of the hidden structured description
   engagement panel (target-id="engagement-panel-structured-description"), filled in with the
-  video's metadata, at most about 20 ms after video-id. Every id, name and text below is made up.
+  video's metadata, at most about 20 ms after video-id; the collapsed description under
+  ytd-watch-metadata (#attributed-snippet-text) shows its first lines, already for the new video
+  when video-id changes (both seen on 2026-11-05, whitespace aside). Every id, name and text
+  below is made up.
 -->
 <html lang="ja">
   <head>
@@ -64,6 +67,15 @@
                             <div id="description">
                               <div id="description-inner">
                                 <ytd-text-inline-expander id="description-inline-expander">
+                                  <div id="snippet">
+                                    <span id="snippet-text"
+                                      ><yt-attributed-string id="attributed-snippet-text"
+                                        ><span
+                                          >Fixture Questの続きをのんびり進めます。</span
+                                        ></yt-attributed-string
+                                      ></span
+                                    >
+                                  </div>
                                   <div>
                                     <ytd-structured-description-content-renderer
                                       id="structured-description"

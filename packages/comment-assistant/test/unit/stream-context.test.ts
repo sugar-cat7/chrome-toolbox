@@ -37,6 +37,19 @@ const flexy = (doc: Document): Element => {
   if (!element) throw new Error('fixture changed');
   return element;
 };
+/** The whole description in the hidden panel, and the collapsed one under the metadata. */
+const panelText = (doc: Document): Element => {
+  const element = doc.querySelector(
+    'ytd-expandable-video-description-body-renderer [id="snippet-text"] yt-attributed-string',
+  );
+  if (!element) throw new Error('fixture changed');
+  return element;
+};
+const inlineText = (doc: Document): Element => {
+  const element = doc.querySelector('ytd-watch-metadata [id="attributed-snippet-text"]');
+  if (!element) throw new Error('fixture changed');
+  return element;
+};
 const ownerLink = (doc: Document): Element => {
   const element = doc.querySelector('ytd-video-owner-renderer > a');
   if (!element) throw new Error('fixture changed');
@@ -62,8 +75,7 @@ describe('stream info read from the page', () => {
     const doc = load('/watch?v=fixture0001', 'youtube-comments');
     // Another attributes section (music, places) has no /gaming link.
     doc.querySelector('a[href="/gaming"]')?.remove();
-    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
-    if (description) description.textContent = 'Fixture Quest の続き\n#FixtureQuest';
+    panelText(doc).textContent = 'Fixture Questの続きをのんびり進めます。\n#FixtureQuest';
     expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')).toEqual({
       streamer: '@FixtureStreamer',
       title: 'Fixture Quest Part 3: the frozen bridge',
@@ -129,11 +141,28 @@ describe('stream info read from the page', () => {
     stop?.();
   });
 
+  it('reads the description only while it is the one of the video the page shows', () => {
+    const doc = load('/watch?v=fixture0001', 'youtube-comments');
+    // Still the previous video's: it does not start with the collapsed description.
+    const description = panelText(doc);
+    description.textContent = '前の動画の説明\n【お約束】\n・指示OKです';
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')).not.toHaveProperty('rules');
+    // Whitespace aside, it does: the panel shows links as chips with spaces of their own.
+    description.textContent =
+      'Fixture Quest の続きを のんびり進めます。\n\n【お約束】\n・アドバイス歓迎です';
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')?.rules).toBe(
+      '【お約束】\n・アドバイス歓迎です',
+    );
+    // Without a collapsed description there is none to read.
+    inlineText(doc).textContent = '';
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')).not.toHaveProperty('rules');
+  });
+
   it('calls back again when the description fills in just after the metadata, then stops', async () => {
     // Seen live: the description panel is empty for about 20 ms after video-id changes.
     const doc = load('/watch?v=fixture0002', 'youtube-comments');
-    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
-    if (!description) throw new Error('fixture changed');
+    const description = panelText(doc);
+    inlineText(doc).textContent = '【お約束】';
     description.textContent = '';
     const ready = vi.fn<() => void>();
     const stop = youtubeComments.watchStreamInfo?.(doc, 'fixture0002#comments', ready);
@@ -148,6 +177,22 @@ describe('stream info read from the page', () => {
     description.textContent = '【お約束】\n・指示NGです';
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(ready).toHaveBeenCalledTimes(2);
+    stop?.();
+  });
+
+  it('waits for the description of the new video while the panel still shows the previous one', async () => {
+    const doc = load('/watch?v=fixture0002', 'youtube-comments');
+    const description = panelText(doc);
+    inlineText(doc).textContent = '新しい動画';
+    const ready = vi.fn<() => void>();
+    const stop = youtubeComments.watchStreamInfo?.(doc, 'fixture0002#comments', ready);
+    flexy(doc).setAttribute('video-id', 'fixture0002');
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
+    description.textContent = '新しい動画\n【お約束】\n・指示OKです';
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(2));
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0002#comments')?.rules).toBe(
+      '【お約束】\n・指示OKです',
+    );
     stop?.();
   });
 
