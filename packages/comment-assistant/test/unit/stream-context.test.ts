@@ -211,6 +211,9 @@ describe('stream keys and prompt context', () => {
     { text: '【２周目】Fixture Quest 真エンド目指す', expected: ['spoiler'] },
     { text: '二周目のんびり', expected: ['spoiler'] },
     { text: 'spoilers ok, already beat it', expected: ['spoiler'] },
+    // A negation governs only the phrase it is part of (review G1 re-review).
+    { text: 'no worries spoilers ok', expected: ['spoiler'] },
+    { text: 'no rush, backseat me if you want', expected: ['instruction'] },
     { text: '【参加型】2周目 Fixture Party', expected: ['instruction', 'spoiler'] },
     // Traps: a game name, a ban, a warning to viewers, a 1st playthrough.
     { text: '『ネタバレが激しすぎるRPG』を初見プレイ', expected: [] },
@@ -240,6 +243,13 @@ describe('stream keys and prompt context', () => {
     { text: 'ネタバレ禁止', expected: [] },
     { text: '参加型なし', expected: [] },
     { text: '参加型無し・ソロ', expected: [] },
+    { text: '参加型ありません', expected: [] },
+    { text: '参加型有りません', expected: [] },
+    { text: '参加型はありません', expected: [] },
+    { text: '参加型はなし', expected: [] },
+    { text: '参加型はじめます', expected: ['instruction'] },
+    { text: 'no big spoilers allowed', expected: [] },
+    { text: 'not backseating welcome', expected: [] },
     { text: '【初見】指示OKではありません', expected: [] },
     { text: '指示ok無', expected: [] },
     { text: 'アドバイス歓迎しない', expected: [] },

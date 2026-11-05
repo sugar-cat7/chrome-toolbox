@@ -75,15 +75,18 @@ export function contextText(context: StreamContext): string {
 }
 
 /**
- * A Japanese word that negates or bans what precedes it: `ネタバレOKじゃない`, `指示OKではありません`,
- * `参加型なし`, `ネタバレ有無`, `ネタバレ禁止`, `アドバイス歓迎しない`.
+ * A Japanese word that negates or bans what precedes it, after `は` or `も` too: `ネタバレOKじゃない`,
+ * `指示OKではありません`, `参加型なし`, `参加型ありません`, `参加型はなし`, `ネタバレ有無`, `ネタバレ禁止`,
+ * `アドバイス歓迎しない`.
  */
-const JA_NOT = String.raw`(?![\s　]*(?:じゃ|では|ない|なし|無|禁止|ません|しない|しません|ng|×|✕))`;
+const JA_NOT = String.raw`(?![\s　]*(?:[はも][\s　]*)?(?:じゃ|では|ない|なし|無|禁止|ません|しない|しません|(?:あり|有り?)ません|ng|×|✕))`;
 /**
- * An English negation up to one word before the phrase: `no spoilers allowed`, `no major spoilers
- * allowed`, `don't backseat me`, `do not backseat me`, `never backseat me`.
+ * An English negation that governs the phrase: right before it (`no spoilers allowed`, `don't
+ * backseat me`, `do not backseat me`, `never backseat me`) or before one word that narrows it
+ * (`no major spoilers allowed`). Another word between them ends its reach: `no worries spoilers
+ * ok` allows spoilers.
  */
-const EN_NOT = String.raw`(?<!\b(?:no|not|never|don[’']?t|doesn[’']?t)[\s-]+(?:[\w’']+[\s-]+)?)`;
+const EN_NOT = String.raw`(?<!\b(?:no|not|never|don[’']?t|doesn[’']?t)[\s-]+(?:(?:major|minor|big|huge|any|more|story|plot|game|late|endgame|ending|unmarked)[\s-]+)?)`;
 /**
  * Words of a stream's own rules (title, or the description's rules once read, Task G2) that turn
  * a stream category off (R62), after NFKC (full-width `ＯＫ`, `２`) and in lower case:
