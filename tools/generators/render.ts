@@ -29,6 +29,8 @@ const infrastructure = [
   'tsconfig.json',
   'vite.config.ts',
 ];
+/** The generated project's README; the source's own `README.md` is not copied into a project. */
+export const rootReadme = 'tools/generators/templates/root/README.md.template';
 export type TemplateState = {
   version: string;
   kind: 'reference' | 'project';
@@ -261,16 +263,12 @@ export function projectFiles(
   kind: TemplateState['kind'] = 'project',
 ): Files {
   const files = infrastructureFiles(source);
-  if (files.has('README.md'))
-    files.set(
-      'README.md',
-      Buffer.from(
-        files
-          .get('README.md')!
-          .toString()
-          .replace(/^# .+\n/u, `# ${options.name}\n`),
-      ),
-    );
+  // The source's README describes the source project (a downstream project's own packages, for
+  // example); every generated project starts from the template's README blueprint instead.
+  files.set(
+    'README.md',
+    Buffer.from(expand(readFileSync(path.join(source, rootReadme), 'utf8'), options)),
+  );
   const root = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')) as {
     name: string;
     scripts: Record<string, string>;
@@ -288,9 +286,10 @@ export function projectFiles(
       root.scripts[`dev:${app}`] = `node tools/dev-environment/dev.ts ${app}`;
   }
   files.set('package.json', Buffer.from(`${JSON.stringify(root, null, 2)}\n`));
-  formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
-    (contents, filename) => files.set(filename, contents),
-  );
+  formatFiles(
+    source,
+    new Map(['package.json', 'README.md'].map((filename) => [filename, files.get(filename)!])),
+  ).forEach((contents, filename) => files.set(filename, contents));
   const state: TemplateState = {
     version: root.version as string,
     kind,

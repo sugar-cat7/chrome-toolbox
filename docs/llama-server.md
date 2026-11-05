@@ -183,7 +183,7 @@ The first command starts the agent; the second stops and unloads it. `Interactiv
 
 ## 6. Extension settings
 
-Each extension keeps its own settings in `chrome.storage.local` (key `settings`, schema `settingsSchema` in [`extension-core`](../packages/extension-core/src/settings.ts)).
+Each extension keeps its own settings in `chrome.storage.local` (key `settings`, schema `settingsSchema` in `packages/extension-core/src/settings.ts`).
 
 | Setting            | Default                  | Server side                                                                                    |
 | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------- |
