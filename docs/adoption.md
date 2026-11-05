@@ -281,6 +281,34 @@ Definitions only, stated briefly as principles after the held-out results at a7e
 - **Board** (53 lines): chatter FP A 3.8% (1/26), B 15.4% (4/26).
 - **These runs are not comparable to the earlier ones:** the relabelled lines now count as relay false positives.
 
+#### Fix round 3 (2026-11-05)
+
+Candidate C, built from two earlier versions with no new wording:
+
+- spoiler, instruction and ghosting exactly as in run A (d767908);
+- relay, privacy and sensitive exactly as at a7e3c89, where sensitive already includes R66.
+
+The values were checked against both sources before the run. The sets are the 432 lines of fix round 2. One run:
+
+| Run             | Definitions                                                                   | spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP     | Chatter, question, important FP |
+| --------------- | ----------------------------------------------------------------------------- | ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | -------------- | ------------------------------- |
+| 11 (C, shipped) | A's spoiler, instruction and ghosting; a7e3c89's relay, privacy and sensitive | 0.86 / 1.00   | 0.86 / 1.00       | 0.51 / 0.86 | 0.75 / 0.56    | 0.92 / 0.88   | 1.00 / 0.76     | 10.5% (22/209) | 9.6% (27/282)                   |
+
+- **The relabelled lines conflict with C's relay text.** a7e3c89's relay definition names "I came from X's stream" as relay. Fix round 2 relabelled those lines, and "also live with the same title", as chatter. C flags 14 of those 15 lines; A flagged 5.
+- **Without the 15 relabelled lines, C is still worse than A:**
+
+  | Run | Chatter FP   | Chatter, question, important FP |
+  | --- | ------------ | ------------------------------- |
+  | C   | 4.1% (8/194) | 4.9% (13/267)                   |
+  | A   | 2.6% (5/194) | 3.4% (9/267)                    |
+
+  A's figures here match the held-out results for A (2.5% and 3.4%).
+
+- **Sensitive recall recovers** from 0.53 (A) to 0.76, with no false positives.
+- **Ghosting changes:** precision falls from 0.90 to 0.75 (guesses and questions about a shot); its definition is the same as A's.
+- **Other chatter lines flagged:** spoilers on past events, a shout and a wish for luck as instructions, 「何切る？」, and small-talk questions as privacy (2).
+- **C ships per the controller's instruction.** The held-out comparison of A and C decides.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
