@@ -128,6 +128,10 @@ async function launchUnemulated(
       '--password-store=basic',
       '--use-mock-keychain',
       '--mute-audio',
+      // Playwright's launch adds this unless `chromiumSandbox: true` (it defaults to false), so
+      // the other fixtures run this way too. Without it, Chromium aborts with "No usable
+      // sandbox!" on Linux hosts that restrict unprivileged user namespaces (Ubuntu 23.10+).
+      '--no-sandbox',
       // The size of Playwright's default viewport.
       '--window-size=1280,720',
       ...(headless ? ['--headless'] : []),
