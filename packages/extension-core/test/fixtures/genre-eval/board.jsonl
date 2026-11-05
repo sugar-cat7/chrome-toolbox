@@ -1,0 +1,40 @@
+{"text": "何切る？", "genre": "board", "expected": "question"}
+{"text": "そこ二萬切り一択", "genre": "board", "expected": "instruction"}
+{"text": "ツモれ！", "genre": "board", "expected": "chatter"}
+{"text": "下家、萬子でテンパイしてるよ", "genre": "board", "expected": "ghosting"}
+{"text": "下家染めてそう", "genre": "board", "expected": "chatter"}
+{"text": "ぬいまるさんの麻雀配信でも同じ役出てた", "genre": "board", "expected": "relay"}
+{"text": "ロンきたー！", "genre": "board", "expected": "chatter"}
+{"text": "リーチしたほうがいい", "genre": "board", "expected": "instruction"}
+{"text": "今の局、対面の待ち三六索だったね", "genre": "board", "expected": "chatter"}
+{"text": "対面の待ち三六索だよ", "genre": "board", "expected": "ghosting"}
+{"text": "なんでそこで二萬切ったの？", "genre": "board", "expected": "question"}
+{"text": "本名でランク登録してるの？本名なに？", "genre": "board", "expected": "privacy"}
+{"text": "さっきの押し判断よかった", "genre": "board", "expected": "chatter"}
+{"text": "その牌鳴いて！", "genre": "board", "expected": "instruction"}
+{"text": "今何段？", "genre": "board", "expected": "question"}
+{"text": "上家の手牌、配信で見たけど字牌だらけ", "genre": "board", "expected": "ghosting"}
+{"text": "役満見たい", "genre": "board", "expected": "chatter"}
+{"text": "麻雀は置いといて、首相の発言どう思う？", "genre": "board", "expected": "sensitive"}
+{"text": "点数計算はやい", "genre": "board", "expected": "chatter"}
+{"text": "ぺんたさんの枠から来ました", "genre": "board", "expected": "relay"}
+{"text": "この役なんて名前？", "genre": "board", "expected": "question"}
+{"text": "ドラ切らないで、字牌から切って", "genre": "board", "expected": "instruction"}
+{"text": "神引き", "genre": "board", "expected": "chatter"}
+{"text": "同じ卓入ったw今から倒しに行く", "genre": "board", "expected": "ghosting"}
+{"text": "住んでるとこ雀荘の近く？どこ住み？", "genre": "board", "expected": "privacy"}
+{"text": "流局か〜", "genre": "board", "expected": "chatter"}
+{"text": "この宗教入ると運気上がるよ、入ろう", "genre": "board", "expected": "sensitive"}
+{"text": "親番がんばれ", "genre": "board", "expected": "chatter"}
+{"text": "discard the north wind, not the dragon", "genre": "board", "expected": "instruction"}
+{"text": "what does riichi mean?", "genre": "board", "expected": "question"}
+{"text": "that was a sick win", "genre": "board", "expected": "chatter"}
+{"text": "麻雀いつから始めたの？", "genre": "board", "expected": "question"}
+{"text": "おつかれ、いい半荘だった", "genre": "board", "expected": "chatter"}
+{"text": "牌の柄かわいい", "genre": "board", "expected": "chatter"}
+{"text": "天和見てみたい", "genre": "board", "expected": "chatter"}
+{"text": "トップおめでとう", "genre": "board", "expected": "chatter"}
+{"text": "降りるの上手い", "genre": "board", "expected": "chatter"}
+{"text": "聴牌してる？", "genre": "board", "expected": "question"}
+{"text": "ラス回避できてよかった", "genre": "board", "expected": "chatter"}
+{"text": "ドラ多いね", "genre": "board", "expected": "chatter"}

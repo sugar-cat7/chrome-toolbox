@@ -71,7 +71,7 @@ pnpm gate:pre-pr -- --base <base-sha>
 - `pnpm check` runs formatting, lint, type, documentation and dependency-boundary checks. `pnpm test` runs the tooling and package unit tests; `pnpm build` builds the packages.
 - Run one package's tests while editing: `pnpm --filter @chrome-toolbox/<name> test`. Extension E2E builds the production extension and loads it into Playwright's Chromium: install the browser once with `pnpm --filter @chrome-toolbox/<name> exec playwright install chromium`, then run `pnpm --filter @chrome-toolbox/<name> test:e2e`.
 - `pnpm gate:pre-pr -- --base <base-sha>` runs the checks for the changed packages and the packages that depend on them, before a pull request. Repository-local Git hooks check commits and pushes ([quality](docs/quality.md)).
-- Benchmarks: `pnpm bench:make-audio` synthesizes test audio with macOS `say`; `pnpm bench:translate`, `pnpm bench:asr`, `pnpm bench:clef` and `pnpm bench:slots` need a running server. Their options, data formats and results are in [adoption](docs/adoption.md).
+- Benchmarks: `pnpm bench:make-audio` synthesizes test audio with macOS `say`; `pnpm bench:translate`, `pnpm bench:asr`, `pnpm bench:clef`, `pnpm bench:slots` and `pnpm bench:genre` (the comment assistant's genre categories against self-written sets, R62) need a running server. Their options, data formats and results are in [adoption](docs/adoption.md).
 - Security scans: `pnpm security:setup`, then `pnpm security:check` ([security](docs/security.md)).
 
 Expected failures use [Result and generated error contracts](docs/errors.md) instead of exceptions. [AGENTS.md](AGENTS.md) is the workflow for contributors and coding agents.

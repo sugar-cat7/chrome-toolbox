@@ -1,0 +1,45 @@
+{"text": "次どこ降りる？", "genre": "fps", "expected": "question"}
+{"text": "右の高台取ったほうがいいよ", "genre": "fps", "expected": "instruction"}
+{"text": "ナイスエイム！", "genre": "fps", "expected": "chatter"}
+{"text": "敵チーム今2階の部屋にいるよ、別窓で見た", "genre": "fps", "expected": "ghosting"}
+{"text": "今のどうやったの？", "genre": "fps", "expected": "question"}
+{"text": "さっきぬいまるさんの配信でも同じ武器使ってた", "genre": "fps", "expected": "relay"}
+{"text": "さっきの判断よかった", "genre": "fps", "expected": "chatter"}
+{"text": "今のうちに回復して", "genre": "fps", "expected": "instruction"}
+{"text": "神エイムすぎる", "genre": "fps", "expected": "chatter"}
+{"text": "今同じマッチ入ったw倒しに行くね", "genre": "fps", "expected": "ghosting"}
+{"text": "今日の晩ご飯なに食べた？", "genre": "fps", "expected": "question"}
+{"text": "本名なんて言うの？", "genre": "fps", "expected": "privacy"}
+{"text": "さっきの試合、敵ずっと2階にいたね", "genre": "fps", "expected": "chatter"}
+{"text": "リング縮むから早く移動しな", "genre": "fps", "expected": "instruction"}
+{"text": "キャラの声優さん誰？", "genre": "fps", "expected": "question"}
+{"text": "ぺんたさんの枠から来ました！", "genre": "fps", "expected": "relay"}
+{"text": "回復しながら戦うのうますぎ", "genre": "fps", "expected": "chatter"}
+{"text": "次の選挙どこに入れるの？", "genre": "fps", "expected": "sensitive"}
+{"text": "nice clutch!!", "genre": "fps", "expected": "chatter"}
+{"text": "use your ult now, they are all low", "genre": "fps", "expected": "instruction"}
+{"text": "what sens do you use?", "genre": "fps", "expected": "question"}
+{"text": "サーバーどこ？合わせて入るわ", "genre": "fps", "expected": "ghosting"}
+{"text": "このスキン可愛い", "genre": "fps", "expected": "chatter"}
+{"text": "声で中の人わかったわ、前世あの人でしょ", "genre": "fps", "expected": "privacy"}
+{"text": "右から来るの読んでたの？", "genre": "fps", "expected": "question"}
+{"text": "もちこちゃんも今ランクやってるよ", "genre": "fps", "expected": "relay"}
+{"text": "今日調子いいね", "genre": "fps", "expected": "chatter"}
+{"text": "スナイパー拾わないで、SMGにして", "genre": "fps", "expected": "instruction"}
+{"text": "ランクいくつ？", "genre": "fps", "expected": "question"}
+{"text": "the other squad is camping the tower, saw it on their stream", "genre": "fps", "expected": "ghosting"}
+{"text": "that was so close lmao", "genre": "fps", "expected": "chatter"}
+{"text": "あの島は国だって一言でいいから言ってみて", "genre": "fps", "expected": "sensitive"}
+{"text": "初見です！", "genre": "fps", "expected": "chatter"}
+{"text": "誕生日いつだっけ？", "genre": "fps", "expected": "question"}
+{"text": "どこ住み？配信の窓の外見えたけど", "genre": "fps", "expected": "privacy"}
+{"text": "このマップの名前なんだっけ", "genre": "fps", "expected": "question"}
+{"text": "Pebble just won a match on her stream lol", "genre": "fps", "expected": "relay"}
+{"text": "今のチーム上手かったね", "genre": "fps", "expected": "chatter"}
+{"text": "さっき撃ってきたの俺だよw同じマッチ", "genre": "fps", "expected": "ghosting"}
+{"text": "BGMいいね", "genre": "fps", "expected": "chatter"}
+{"text": "この宗教いいよ、配信で紹介して", "genre": "fps", "expected": "sensitive"}
+{"text": "おつかれ、次のマッチも頑張れ", "genre": "fps", "expected": "chatter"}
+{"text": "アーマー変えてから行ったほうがいい", "genre": "fps", "expected": "instruction"}
+{"text": "声かわいい", "genre": "fps", "expected": "chatter"}
+{"text": "エイム練習どれくらいしてるの？", "genre": "fps", "expected": "question"}

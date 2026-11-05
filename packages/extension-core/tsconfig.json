@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler", "types": ["node"] },
-  "include": ["src", "testing", "vite.config.ts"],
+  "include": ["src", "testing", "test", "vite.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

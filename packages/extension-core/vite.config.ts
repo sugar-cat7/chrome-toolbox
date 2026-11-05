@@ -6,5 +6,8 @@ export default defineConfig({
     dts: true,
     deps: { neverBundle: ['@chrome-toolbox/contracts', 'zod'] },
   },
-  test: { include: ['src/**/*.test.ts', 'testing/**/*.test.ts'], passWithNoTests: false },
+  test: {
+    include: ['src/**/*.test.ts', 'testing/**/*.test.ts', 'test/**/*.test.ts'],
+    passWithNoTests: false,
+  },
 });

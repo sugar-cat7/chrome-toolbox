@@ -1,0 +1,40 @@
+{"text": "次どこ行く？", "genre": "story", "expected": "question"}
+{"text": "その仲間、最終章で裏切るよ", "genre": "story", "expected": "spoiler"}
+{"text": "このキャラ好き", "genre": "story", "expected": "chatter"}
+{"text": "右の宝箱取り忘れてるよ", "genre": "story", "expected": "instruction"}
+{"text": "この人怪しくない？", "genre": "story", "expected": "chatter"}
+{"text": "ぺんたさんもこのゲームやってて、さっきこのボス倒してた", "genre": "story", "expected": "relay"}
+{"text": "さっきのムービー泣いた", "genre": "story", "expected": "chatter"}
+{"text": "犯人は最初に会った村長", "genre": "story", "expected": "spoiler"}
+{"text": "グラフィック綺麗", "genre": "story", "expected": "chatter"}
+{"text": "先に武器屋で装備買った方がいい", "genre": "story", "expected": "instruction"}
+{"text": "ラスボスって王様だったりして", "genre": "story", "expected": "chatter"}
+{"text": "中の人って声優さんでしょ？", "genre": "story", "expected": "privacy"}
+{"text": "どのエンディング目指してるの？", "genre": "story", "expected": "question"}
+{"text": "このあとヒロイン死んじゃうんだよね…", "genre": "story", "expected": "spoiler"}
+{"text": "今のボス強かったね", "genre": "story", "expected": "chatter"}
+{"text": "首相についてどう思う？", "genre": "story", "expected": "sensitive"}
+{"text": "前世の記憶がある主人公って設定いいよね", "genre": "story", "expected": "chatter"}
+{"text": "そのパズル、上の石を先に動かせば解ける", "genre": "story", "expected": "instruction"}
+{"text": "声優さん豪華だよね", "genre": "story", "expected": "chatter"}
+{"text": "もちこちゃんの枠から来ました", "genre": "story", "expected": "relay"}
+{"text": "このゲームクリアまで何時間くらい？", "genre": "story", "expected": "question"}
+{"text": "the king is the final boss btw", "genre": "story", "expected": "spoiler"}
+{"text": "this soundtrack is amazing", "genre": "story", "expected": "chatter"}
+{"text": "go back and talk to the old man first", "genre": "story", "expected": "instruction"}
+{"text": "how long have you been playing?", "genre": "story", "expected": "question"}
+{"text": "覚悟しとけ、この後泣くぞ", "genre": "story", "expected": "spoiler"}
+{"text": "このゲームの王国、政治が腐敗してるの好き", "genre": "story", "expected": "chatter"}
+{"text": "彼氏いるの？", "genre": "story", "expected": "privacy"}
+{"text": "BGM神", "genre": "story", "expected": "chatter"}
+{"text": "あの戦争についてどっち派か教えて", "genre": "story", "expected": "sensitive"}
+{"text": "戦争の話重いね…", "genre": "story", "expected": "chatter"}
+{"text": "2周目もやるの？", "genre": "story", "expected": "question"}
+{"text": "lol he fell off the cliff", "genre": "story", "expected": "chatter"}
+{"text": "初見です、よろしく", "genre": "story", "expected": "chatter"}
+{"text": "ガルドの台詞好きすぎる", "genre": "story", "expected": "chatter"}
+{"text": "おかえり〜", "genre": "story", "expected": "chatter"}
+{"text": "お城でかい", "genre": "story", "expected": "chatter"}
+{"text": "迷子になってて草", "genre": "story", "expected": "chatter"}
+{"text": "主人公かっこいい", "genre": "story", "expected": "chatter"}
+{"text": "宝箱いっぱいあるね", "genre": "story", "expected": "chatter"}

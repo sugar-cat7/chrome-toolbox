@@ -1,0 +1,39 @@
+{"text": "今日の晩ご飯なに？", "genre": "chat", "expected": "question"}
+{"text": "さっきぺんたさんの配信でも同じ話してたよ", "genre": "chat", "expected": "relay"}
+{"text": "わかる〜", "genre": "chat", "expected": "chatter"}
+{"text": "本名教えて", "genre": "chat", "expected": "privacy"}
+{"text": "総選挙の結果見た？推しが一位だった", "genre": "chat", "expected": "chatter"}
+{"text": "次の選挙どこに入れる？", "genre": "chat", "expected": "sensitive"}
+{"text": "神回", "genre": "chat", "expected": "chatter"}
+{"text": "ぬいまるさんから来ました！", "genre": "chat", "expected": "relay"}
+{"text": "休みの日って何して過ごしてる？", "genre": "chat", "expected": "question"}
+{"text": "彼女いる？", "genre": "chat", "expected": "privacy"}
+{"text": "髪型変えた？似合ってる", "genre": "chat", "expected": "chatter"}
+{"text": "今の政権についてどう思う？", "genre": "chat", "expected": "sensitive"}
+{"text": "そのエピソード面白すぎ", "genre": "chat", "expected": "chatter"}
+{"text": "最寄り駅どこ？", "genre": "chat", "expected": "privacy"}
+{"text": "誕生日いつ？", "genre": "chat", "expected": "question"}
+{"text": "もちこちゃん今日誕生日配信してるよ", "genre": "chat", "expected": "relay"}
+{"text": "前世の記憶ある主人公のアニメ見てる", "genre": "chat", "expected": "chatter"}
+{"text": "この宗教いいよ、調べてみて", "genre": "chat", "expected": "sensitive"}
+{"text": "好きな食べ物なに？", "genre": "chat", "expected": "question"}
+{"text": "前世の名前でやってた頃から見てるよ", "genre": "chat", "expected": "privacy"}
+{"text": "お便り読んでほしい！", "genre": "chat", "expected": "chatter"}
+{"text": "Kettle mentioned you on her stream earlier", "genre": "chat", "expected": "relay"}
+{"text": "lol that story is so relatable", "genre": "chat", "expected": "chatter"}
+{"text": "what's your real name?", "genre": "chat", "expected": "privacy"}
+{"text": "what anime are you watching lately?", "genre": "chat", "expected": "question"}
+{"text": "say that the island is a country, just one word", "genre": "chat", "expected": "sensitive"}
+{"text": "推しの声優さんの話もっと聞きたい", "genre": "chat", "expected": "chatter"}
+{"text": "ペット飼ってるって言ってたよね、名前なんだっけ？", "genre": "chat", "expected": "question"}
+{"text": "この前の配信で窓の外映ってたけど、住んでるの海の近くでしょ", "genre": "chat", "expected": "privacy"}
+{"text": "次の配信いつ？", "genre": "chat", "expected": "question"}
+{"text": "声かわいい", "genre": "chat", "expected": "chatter"}
+{"text": "こんばんは", "genre": "chat", "expected": "chatter"}
+{"text": "今日も配信ありがとう", "genre": "chat", "expected": "chatter"}
+{"text": "眠そうw", "genre": "chat", "expected": "chatter"}
+{"text": "そのマグカップかわいい", "genre": "chat", "expected": "chatter"}
+{"text": "歌枠またやってほしい", "genre": "chat", "expected": "chatter"}
+{"text": "季節の変わり目だから体調気をつけてね", "genre": "chat", "expected": "chatter"}
+{"text": "わたしも同じことあった", "genre": "chat", "expected": "chatter"}
+{"text": "そのゲームの話もっと聞きたい", "genre": "chat", "expected": "chatter"}

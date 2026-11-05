@@ -1,0 +1,35 @@
+{"text": "高音きれい", "genre": "singing", "expected": "chatter"}
+{"text": "ぺんたちゃんもさっきこの曲歌ってたよ", "genre": "singing", "expected": "relay"}
+{"text": "次はアニソン歌って！", "genre": "singing", "expected": "chatter"}
+{"text": "歌い方で中の人わかった", "genre": "singing", "expected": "privacy"}
+{"text": "鳥肌立った", "genre": "singing", "expected": "chatter"}
+{"text": "何曲目？", "genre": "singing", "expected": "question"}
+{"text": "もちこさんの歌枠から来ました", "genre": "singing", "expected": "relay"}
+{"text": "この曲好き", "genre": "singing", "expected": "chatter"}
+{"text": "選挙近いし、どの政党支持してるか教えて", "genre": "singing", "expected": "sensitive"}
+{"text": "声優さんの曲だよねこれ", "genre": "singing", "expected": "chatter"}
+{"text": "カラオケどこの店行ってるの？近所？", "genre": "singing", "expected": "privacy"}
+{"text": "次の歌枠いつ？", "genre": "singing", "expected": "question"}
+{"text": "原曲より好きかも", "genre": "singing", "expected": "chatter"}
+{"text": "ふわりさんも今歌枠してるね", "genre": "singing", "expected": "relay"}
+{"text": "アンコール！", "genre": "singing", "expected": "chatter"}
+{"text": "歌詞の話じゃないけど、首相ってどう思う？", "genre": "singing", "expected": "sensitive"}
+{"text": "キー上げた？", "genre": "singing", "expected": "question"}
+{"text": "神曲すぎる", "genre": "singing", "expected": "chatter"}
+{"text": "彼氏のために歌ってるの？", "genre": "singing", "expected": "privacy"}
+{"text": "国歌みたいに壮大な曲だね", "genre": "singing", "expected": "chatter"}
+{"text": "Pebble sang this same song yesterday on her stream", "genre": "singing", "expected": "relay"}
+{"text": "your voice is so soothing", "genre": "singing", "expected": "chatter"}
+{"text": "what's the name of this song?", "genre": "singing", "expected": "question"}
+{"text": "この宗教の歌も歌って広めてよ", "genre": "singing", "expected": "sensitive"}
+{"text": "goosebumps", "genre": "singing", "expected": "chatter"}
+{"text": "泣いた", "genre": "singing", "expected": "chatter"}
+{"text": "声の調子大丈夫？", "genre": "singing", "expected": "question"}
+{"text": "サビの入り最高", "genre": "singing", "expected": "chatter"}
+{"text": "リクエスト受付してる？", "genre": "singing", "expected": "question"}
+{"text": "歌うまい", "genre": "singing", "expected": "chatter"}
+{"text": "エコーいい感じ", "genre": "singing", "expected": "chatter"}
+{"text": "拍手！", "genre": "singing", "expected": "chatter"}
+{"text": "今日喉の調子良さそう", "genre": "singing", "expected": "chatter"}
+{"text": "この曲カラオケでよく歌う", "genre": "singing", "expected": "chatter"}
+{"text": "待機してた", "genre": "singing", "expected": "chatter"}

@@ -45,6 +45,7 @@
     "bench:make-audio": "node tools/bench/make-audio.ts",
     "bench:clef": "node tools/bench/clef.ts",
     "bench:slots": "node tools/bench/slots.ts",
+    "bench:genre": "node tools/bench/genre.ts",
     "dev:web": "node tools/dev-environment/dev.ts web"
   },
   "devDependencies": {
