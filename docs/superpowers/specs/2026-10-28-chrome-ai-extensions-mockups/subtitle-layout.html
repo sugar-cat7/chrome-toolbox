@@ -1,0 +1,309 @@
+<style>
+  .yt {
+    background: #0f0f0f;
+    border-radius: 10px;
+    overflow: hidden;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+  }
+  .yt-video {
+    position: relative;
+    aspect-ratio: 16/9;
+    background: linear-gradient(135deg, #3b2a5c, #1d3b5a 60%, #0f2a33);
+  }
+  .yt-live {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: #e00;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .pill {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.65);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3ddc84;
+    display: inline-block;
+  }
+  .subs {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    text-align: center;
+  }
+  .sub-en {
+    display: inline-block;
+    background: rgba(0, 0, 0, 0.6);
+    font-size: 12px;
+    color: #ddd;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  .sub-ja {
+    display: inline-block;
+    background: rgba(0, 0, 0, 0.75);
+    font-size: 17px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  .sub-draft {
+    color: #aaa;
+    font-style: italic;
+  }
+  .yt-bar {
+    height: 6px;
+    background: #333;
+  }
+  .yt-bar i {
+    display: block;
+    height: 100%;
+    width: 72%;
+    background: #e00;
+  }
+  .yt-meta {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #ccc;
+  }
+  .panel {
+    background: #fff;
+    color: #111;
+    border-left: 1px solid #ddd;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel h4 {
+    margin: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .line {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f2f2f2;
+  }
+  .line .t {
+    color: #888;
+    font-size: 10px;
+  }
+  .line .en {
+    color: #666;
+  }
+  .line .ja {
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .line.now {
+    background: #fff7e0;
+  }
+  .row {
+    display: flex;
+    gap: 0;
+  }
+  .popup {
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    width: 260px;
+    font-size: 12px;
+    font-family: system-ui, sans-serif;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+  }
+  .popup .hd {
+    padding: 10px 12px;
+    font-weight: 700;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+  }
+  .popup .it {
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #f4f4f4;
+  }
+  .sw {
+    width: 30px;
+    height: 16px;
+    border-radius: 999px;
+    background: #3a7afe;
+    position: relative;
+  }
+  .sw:after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    top: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+  }
+  .seg {
+    display: flex;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .seg span {
+    padding: 2px 7px;
+    font-size: 11px;
+  }
+  .seg .on {
+    background: #3a7afe;
+    color: #fff;
+  }
+  .muted {
+    color: #888;
+    font-size: 11px;
+  }
+</style>
+
+<h2>字幕翻訳：再生画面での見え方</h2>
+<p class="subtitle">
+  英語圏のVTuberのライブ配信を見ている場面の例です。字幕の出し方はA/Bどちらが近いですか？（クリックで選択できます）。右下には、どちらの案でも共通で使う拡張のポップアップを載せています。
+</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>映像の上に2段の字幕（英語は小さく、日本語は大きく）</h3>
+      <p>
+        視線を動かさずに済みます。英語は音声認識が終わった時点ですぐに出て（約1秒）、日本語は文の区切りで確定します（2秒以内が目標）。
+      </p>
+      <div class="yt" style="margin-top: 8px">
+        <div class="yt-video">
+          <span class="yt-live">LIVE</span>
+          <span class="pill"><span class="dot"></span>音声認識 · 遅延 1.4s</span>
+          <div class="subs">
+            <div class="sub-en">
+              Okay chat, we're finally going into the final boss — wish me luck!
+            </div>
+            <br />
+            <div class="sub-ja">よしチャット、ついにラスボスに行くよ ― 応援してて！</div>
+          </div>
+        </div>
+        <div class="yt-bar"><i></i></div>
+        <div class="yt-meta">【ELDEN RING】Final boss tonight!! #3</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>映像には日本語だけ、英語の原文はサイドパネルの文字起こしログに</h3>
+      <p>
+        映像はすっきりします。ログはさかのぼって読めて、時刻をクリックするとその場面に戻れます（アーカイブ視聴時）。
+      </p>
+      <div class="row" style="margin-top: 8px">
+        <div class="yt" style="flex: 1.6; border-radius: 10px 0 0 10px">
+          <div class="yt-video">
+            <span class="yt-live">LIVE</span>
+            <span class="pill"><span class="dot"></span>音声認識 · 遅延 1.4s</span>
+            <div class="subs">
+              <div class="sub-ja">よしチャット、ついにラスボスに行くよ ― 応援してて！</div>
+            </div>
+          </div>
+          <div class="yt-bar"><i></i></div>
+          <div class="yt-meta">【ELDEN RING】Final boss tonight!! #3</div>
+        </div>
+        <div class="panel" style="flex: 1; border-radius: 0 10px 10px 0">
+          <h4>文字起こし <span class="muted">EN → JA</span></h4>
+          <div class="line">
+            <div class="t">1:02:11</div>
+            <div class="en">I've died like forty times to this guy.</div>
+            <div class="ja">こいつに40回くらい死んでるんだけど。</div>
+          </div>
+          <div class="line">
+            <div class="t">1:02:16</div>
+            <div class="en">But I learned the second phase, I think.</div>
+            <div class="ja">でも第2形態は覚えたと思う。</div>
+          </div>
+          <div class="line now">
+            <div class="t">1:02:21</div>
+            <div class="en">Okay chat, we're finally going into the final boss — wish me luck!</div>
+            <div class="ja">よしチャット、ついにラスボスに行くよ ― 応援してて！</div>
+          </div>
+          <div class="line">
+            <div class="t">1:02:25</div>
+            <div class="en sub-draft">here we go…</div>
+            <div class="ja muted">（翻訳中）</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="section"
+  style="display: flex; gap: 24px; align-items: flex-start; margin-top: 18px; flex-wrap: wrap"
+>
+  <div class="popup">
+    <div class="hd">字幕翻訳 <span class="sw"></span></div>
+    <div class="it">
+      表示 <span class="seg"><span>日本語</span><span class="on">併記</span><span>英語</span></span>
+    </div>
+    <div class="it">
+      字幕の取得元
+      <span class="seg"
+        ><span class="on">自動</span><span>字幕トラック</span><span>音声</span></span
+      >
+    </div>
+    <div class="it">
+      <span>用語集<br /><span class="muted">チャンネル固有の名前・ミーム</span></span
+      ><span class="muted">12件 ›</span>
+    </div>
+    <div class="it">
+      <span>接続先 llama.cpp</span
+      ><span class="muted"><span class="dot"></span> 192.0.2.20:8080</span>
+    </div>
+    <div class="it"><span>モデル</span><span class="muted">音声認識: 小型 / 翻訳: 4B</span></div>
+  </div>
+  <div style="flex: 1; min-width: 260px">
+    <h3>「軽量・高速・高精度」を両立させる仕組み（案）</h3>
+    <ul>
+      <li>
+        <b>字幕トラックが使えるとき（アーカイブなど）</b
+        >：YouTubeの英語字幕を先読みして事前に翻訳します。遅延はほぼ0秒で、音声認識もしないので最も軽くなります。
+      </li>
+      <li>
+        <b>ライブ配信や字幕がない動画</b
+        >：タブの音声を無音の箇所で短く区切り、小型の音声認識にかけます。英語をまず表示し、その後に日本語を表示します。
+      </li>
+      <li>
+        <b>精度</b
+        >：直前の数文を文脈として渡すことと、チャンネルごとの用語集（配信者の名前やミーム）で誤訳を減らします。
+      </li>
+      <li>
+        <b>2秒を超えてしまう場合の保険</b
+        >：ライブの再生を数秒だけ遅らせて、字幕と音声をそろえるモードを用意します（任意でON）。
+      </li>
+    </ul>
+  </div>
+</div>
