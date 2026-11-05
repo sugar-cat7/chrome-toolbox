@@ -228,7 +228,6 @@ const guessOf = ({ guess, guessGame, guessTitle }: GenreRecord): Partial<GenreRe
   ...(guessGame === undefined ? {} : { guessGame }),
   ...(guessTitle === undefined ? {} : { guessTitle }),
 });
-/** The viewer's choice of a record with what it was made under. */
 /**
  * The viewer's choice of a record with what it was made under; a Twitch choice made before the
  * page showed a category takes the first one it shows (`shown`).
