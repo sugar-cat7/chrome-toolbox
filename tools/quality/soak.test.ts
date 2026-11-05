@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { packageChecks } from './definitions.ts';
 import { workspacePackages, type WorkspacePackage } from './graph.ts';
@@ -67,10 +70,36 @@ describe('browser check deadlines', () => {
     expect(browserTimeout(extension(false))).toBe(180_000);
   });
 
-  it('reads the soak marker from the manifests: only the comment assistant has one', () => {
-    const marked = workspacePackages(process.cwd())
-      .filter((pkg) => pkg.soak === true)
-      .map((pkg) => pkg.name);
-    expect(marked).toEqual(['@chrome-toolbox/comment-assistant']);
+  it('reads the soak marker from the manifests: only `starter.soak: true` lengthens the deadline', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'starter-soak-marker-'));
+    try {
+      for (const [name, starter] of [
+        ['marked', { runtime: 'extension', soak: true }],
+        ['unmarked', { runtime: 'extension' }],
+        ['off', { runtime: 'extension', soak: false }],
+        ['text', { runtime: 'extension', soak: 'true' }],
+      ] as const) {
+        mkdirSync(path.join(root, 'packages', name), { recursive: true });
+        writeFileSync(
+          path.join(root, 'packages', name, 'package.json'),
+          JSON.stringify({
+            name: `@example/${name}`,
+            starter,
+            scripts: { test: 'vitest', 'test:e2e': 'playwright' },
+          }),
+        );
+      }
+      const deadlines = Object.fromEntries(
+        workspacePackages(root).map((pkg) => [pkg.name, browserTimeout(pkg)]),
+      );
+      expect(deadlines).toEqual({
+        '@example/marked': extensionBrowserTimeout(),
+        '@example/unmarked': 180_000,
+        '@example/off': 180_000,
+        '@example/text': 180_000,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
