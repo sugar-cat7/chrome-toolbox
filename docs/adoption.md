@@ -252,6 +252,35 @@ The sets now cover all 10 detectable genres (puzzle_rta, watchalong, sports_view
 - Run 6's six chatter lines flagged were the four known confusions: guesses as spoiler (3) or ghosting (1), a character as privacy, a shout as an instruction. Run 7 fixed the spoiler guesses and the character, but ghosting took two more lines about a finished match or hand and a question, relay lost recall (a streamer live elsewhere read as chat), and privacy lost recall (partner and whereabouts questions).
 - Shipped, per category, from the two runs: spoiler and instruction as in run 7; ghosting and privacy as in run 6 with one sentence each (a guess is chat unless it states hidden information as a known fact; only real people count, never characters); relay as in run 6, narrowed by R66 (a neutral mention that another streamer exists or played the same game is chat, a comparison is sensitive); sensitive widened by R66 (comparisons with an identifiable streamer, kind or not; sexual remarks or requests aimed at real people; 不謹慎 jokes or baiting about real disasters and deaths). R66 came after both runs, so this combination and the 27 lines added for R66 (14 sensitive positives of the three kinds, 13 negatives: neutral mentions of streamers, voice compliments, disaster-themed games and shows; 401 lines now) are **not measured in-repo**. Acceptance is the held-out set (R65).
 
+#### Fix round 2 (2026-11-05)
+
+Definitions only, stated briefly as principles after the held-out results at a7e3c89. Relay is a report of what another stream shows, says or did, or a push to go there or raid it (凸). Privacy is identifying real-world facts, not small talk. An instruction tells the streamer to do something. Ghosting is hidden information stated as fact from a source the streamer cannot see. A hope about an outcome is not a spoiler. The sets were relabelled to match: 15 lines about arriving from another stream, or about another streamer also playing or being live with the same title, are now chatter. 31 lines were added, with board weighted: readings of the table, wishes for luck, worries about a hand, small-talk questions, hopes about outcomes, plus relay pushes and reports, a stated hand and an instruction. 432 lines: positives spoiler 24, instruction 25, relay 21, ghosting 16, privacy 26, sensitive 38; 209 chatter lines, 282 chatter, question or important. Three runs, the limit for this round:
+
+| Run            | Definitions                                                                                                                                                     | spoiler P / R      | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP    | Chatter, question, important FP |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------- | ------------------------------- |
+| 8 (A, shipped) | every definition shortened to its principle, few or no examples                                                                                                 | 0.92 / 1.00        | 0.89 / 0.96       | 0.78 / 1.00 | 0.90 / 0.56    | 0.91 / 0.81   | 0.95 / 0.53     | 4.8% (10/209) | 5.0% (14/282)                   |
+| 9 (A again)    | the same file: a script error left A in place                                                                                                                   | identical to run 8 |                   |             |                |               |                 | 4.8% (10/209) | 5.0% (14/282)                   |
+| 10 (B)         | A's principles with the positive detail of a7e3c89 restored (examples, sniping, religion and territorial bait) and an arrival phrase quoted as chatter in relay | 0.89 / 1.00        | 0.93 / 1.00       | 0.64 / 1.00 | 0.82 / 0.88    | 0.92 / 0.85   | 0.94 / 0.87     | 8.6% (18/209) | 7.4% (21/282)                   |
+
+- **No run meets the ≤3% chatter and ordinary FP targets.** By the round's rule (FP targets first, then the highest minimum precision), A is the best run and ships exactly.
+- **What run A got wrong on the chatter and ordinary lines:**
+  - five arrival and "also live" lines read as relay;
+  - a shout and a wish for luck read as instructions;
+  - a past event and an earlier match result read as spoilers;
+  - two small-talk questions read as privacy;
+  - a question about what just happened read as ghosting;
+  - 「何切る？」 read as an instruction;
+  - a disaster-set anime read as sensitive.
+- **Cutting the positive detail cost recall:**
+  - sensitive: religion promotion was read as spam or chatter, and territorial bait and sexual or comparison lines were missed;
+  - ghosting: sniping and stated hands were missed.
+- **What run B showed:**
+  - Quoting 「○○さんの枠から来ました」 as chatter primed relay: 12 false positives.
+  - Restoring the examples brought sensitive and ghosting recall back (0.87, 0.88).
+  - It also brought back ghosting false positives on guesses.
+- **Board** (53 lines): chatter FP A 3.8% (1/26), B 15.4% (4/26).
+- **These runs are not comparable to the earlier ones:** the relabelled lines now count as relay false positives.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
