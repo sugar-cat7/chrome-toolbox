@@ -309,6 +309,19 @@ The values were checked against both sources before the run. The sets are the 43
 - **Other chatter lines flagged:** spoilers on past events, a shout and a wish for luck as instructions, 「何切る？」, and small-talk questions as privacy (2).
 - **C ships per the controller's instruction.** The held-out comparison of A and C decides.
 
+#### Choice of the shipped definitions (2026-11-05)
+
+The candidates were also run on a held-out set of 497 made-up lines. A separate agent wrote it without seeing the definitions or these sets, and it is kept outside the repo. Two fix rounds took principles from its misses, so it served as a development set. A fourth candidate, D, is run A with a7e3c89's sensitive wording. Each candidate was run once at temperature 0:
+
+| Candidate       | Held-out chatter FP | Held-out chatter, question, important FP | Held-out lowest precision | Held-out sensitive recall | In-repo chatter FP       | In-repo sensitive recall |
+| --------------- | ------------------- | ---------------------------------------- | ------------------------- | ------------------------- | ------------------------ | ------------------------ |
+| a7e3c89         | 3.4% (8/236)        | 3.1% (10/325)                            | 0.80 (ghosting)           | 0.75                      | not run on the 432 lines | –                        |
+| A               | 2.5% (6/236)        | 3.4% (11/325)                            | 0.81 (relay)              | 0.60                      | 4.8% (10/209)            | 0.53                     |
+| C               | 3.4% (8/236)        | 3.1% (10/325)                            | 0.79 (ghosting)           | 0.72                      | 10.5% (22/209)           | 0.76                     |
+| **D (shipped)** | **2.1% (5/236)**    | **2.8% (9/325)**                         | **0.80 (ghosting)**       | **0.70**                  | 5.7% (12/209)            | 0.74                     |
+
+D ships. On the held-out set it is the only candidate under 3% on both false-positive measures with every precision at 0.80 or above. On false positives it is within two lines of A on both sets, and it keeps most of the R66 sensitive recall that A lost. A final blind set, written after this choice and never used for tuning, gives the reported number.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
