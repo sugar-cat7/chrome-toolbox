@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { runSync } from '../process.ts';
+import { runSync } from '../../tools/process.ts';
+import { REPO_ROOT } from './paths.ts';
 
 /** First line of every results file: what produced the rows below it. */
 export type BenchMeta = {
@@ -38,9 +39,10 @@ async function serverProps(
   }
 }
 
+/** The commit of the bench code that produced the results, wherever the bench runs from. */
 function gitSha(): string | null {
   try {
-    return runSync('git', ['rev-parse', 'HEAD'], process.cwd());
+    return runSync('git', ['rev-parse', 'HEAD'], REPO_ROOT);
   } catch {
     return null;
   }

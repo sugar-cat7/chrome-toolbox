@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { loadAudioSamples } from './datasets.ts';
+import { fromRoot } from './paths.ts';
 
 /** Voice names from `say -v '?'` (the name is everything before the locale column). */
 export function parseVoices(listing: string): Set<string> {
@@ -19,13 +20,13 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((argument) => argument !== '--'),
     options: {
-      manifest: { type: 'string', default: 'tools/bench/fixtures/audio.jsonl' },
+      manifest: { type: 'string', default: 'packages/bench/fixtures/audio.jsonl' },
       out: { type: 'string', default: 'bench-data/audio' },
     },
   });
-  const samples = loadAudioSamples(values.manifest);
+  const samples = loadAudioSamples(fromRoot(values.manifest));
   const voices = parseVoices(execFileSync('say', ['-v', '?'], { encoding: 'utf8' }));
-  mkdirSync(values.out, { recursive: true });
+  mkdirSync(fromRoot(values.out), { recursive: true });
   const tmp = mkdtempSync(path.join(tmpdir(), 'make-audio-'));
   let written = 0;
   try {
@@ -35,7 +36,7 @@ function main(): void {
         continue;
       }
       const aiff = path.join(tmp, `${sample.id}.aiff`);
-      const wav = path.join(values.out, `${sample.id}.wav`);
+      const wav = path.join(fromRoot(values.out), `${sample.id}.wav`);
       execFileSync('say', ['-v', sample.voice, '-o', aiff, sample.transcript]);
       execFileSync('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiff, wav]);
       written += 1;

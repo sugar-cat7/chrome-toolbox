@@ -40,16 +40,9 @@
     "o11y:mcp": "node tools/o11y/mcp.ts",
     "o11y:verify": "node tools/o11y/verify.ts",
     "o11y:investigate": "node tools/o11y/investigate.ts",
-    "bench:translate": "node tools/bench/translate.ts",
-    "bench:asr": "node tools/bench/asr.ts",
-    "bench:make-audio": "node tools/bench/make-audio.ts",
-    "bench:clef": "node tools/bench/clef.ts",
-    "bench:slots": "node tools/bench/slots.ts",
-    "bench:genre": "node tools/bench/genre.ts",
     "dev:web": "node tools/dev-environment/dev.ts web"
   },
   "devDependencies": {
-    "@chrome-toolbox/extension-core": "workspace:*",
     "@types/node": "catalog:",
     "knip": "catalog:",
     "oxc-parser": "catalog:",

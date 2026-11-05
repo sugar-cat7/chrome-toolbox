@@ -6,11 +6,11 @@
 
 **Architecture:**
 
-- 拡張と同じ `extension-core` の LLM クライアントとプロンプトを使い、Node の CLI（`tools/bench/*`）から llama-server を呼ぶ。
+- 拡張と同じ `extension-core` の LLM クライアントとプロンプトを使い、Node の CLI（`packages/bench/*`、ワークスペースのパッケージ `@chrome-toolbox/bench`。当初は `tools/bench/*` に置き、2026-11-05 に移した）から llama-server を呼ぶ。
 - 結果は gitignore された `bench-data/results/` に JSONL で保存し、要約を `docs/adoption.md` に記録する。
 - プロンプトと JSON Schema は `extension-core` に置き、①②がそのまま使う。
 
-**Tech Stack:** Node 24 TypeScript (tools), Zod mini, Vitest 5 (`pnpm test:tools`), llama.cpp `llama-server`, whisper.cpp server (比較候補), macOS `say` / `afconvert`（合成音声 fixture）
+**Tech Stack:** Node 24 TypeScript (tools), Zod mini, Vitest 5 (`pnpm --filter @chrome-toolbox/bench test`), llama.cpp `llama-server`, whisper.cpp server (比較候補), macOS `say` / `afconvert`（合成音声 fixture）
 
 **Spec:** `docs/superpowers/specs/2026-10-28-chrome-ai-extensions-design.md`（§3, §4, §5, §6 対象言語, §7 Clef 代替, §9 基準機, §10 Phase 0.5）
 
@@ -221,8 +221,8 @@ it('comment prompt asks only for categories when translate is false', () => {
 
 **Files:**
 
-- Create: `tools/bench/metrics.ts`
-- Test: `tools/bench/metrics.test.ts`
+- Create: `packages/bench/metrics.ts`
+- Test: `packages/bench/metrics.test.ts`
 
 **Interfaces:**
 
@@ -255,12 +255,12 @@ it.each([
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - `errorRate` は、内部で `normalizeForScoring` を両辺に適用してから分割する。
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: PASS
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(bench): add percentile and error-rate metrics"`
@@ -269,12 +269,12 @@ it.each([
 
 **Files:**
 
-- Create: `tools/bench/datasets.ts`
-- Create: `tools/bench/translate.ts`
-- Create: `tools/bench/fixtures/text/{en,id,ko,es,zh}.jsonl`（各 5 行、自作の配信風の文）
-- Modify: `package.json`（root scripts: `"bench:translate": "node tools/bench/translate.ts"`。devDependencies に `"@chrome-toolbox/extension-core": "workspace:*"`）
+- Create: `packages/bench/datasets.ts`
+- Create: `packages/bench/translate.ts`
+- Create: `packages/bench/fixtures/text/{en,id,ko,es,zh}.jsonl`（各 5 行、自作の配信風の文）
+- Modify: `packages/bench/package.json`（scripts: `"bench:translate": "node translate.ts"`。dependencies に `"@chrome-toolbox/extension-core": "workspace:*"`）
 - Modify: `.gitignore`（`bench-data/`）
-- Test: `tools/bench/translate.test.ts`
+- Test: `packages/bench/translate.test.ts`
 
 **Interfaces:**
 
@@ -285,8 +285,8 @@ it.each([
   - `runTranslationBench(options: { client: LlamaClient; samples: TextSample[]; slot?: number; judge?: LlamaClient }): Promise<TranslationReport>`
     - `TranslationReport = { rows: TranslationRow[]; p50Ms?: number; p95Ms?: number; failures: Record<string, number>; meanScore?: number }`
     - `TranslationRow = { id; lang; kind; output?: string; ms: number; error?: string; score?: 1|2|3|4|5 }`
-  - CLI: `pnpm run bench:translate -- --server <url> [--model <id>] [--set <dir>] [--slot <n>] [--judge-server <url>] [--out <file>]`
-    - 既定値: `--set tools/bench/fixtures/text`、`--out bench-data/results/translate-<model>-<timestamp>.jsonl`
+  - CLI: `pnpm --filter @chrome-toolbox/bench bench:translate -- --server <url> [--model <id>] [--set <dir>] [--slot <n>] [--judge-server <url>] [--out <file>]`
+    - 既定値: `--set packages/bench/fixtures/text`、`--out bench-data/results/translate-<model>-<timestamp>.jsonl`
     - 最後に表形式の要約（p50、p95、失敗数、平均点）を出力する。
 
 - [ ] **Step 1: 失敗するテストを書く**（fetch は偽物を渡す）
@@ -317,7 +317,7 @@ it('asks the judge for a 1-5 score per translated row', async () => {
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - 開始時に `client.health()` を呼び、失敗なら `llama-server is not ready: <internalCode>` で throw する。
@@ -326,10 +326,10 @@ it('asks the judge for a 1-5 score per translated row', async () => {
   - `kind: 'speech'` には `subtitlePrompt`（直前の 3 文を文脈として渡す）を、`kind: 'chat'` には 1 件ずつの `commentBatchPrompt` を使う。
   - judge のプロンプトは原文と訳を渡し、`{ score: 1..5 }` を JSON Schema で返させる。
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: PASS
 - [ ] **Step 5: 実機で動作確認する**
-  - Run: `pnpm run bench:translate -- --server http://127.0.0.1:8080`（手元に llama-server がある場合）
+  - Run: `pnpm --filter @chrome-toolbox/bench bench:translate -- --server http://127.0.0.1:8080`（手元に llama-server がある場合）
   - Expected: 25 行と要約表が出る。llama-server がない場合は「not ready」で終了コード 1。
 - [ ] **Step 6: Commit**
   - `git commit -m "feat(bench): add translation latency and judge benchmark"`
@@ -338,11 +338,11 @@ it('asks the judge for a 1-5 score per translated row', async () => {
 
 **Files:**
 
-- Create: `tools/bench/asr.ts`
-- Create: `tools/bench/make-audio.ts`（macOS の `say` → `afconvert` で 16kHz mono WAV を生成する）
-- Create: `tools/bench/fixtures/audio.jsonl`（`{ id, lang, voice, transcript }`。音声ファイル自体は生成物なので、`bench-data/audio/` に出力する）
-- Modify: `package.json`（`"bench:asr": "node tools/bench/asr.ts"`、`"bench:make-audio": "node tools/bench/make-audio.ts"`）
-- Test: `tools/bench/asr.test.ts`
+- Create: `packages/bench/asr.ts`
+- Create: `packages/bench/make-audio.ts`（macOS の `say` → `afconvert` で 16kHz mono WAV を生成する）
+- Create: `packages/bench/fixtures/audio.jsonl`（`{ id, lang, voice, transcript }`。音声ファイル自体は生成物なので、`bench-data/audio/` に出力する）
+- Modify: `packages/bench/package.json`（`"bench:asr": "node asr.ts"`、`"bench:make-audio": "node make-audio.ts"`）
+- Test: `packages/bench/asr.test.ts`
 
 **Interfaces:**
 
@@ -355,7 +355,7 @@ it('asks the judge for a 1-5 score per translated row', async () => {
   - `runAsrBench(options): Promise<AsrReport>`
     - `AsrReport = { rows; byLang: Record<lang, { errorRate: number; langAccuracy: number; p50Ms?: number; p95Ms?: number }> }`
     - zh は `unit: 'char'`、ほかは `'word'`。`lang: 'mixed'` は langAccuracy の分母から外す。
-  - CLI: `pnpm run bench:asr -- --engine whisper|llama --server <url> [--model <id>] [--set bench-data/audio]`
+  - CLI: `pnpm --filter @chrome-toolbox/bench bench:asr -- --engine whisper|llama --server <url> [--model <id>] [--set bench-data/audio]`
 
 - [ ] **Step 1: 失敗するテストを書く**
   - 偽の fetch を使い、エンジンごとのリクエストの形と、byLang の集計を検証する。
@@ -387,19 +387,19 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - `make-audio.ts` は `say -v <voice> -o <tmp>.aiff <transcript>` を実行し、次に `afconvert -f WAVE -d LEI16@16000 -c 1` で変換する。
   - 声の候補は `say -v '?'` の出力から、言語ごとに 1 つ選ぶ。en: Samantha、id: Damayanti、ko: Yuna、es: Mónica、zh: Tingting。存在しない声はスキップして警告する。
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: PASS
 - [ ] **Step 5: 実機で比べる**
   - Run:
-    - `pnpm run bench:make-audio`
-    - `pnpm run bench:asr -- --engine whisper --server <whisper-url>`
-    - `pnpm run bench:asr -- --engine llama --server <llama-audio-url>`
+    - `pnpm --filter @chrome-toolbox/bench bench:make-audio`
+    - `pnpm --filter @chrome-toolbox/bench bench:asr -- --engine whisper --server <whisper-url>`
+    - `pnpm --filter @chrome-toolbox/bench bench:asr -- --engine llama --server <llama-audio-url>`
   - Expected: 5 言語の表が出る。
   - 合成音声はきれいすぎるので、実配信のクリップ（`bench-data/audio/real/`、手元のみ）でも同じコマンドを実行する。
 - [ ] **Step 6: Commit**
@@ -409,10 +409,10 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
 
 **Files:**
 
-- Create: `tools/bench/clef.ts`
-- Create: `tools/bench/fixtures/clef.jsonl`（自作のコメント 20 件と正解ラベル `{ text, toxic: boolean }`。攻撃的な例は穏当な自作の文にとどめる）
-- Modify: `package.json`（`"bench:clef": "node tools/bench/clef.ts"`）
-- Test: `tools/bench/clef.test.ts`
+- Create: `packages/bench/clef.ts`
+- Create: `packages/bench/fixtures/clef.jsonl`（自作のコメント 20 件と正解ラベル `{ text, toxic: boolean }`。攻撃的な例は穏当な自作の文にとどめる）
+- Modify: `packages/bench/package.json`（`"bench:clef": "node clef.ts"`）
+- Test: `packages/bench/clef.test.ts`
 
 **Interfaces:**
 
@@ -432,14 +432,14 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
 - [ ] **Step 1: 失敗するテストを書く**
   - 偽の fetch で、3 つのモード（`systemone`、`logprobs`、`unavailable`）がそれぞれ判定されることを、テーブル形式で検証する。
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: PASS
 - [ ] **Step 5: 実機で確認する**
-  - Run: `pnpm run bench:clef -- --server <clef-flash-url>`
+  - Run: `pnpm --filter @chrome-toolbox/bench bench:clef -- --server <clef-flash-url>`
   - Expected: `CLEF_MODE=…` と正答率が出る。`unavailable` なら、②は LLM 分類による代替方式で進める（spec §7）。
 - [ ] **Step 6: Commit**
   - `git commit -m "feat(bench): probe Clef decision API on llama.cpp"`
@@ -448,9 +448,9 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
 
 **Files:**
 
-- Create: `tools/bench/slots.ts`
-- Modify: `package.json`（`"bench:slots": "node tools/bench/slots.ts"`）
-- Test: `tools/bench/slots.test.ts`
+- Create: `packages/bench/slots.ts`
+- Modify: `packages/bench/package.json`（`"bench:slots": "node slots.ts"`）
+- Test: `packages/bench/slots.test.ts`
 
 **Interfaces:**
 
@@ -461,7 +461,7 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
     - 字幕のリクエストは slot 0 に 1.5 秒ごと、コメントのバッチ（20 件）は slot 1 に連続で送る。
     - `pinSlots: false` のときは `slot` を付けない（比較用）。
     - 各クライアントには、それぞれ `concurrency: 1` の専用キューを渡す。共有キューだと、スロット分離の効果を測れないため。
-  - CLI: `pnpm run bench:slots -- --server <url> [--seconds 60]`
+  - CLI: `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <url> [--seconds 60]`
     - 前提: サーバーは `--parallel 2` で起動していること。`/props` の `total_slots` を確認し、2 未満なら理由を表示して終了する。
 
 - [ ] **Step 1: 失敗するテストを書く**
@@ -469,14 +469,14 @@ it('scores zh by characters and excludes mixed samples from language accuracy', 
     - 字幕のリクエストに `id_slot: 0`、コメントのリクエストに `id_slot: 1` が付く。
     - `total_slots: 1` のときは throw する。
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: PASS
 - [ ] **Step 5: 実機で確認する**
-  - Run: `pnpm run bench:slots -- --server http://127.0.0.1:8080`
+  - Run: `pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:8080`
   - Expected: 字幕の遅延について、idle と loaded、pin あり・なしの表が出る。
 - [ ] **Step 6: Commit**
   - `git commit -m "feat(bench): measure subtitle latency under comment load with slot pinning"`

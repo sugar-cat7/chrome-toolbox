@@ -137,7 +137,8 @@ export function streamCategories(
 /**
  * One line of a genre evaluation set (`test/fixtures/genre-eval/<genre>.jsonl`, R62): a made-up
  * comment, the genre of its stream and the category it should get there (no relaxation, no
- * spoiler note). The shape test and `pnpm bench:genre` read the sets with it.
+ * spoiler note). The shape test and the genre bench (`bench:genre` of `@chrome-toolbox/bench`)
+ * read the sets with it.
  */
 export const genreEvalLineSchema = z.strictObject({
   text: z.string().check(z.minLength(1), z.maxLength(200)),

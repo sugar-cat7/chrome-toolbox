@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { loadClefSamples, type ClefSample } from './datasets.ts';
 import { postJson } from './http.ts';
 import { percentile } from './metrics.ts';
+import { fromRoot } from './paths.ts';
 import { benchMeta, writeResults } from './results.ts';
 
 /**
@@ -174,12 +175,12 @@ async function main(): Promise<void> {
     options: {
       server: { type: 'string' },
       model: { type: 'string' },
-      set: { type: 'string', default: 'tools/bench/fixtures/clef.jsonl' },
+      set: { type: 'string', default: 'packages/bench/fixtures/clef.jsonl' },
       out: { type: 'string' },
     },
   });
   if (values.server === undefined) throw new Error('--server <url> is required');
-  const samples = loadClefSamples(values.set);
+  const samples = loadClefSamples(fromRoot(values.set));
   const options = values.model === undefined ? {} : { model: values.model };
   const probe = await probeClef(values.server, options);
   console.log(`probe: ${probe.detail}`);
@@ -211,7 +212,7 @@ async function main(): Promise<void> {
               : null,
         },
       });
-      writeResults(out, meta, score.rows);
+      writeResults(fromRoot(out), meta, score.rows);
       for (const row of score.rows)
         console.log(
           `${row.toxic ? 'toxic' : 'ok'}\t${row.pToxic?.toFixed(3) ?? '-'}\t${row.ms.toFixed(0)}ms\t${row.error ?? row.text}`,

@@ -67,9 +67,9 @@
 - Modify: `packages/extension-core/src/llm.ts`（`props` にモデル名の引数を足す）
 - Modify: `packages/extension-core/src/settings.ts`（既定の URL と、モデル名）
 - Modify: `packages/extension-core/testing/playwright.ts`（スタブが `/props?model=` に応答する）
-- Modify: `tools/bench/slots.ts`（`--model`）
+- Modify: `packages/bench/slots.ts`（`--model`）
 - Modify: `docs/adoption.md`、`.agents/skills/extension/SKILL.md`
-- Test: `packages/extension-core/src/llm.test.ts`、`packages/extension-core/src/settings.test.ts`（新規）、`tools/bench/slots.test.ts`
+- Test: `packages/extension-core/src/llm.test.ts`、`packages/extension-core/src/settings.test.ts`（新規）、`packages/bench/slots.test.ts`
 
 **Interfaces:**
 
@@ -86,7 +86,7 @@
   - 以前の形の設定（`{ llamaBaseUrl }` だけ）を `load` すると、`models` が既定値で補われる。
   - `bench:slots` が `--model` を、字幕とコメント両方のリクエストの `model` と、`props` に渡す。
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test` と `pnpm test:tools -- tools/bench`
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test` と `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - スタブの llama サーバーは `/props` と `/props?model=` の両方に `{ total_slots: 2 }` を返す。
@@ -95,7 +95,7 @@
   - Run: 上記のテストと、3 本の拡張の `test` と `test:e2e`
   - Expected: PASS
 - [ ] **Step 5: 実機で計測して記録する**
-  - Run: `pnpm bench:slots -- --server http://127.0.0.1:18082 --model gemma4-e4b --seconds 20`
+  - Run: `pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:18082 --model gemma4-e4b --seconds 20`
     - 実行には、`docs/llama-server.md` の手順でルーターモードで起動したサーバーが必要。
   - `docs/adoption.md` の「2026-10 モデル検証」に、背景の実測値（合成データであることを明記）、slots の結果、サーバーの構成（ルーターモードの設定値、llama.cpp b11669 のソースビルド、macOS 26 でビルドされたバイナリが macOS 15 では動かないこと）、暫定の決定（R8 / R10）を記録する。
     - 実配信データでの計測と、ユーザーによる 20 文の確認は、引き続き PENDING とする。
@@ -295,7 +295,7 @@ it('store ignores duplicate ids', () => {
     - 戻り値は、各テキストの「攻撃的である確率」（0〜1）。
   - `createClefJudge(options: { baseUrl: string; fetch: Fetch; queue: Queue; maxPromptChars?: number }): ToxicityJudge`
     - `POST /v1/systemone` だけを使う（判断 R3: Phase 0.5 の probe が `logprobs` を返した場合、それは Clef ではなくテキスト LLM が答えたことを意味するので、`llmCategoryJudge` に落とす）。
-    - リクエストとレスポンスの形は、`docs/adoption.md` の「Clef sources and probe」と `tools/bench/clef.ts` に合わせる。
+    - リクエストとレスポンスの形は、`docs/adoption.md` の「Clef sources and probe」と `packages/bench/clef.ts` に合わせる。
     - 1 回のリクエストは Clef サーバーのマイクロバッチ（`-ub`）に収まる大きさに分割する（判断 R4）。既定の `maxPromptChars` は 1,500 文字。分割した結果は元の順に連結して返す。
   - `llmCategoryJudge: ToxicityJudge`（`mode: 'llm'`）
     - `judge` は常に空配列の `Ok([])` を返す。
@@ -507,7 +507,7 @@ it.each([{ windowMinutes: 5 }, { windowMinutes: 15 }])(
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
 - [ ] **Step 4: 通ることを確認する**
-  - Run: 上記と、3 本の拡張の `test:e2e`、`pnpm test:tools -- tools/bench`、`pnpm check`
+  - Run: 上記と、3 本の拡張の `test:e2e`、`pnpm --filter @chrome-toolbox/bench test`、`pnpm check`
   - Expected: PASS
 - [ ] **Step 5: 実機で確認する**
   - 記録済みのコメントを再生して、攻撃的と判定される件数と、訳文の注釈やタグの件数が減ったことを確かめる。
@@ -776,7 +776,7 @@ it('swaps only text nodes and restores the original exactly', () => {
 - サーバーの推奨設定:
   - `--parallel 3`。字幕にスロット 0、コメントにスロット 1 と 2 を使う。既存の `setServerSlots` で 2 並列になる。
   - Gemma の `ctx-size = 12288`（1 スロット 4,096 を保つ）。
-  - 字幕の遅延を `pnpm bench:slots` で測り、`docs/adoption.md` に記録する。
+  - 字幕の遅延を `pnpm --filter @chrome-toolbox/bench bench:slots` で測り、`docs/adoption.md` に記録する。
 
 - [ ] **Step 1: 失敗するテストを書く**（エモートだけのコメントがモデルにも Clef にも行かない。1 語のコメントは Clef に行かず、罵倒語の一覧に当たる語は行く。3 スロットのサーバーでバッチが 2 並列になる［既存のテストがあれば流用］）
 - [ ] **Step 2: 失敗を確認する**

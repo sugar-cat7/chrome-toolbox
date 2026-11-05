@@ -13,6 +13,7 @@ import {
 import { loadTextSamples, type TextSample } from './datasets.ts';
 import { BENCH_STREAM, GENERATION } from './generation.ts';
 import { percentile } from './metrics.ts';
+import { fromRoot } from './paths.ts';
 import { benchMeta, writeResults } from './results.ts';
 
 export type TranslationRow = {
@@ -299,7 +300,7 @@ async function main(): Promise<void> {
     options: {
       server: { type: 'string' },
       model: { type: 'string' },
-      set: { type: 'string', default: 'tools/bench/fixtures/text' },
+      set: { type: 'string', default: 'packages/bench/fixtures/text' },
       slot: { type: 'string' },
       'chat-batch': { type: 'string', default: '1' },
       'judge-server': { type: 'string' },
@@ -317,7 +318,7 @@ async function main(): Promise<void> {
   const chatBatch = parseIntegerOption(values['chat-batch'], '--chat-batch', 1);
   const report = await runTranslationBench({
     client,
-    samples: loadTextSamples(values.set),
+    samples: loadTextSamples(fromRoot(values.set)),
     chatBatch,
     ...(slot === undefined ? {} : { slot }),
     ...(values.model === undefined ? {} : { model: values.model }),
@@ -339,7 +340,7 @@ async function main(): Promise<void> {
       judgeServer: judgeServer ?? null,
     },
   });
-  writeResults(out, meta, report.rows);
+  writeResults(fromRoot(out), meta, report.rows);
   for (const row of report.rows)
     console.log(
       `${row.id}\t${row.ms.toFixed(0)}ms\t${row.score ?? '-'}\t${row.output ?? row.error ?? ''}${row.judgeError === undefined ? '' : `\t(judge: ${row.judgeError})`}`,

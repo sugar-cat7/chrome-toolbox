@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { loadAudioSamples, type AudioSample } from './datasets.ts';
 import { postJson } from './http.ts';
 import { errorRate, percentile } from './metrics.ts';
+import { fromRoot } from './paths.ts';
 import { benchMeta, writeResults } from './results.ts';
 
 export type AsrEngine = 'whisper' | 'llama';
@@ -162,7 +163,7 @@ export async function runAsrBench(options: {
   const attempted = rows.filter((row) => row.missing === undefined);
   if (rows.length > 0 && attempted.length === 0)
     throw new Error(
-      `no WAV file found for any of ${rows.length} samples (run pnpm run bench:make-audio or check --set)`,
+      `no WAV file found for any of ${rows.length} samples (run pnpm --filter @chrome-toolbox/bench bench:make-audio or check --set)`,
     );
   const ok = attempted.filter((row) => row.error === undefined);
   if (attempted.length > 0 && ok.length === 0)
@@ -212,7 +213,7 @@ async function main(): Promise<void> {
       server: { type: 'string' },
       model: { type: 'string' },
       set: { type: 'string', default: 'bench-data/audio' },
-      manifest: { type: 'string', default: 'tools/bench/fixtures/audio.jsonl' },
+      manifest: { type: 'string', default: 'packages/bench/fixtures/audio.jsonl' },
       out: { type: 'string' },
     },
   });
@@ -222,9 +223,9 @@ async function main(): Promise<void> {
   const report = await runAsrBench({
     engine: values.engine,
     server: values.server,
-    samples: loadAudioSamples(values.manifest),
+    samples: loadAudioSamples(fromRoot(values.manifest)),
     loadWav: (id) => {
-      const file = path.join(values.set, `${id}.wav`);
+      const file = path.join(fromRoot(values.set), `${id}.wav`);
       return existsSync(file) ? readFileSync(file) : undefined;
     },
     ...(values.model === undefined ? {} : { model: values.model }),
@@ -244,7 +245,7 @@ async function main(): Promise<void> {
       temperature: values.engine === 'llama' ? 0 : null,
     },
   });
-  writeResults(out, meta, report.rows);
+  writeResults(fromRoot(out), meta, report.rows);
   for (const row of report.rows)
     console.log(
       `${row.id}\t${row.ms.toFixed(0)}ms\t${row.errorRate?.toFixed(3) ?? '-'}\t${row.detectedLang ?? '-'}\t${row.missing ? 'missing wav' : (row.hypothesis ?? row.error ?? '')}`,

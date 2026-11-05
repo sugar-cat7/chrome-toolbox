@@ -201,7 +201,7 @@
     ```
 
   - `ChatMessage = Readonly<{ role: 'system' | 'user' | 'assistant'; content: string | readonly ChatContentPart[] }>`
-    - `data` は WAV の base64（`data:` URL ではない）。`tools/bench/asr.ts` が実サーバーで通した形と同じ。
+    - `data` は WAV の base64（`data:` URL ではない）。`packages/bench/asr.ts` が実サーバーで通した形と同じ。
   - `ServerProps = Readonly<{ totalSlots: number; audio: boolean | undefined }>`
     - `audio` は `modalities.audio`。サーバーが返さないときは `undefined`。
   - `chat`:
@@ -287,7 +287,7 @@ it('withoutAudio reports no audio in props and rejects input_audio with 400', as
 - Modify: `packages/extension-core/src/prompts.ts`、`src/prompts.test.ts`、`src/index.ts`
   - `subtitleOutputSchema` と `withEnglish` を削除する。
 - Modify: `packages/extension-core/testing/llama-stub.ts`（字幕の翻訳に応答する）
-- Modify: `tools/bench/translate.ts`、`tools/bench/slots.ts`、`tools/bench/generation.ts` と、それぞれのテスト（新しい形式で送り、新しい形式で読む）
+- Modify: `packages/bench/translate.ts`、`packages/bench/slots.ts`、`packages/bench/generation.ts` と、それぞれのテスト（新しい形式で送り、新しい形式で読む）
 
 **Interfaces:**
 
@@ -354,12 +354,12 @@ it('tells the model to keep glossary terms whose target equals the source', () =
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm test:tools`
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - ベンチの meta に残る生成設定が変わるので、`docs/adoption.md` の「What the reports mean」の字幕の `max_tokens` の行を直す。
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test && pnpm test:tools && pnpm check`
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test && pnpm --filter @chrome-toolbox/bench test && pnpm check`
   - Expected: PASS
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(extension-core): one-line subtitle translation sharing its prefix with speech recognition"`
@@ -370,10 +370,10 @@ it('tells the model to keep glossary terms whose target equals the source', () =
 
 - Modify: `packages/extension-core/src/prompts.ts`（`asrPrompt`、`parseAsrLine`、`asrTextLimit`、`asrMaxTokens`）、`src/index.ts`
 - Create: `packages/extension-core/src/asr.ts`、`src/asr.test.ts`
-- Modify: `tools/bench/asr.ts`、`tools/bench/asr.test.ts`
+- Modify: `packages/bench/asr.ts`、`packages/bench/asr.test.ts`
   - whisper.cpp のエンジンを削除する（R10）。
   - 拡張と同じリクエストを送る。
-- Modify: `tools/bench/datasets.ts`（音声の言語に `ja` を足す）、`tools/bench/fixtures/audio.jsonl`（自作の日本語の文 `ja-1`〜`ja-3`、声は `Kyoko`）
+- Modify: `packages/bench/datasets.ts`（音声の言語に `ja` を足す）、`packages/bench/fixtures/audio.jsonl`（自作の日本語の文 `ja-1`〜`ja-3`、声は `Kyoko`）
 - Modify: `docs/adoption.md`（「Commands the user runs」の `bench:asr` の行）
 
 **Interfaces:**
@@ -406,7 +406,7 @@ it('tells the model to keep glossary terms whose target equals the source', () =
     - 送り方: `model: model()`、`slot: 0`、`temperature: 0`、`cachePrompt: true`、`grammar`、`maxTokens: asrMaxTokens`、`templateKwargs: { enable_thinking: false }`
     - `ms` は、送ってから応答を読み終えるまで。
 - `bench:asr`:
-  - Usage: `pnpm bench:asr -- --server <url> --model <name> [--repeat <n>] [--chunk-ms <ms>] [--set <dir> --manifest <jsonl>] [--out <jsonl>]`
+  - Usage: `pnpm --filter @chrome-toolbox/bench bench:asr -- --server <url> --model <name> [--repeat <n>] [--chunk-ms <ms>] [--set <dir> --manifest <jsonl>] [--out <jsonl>]`
   - `--engine` はなくす。リクエストは `createAsrClient` と同じ（枠 0、`model`、行形式）。
   - `--repeat <n>`（既定 1）: 標本の集まりを、順番どおりに n 回流す。
   - `--chunk-ms <ms>`（既定なし）: 1 つの音声を、先頭から長さ `ms` 以下に切って順に送り、文字起こしを空白でつないで採点する。拡張の強制の区切り（1,500 ms）で精度がどれだけ落ちるかを測るためのもの。遅延は切った 1 つずつの値を記録する。
@@ -462,7 +462,7 @@ it('sends model, id_slot 0, the grammar and the wav as input_audio', async () =>
 it('returns audio_unsupported when the server has no projector', async () => {
   /* withoutAudio のスタブ */
 });
-// tools/bench/asr.test.ts
+// packages/bench/asr.test.ts
 it('scores chunked clips by joining the chunk transcripts', async () => {
   /* --chunk-ms 1500、偽のサーバー */
 });
@@ -472,15 +472,15 @@ it('counts silent rows and language accuracy with the line format', async () => 
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm test:tools`
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm test:tools && pnpm check`
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/bench test && pnpm check`
   - Expected: PASS
 - [ ] **Step 5: 実サーバーで 1 回だけ形を確かめる（コントローラー）**
   - サーバーに投影器があるときだけ行う。
-  - `pnpm bench:make-audio` → `pnpm bench:asr -- --server <url> --model gemma4-e4b`
+  - `pnpm --filter @chrome-toolbox/bench bench:make-audio` → `pnpm --filter @chrome-toolbox/bench bench:asr -- --server <url> --model gemma4-e4b`
   - 18 本すべてが行形式で読めることと、`ja` が `ja` と判別されることを確かめる。
   - 計測は Task 4 で行う。ここでは数字を記録しない。
 - [ ] **Step 6: Commit**
@@ -497,7 +497,7 @@ it('counts silent rows and language accuracy with the line format', async () => 
 
 **Files:**
 
-- Modify: `tools/bench/slots.ts`、`tools/bench/slots.test.ts`（`--audio`）
+- Modify: `packages/bench/slots.ts`、`packages/bench/slots.test.ts`（`--audio`）
 - Modify: `docs/llama-server.md`、`docs/adoption.md`
 
 **Interfaces:**
@@ -530,11 +530,11 @@ it('fails the target when ja p95 exceeds 3000 ms', async () => {
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm test:tools`
+  - Run: `pnpm --filter @chrome-toolbox/bench test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm test:tools && pnpm check`
+  - Run: `pnpm --filter @chrome-toolbox/bench test && pnpm check`
   - Expected: PASS
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(bench): measure speech recognition and translation together on the subtitle slot"`
@@ -552,12 +552,12 @@ it('fails the target when ja p95 exceeds 3000 ms', async () => {
   - プリセットを 2 つ用意する。違うのは `[gemma4-e4b]` の `mmproj` の行だけにする。
     - A: `gemma-4-E4B-it-mmproj.gguf`（BF16）
     - B: `mmproj-gemma-4-E4B-it-Q8_0.gguf`
-  - `pnpm bench:make-audio` で 18 本の合成音声を作る。`bench-data/audio/real/` に実音声があれば、それも使う。
+  - `pnpm --filter @chrome-toolbox/bench bench:make-audio` で 18 本の合成音声を作る。`bench-data/audio/real/` に実音声があれば、それも使う。
 - [ ] **Step 7: 投影器を比べる（A-B-B-A。コントローラーが行う）**
   - 各回で次を行う。
     1. そのプリセットでサーバーを起動し直す。
     2. 1 本で温める。
-    3. `pnpm bench:asr -- --server http://127.0.0.1:18090 --model gemma4-e4b --repeat 3 --out bench-data/results/asr-<A|B>-<回>.jsonl` を実行する。
+    3. `pnpm --filter @chrome-toolbox/bench bench:asr -- --server http://127.0.0.1:18090 --model gemma4-e4b --repeat 3 --out bench-data/results/asr-<A|B>-<回>.jsonl` を実行する。
     4. 同じことを `--chunk-ms 1500` でも行う。
     5. gemma4-e4b の子プロセスのメモリを記録する。待機時と計測の後の `ps -o rss=`、`footprint`、サーバーのログにある投影器のバッファの大きさ。
   - 決め方: 次をすべての言語で満たせば Q8_0 を勧める。満たさなければ BF16 を勧める。
@@ -568,7 +568,7 @@ it('fails the target when ja p95 exceeds 3000 ms', async () => {
   - 投影器は Step 7 で決めたものにする。
     - A: 採用中のプリセット（MTP n3）
     - B: A から `spec-type`、`model-draft`、`spec-draft-n-max` を除いたもの
-  - 各回: `pnpm bench:slots -- --server http://127.0.0.1:18090 --model gemma4-e4b --audio --comment-streams 2 --seconds 60`
+  - 各回: `pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:18090 --model gemma4-e4b --audio --comment-streams 2 --seconds 60`
   - 決め方:
     - A の「loaded, pinned」の行が合格すれば、MTP をそのまま使う。
     - A が不合格で B が合格なら、`spec-draft-n-max = 2` の A' を 1 組（A'-B）測る。

@@ -12,8 +12,8 @@ import {
 /**
  * The self-written evaluation sets of the genre categories (R62): one JSONL file per genre,
  * `<genre>.jsonl`, one comment per line with the category the classifier should give it in a
- * stream of that genre (no relaxations, no spoiler targets). `tools/bench/genre.ts` runs them
- * against a real server. Every line is made up: no real chat, streamer, agency or viewer name.
+ * stream of that genre (no relaxations, no spoiler targets). `packages/bench/genre.ts` runs
+ * them against a real server. Every line is made up: no real chat, streamer, agency or viewer name.
  */
 const DIRECTORY = path.join(import.meta.dirname, 'fixtures', 'genre-eval');
 /** Every genre a stream can be detected as (R62); `other` (unknown) needs no set. */

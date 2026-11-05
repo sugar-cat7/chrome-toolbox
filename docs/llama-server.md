@@ -133,7 +133,7 @@ curl -s http://127.0.0.1:18083/v1/models
 curl -s 'http://127.0.0.1:18083/props?model=gemma4-e4b'
 ```
 
-The first lists the three preset names; the second loads `gemma4-e4b` and reports `total_slots: 3`. In router mode every request needs a `model`, and `/props` without one returns the router's own information without `total_slots`. With the server running, `pnpm bench:slots -- --server http://127.0.0.1:18083 --model gemma4-e4b --comment-streams 2` measures subtitle latency while two comment streams use slots 1 and 2.
+The first lists the three preset names; the second loads `gemma4-e4b` and reports `total_slots: 3`. In router mode every request needs a `model`, and `/props` without one returns the router's own information without `total_slots`. With the server running, `pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:18083 --model gemma4-e4b --comment-streams 2` measures subtitle latency while two comment streams use slots 1 and 2.
 
 ## 5. Keep it running on macOS
 

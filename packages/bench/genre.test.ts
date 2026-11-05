@@ -11,6 +11,7 @@ import {
   type GenreRow,
   type GenreSample,
 } from './genre.ts';
+import { fromRoot } from './paths.ts';
 
 type Sent = {
   model?: string;
@@ -59,7 +60,7 @@ describe('loadGenreSamples', () => {
   };
 
   it('reads every set of the repository', () => {
-    const samples = loadGenreSamples(GENRE_EVAL_DIR);
+    const samples = loadGenreSamples(fromRoot(GENRE_EVAL_DIR));
     expect(samples.length).toBeGreaterThanOrEqual(300);
     // At least these genres; a set added later must not break the bench.
     const genres = new Set(samples.map((s) => s.genre));

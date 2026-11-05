@@ -21,11 +21,12 @@ import {
   type StreamGenre,
 } from '@chrome-toolbox/extension-core';
 import { GENERATION } from './generation.ts';
+import { fromRoot } from './paths.ts';
 import { benchMeta, writeResults } from './results.ts';
 
 /**
  * The self-written evaluation sets of the genre categories (R62), one `<genre>.jsonl` per
- * genre. Every line is made up.
+ * genre, from the repository root. Every line is made up.
  */
 export const GENRE_EVAL_DIR = 'packages/extension-core/test/fixtures/genre-eval';
 /** Comments per request, as the comment extension batches them (spec §7). */
@@ -274,7 +275,7 @@ async function main(): Promise<void> {
   const client = createLlamaClient({ baseUrl: values.server, fetch, timeoutMs: 120_000 });
   const report = await runGenreBench({
     client,
-    samples: loadGenreSamples(values.set),
+    samples: loadGenreSamples(fromRoot(values.set)),
     ...(values.model === undefined ? {} : { model: values.model }),
     ...(slot === undefined ? {} : { slot }),
   });
@@ -287,7 +288,7 @@ async function main(): Promise<void> {
     model: values.model,
     settings: { ...GENERATION, batch: BATCH, slot: slot ?? null, set: values.set },
   });
-  writeResults(out, meta, report.rows);
+  writeResults(fromRoot(out), meta, report.rows);
   console.log(genreSummary(report));
   console.log(`wrote ${out}`);
 }
