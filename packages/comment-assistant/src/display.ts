@@ -11,11 +11,17 @@ const LABELS: Readonly<Record<CommentCategory, string>> = {
   question: '質問',
   important: '重要情報',
   chatter: '雑談',
+  instruction: '指示',
+  relay: '他配信の話題',
+  ghosting: 'ゴースティング',
+  privacy: 'プライバシー',
+  sensitive: 'センシティブ',
 };
 /**
  * Each category's colour, and the opaque ink of the label on its bar: black or white, whichever
- * keeps WCAG contrast of at least 4.5:1 with the colour (5.2:1 or more). Both are fixed, so a
- * light or dark page changes neither.
+ * keeps WCAG contrast of at least 4.5:1 with the colour (5.0:1 or more). Both are fixed, so a
+ * light or dark page changes neither. The colours differ in hue, so a concealed bar says which
+ * category it is (the genre categories, R62: teal, pink, indigo, brown and yellow).
  */
 const PALETTE: Readonly<Record<CommentCategory, Readonly<{ color: string; ink: string }>>> = {
   abusive: { color: '#e5484d', ink: '#000000' },
@@ -24,6 +30,11 @@ const PALETTE: Readonly<Record<CommentCategory, Readonly<{ color: string; ink: s
   question: { color: '#0090ff', ink: '#000000' },
   important: { color: '#f5a524', ink: '#000000' },
   chatter: { color: '#46a758', ink: '#000000' },
+  instruction: { color: '#12a594', ink: '#000000' },
+  relay: { color: '#d6409f', ink: '#000000' },
+  ghosting: { color: '#3e63dd', ink: '#ffffff' },
+  privacy: { color: '#ad7f58', ink: '#000000' },
+  sensitive: { color: '#ffe629', ink: '#000000' },
 };
 const TRANSLATED = 'data-ca-translated';
 const REVEALED = 'data-ca-revealed';

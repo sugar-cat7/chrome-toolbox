@@ -1,4 +1,11 @@
-import { createLruCache } from '@chrome-toolbox/extension-core';
+import {
+  createLruCache,
+  RELAXABLE_CATEGORIES,
+  streamCategories,
+  type RelaxableCategory,
+  type StreamCategory,
+  type StreamGenre,
+} from '@chrome-toolbox/extension-core';
 import type { Site } from './sites/types.ts';
 
 /** Streams the service worker remembers, the most recent first. */
@@ -17,7 +24,8 @@ export const COMMENTS_SUFFIX = '#comments';
 export type StreamInfo = Readonly<{ streamer?: string | undefined; title?: string | undefined }>;
 /**
  * One stream: its site, its partition (`<videoId>` on YouTube, the channel login on Twitch),
- * the streamer and title a page reported, and the stream's spoiler note from the side panel.
+ * the streamer and title a page reported, the stream's spoiler note from the side panel, and
+ * what kind of stream it is with the stream categories its own rules turn off (R62).
  */
 export type StreamContext = Readonly<{
   site: Site;
@@ -25,6 +33,18 @@ export type StreamContext = Readonly<{
   streamer?: string | undefined;
   title?: string | undefined;
   spoilerNote?: string | undefined;
+  /** The stream's genre as given (`classify`); `other` while absent. Task G2 detects it. */
+  genre?: StreamGenre | undefined;
+  /**
+   * The stream categories the stream's own rules turn off, as given with the genre (`classify`);
+   * the title's own words turn them off too (`streamCategoriesOf`). Absent when none were given.
+   */
+  relaxations?: readonly RelaxableCategory[] | undefined;
+}>;
+/** What kind of stream it is and what its own rules relax (R62), as `classify` takes it. */
+export type StreamGenreInfo = Readonly<{
+  genre: StreamGenre;
+  relaxations: readonly RelaxableCategory[];
 }>;
 
 /** The stream a store partition belongs to: the part before `#` (`<videoId>#comments` → `<videoId>`). */
@@ -54,6 +74,41 @@ export function contextText(context: StreamContext): string {
   ].join('\n');
 }
 
+/**
+ * Words of a stream's own rules (title, or the description's rules once read, Task G2) that turn
+ * a stream category off (R62), after NFKC (full-width `ＯＫ`, `２`) and in lower case:
+ * - instruction: 参加型 (not `参加型じゃない`), アドバイス歓迎/OK, 指示OK/歓迎, "backseat me",
+ *   "backseating welcome/allowed/ok";
+ * - spoiler: ネタバレあり/有り/OK/歓迎/解禁 (not `ネタバレありません`), 2周目 (or 二周目), "spoilers
+ *   ok/allowed/welcome".
+ * Bans and warnings (ネタバレ禁止, ネタバレ注意, 指示NG, NoBackseating) and a game named after
+ * spoilers (`ネタバレが激しすぎるRPG`) relax nothing.
+ */
+const RELAXATION_WORDS: Readonly<Record<RelaxableCategory, RegExp>> = {
+  instruction:
+    /参加型(?!じゃ|では)|アドバイス(?:大?歓迎|ok)|指示(?:ok|大?歓迎)|backseat me|backseat(?:ing)? (?:is )?(?:welcome|allowed|ok)/u,
+  spoiler:
+    /ネタバレ(?:あり(?!ません)|有り?|ok|大?歓迎|解禁)|[2二]周目|spoilers? (?:are )?(?:ok|allowed|welcome)/u,
+};
+/** The stream categories a text of the stream's own rules turns off (R62), in order. */
+export const relaxationsIn = (text: string): RelaxableCategory[] => {
+  const normalized = text.normalize('NFKC').toLowerCase();
+  return RELAXABLE_CATEGORIES.filter((category) => RELAXATION_WORDS[category].test(normalized));
+};
+/**
+ * The stream categories a stream has on (R62): its genre (`other` while unknown), the
+ * relaxations given for it and the ones its title names (`relaxationsIn`), and whether the
+ * viewer wrote spoiler targets for it.
+ */
+export function streamCategoriesOf(context: StreamContext): StreamCategory[] {
+  const named = relaxationsIn(context.title ?? '');
+  return streamCategories({
+    genre: context.genre ?? 'other',
+    relaxations: [...(context.relaxations ?? []), ...named],
+    spoilerTargets: context.spoilerNote !== undefined,
+  });
+}
+
 /** A short key for a context text (32-bit FNV-1a, 8 hex digits); the text cache keys by it. */
 export function contextHash(text: string): string {
   let hash = 0x811c9dc5;
@@ -76,6 +131,17 @@ export type StreamContexts = {
     info: StreamInfo,
   ): { context: StreamContext; changed: boolean };
   /**
+   * Sets what kind of stream `partition` belongs to and what its own rules relax (R62); returns
+   * the stream's context and whether the genre or the relaxations changed. Task G2 detects them;
+   * until it is called a stream is `other`, relaxed only by its title (`streamCategoriesOf`).
+   */
+  classify(
+    this: void,
+    site: Site,
+    partition: string,
+    info: StreamGenreInfo,
+  ): { context: StreamContext; changed: boolean };
+  /**
    * The context of the stream `partition` belongs to, with the stream's spoiler note when one is
    * known. An unknown stream gets one with neither streamer nor title, which is not kept.
    */
@@ -87,7 +153,12 @@ export type StreamContexts = {
   clear(this: void): void;
 };
 
-type Known = { streamer?: string; title?: string };
+type Known = {
+  streamer?: string;
+  title?: string;
+  genre?: StreamGenre;
+  relaxations?: readonly RelaxableCategory[];
+};
 
 /**
  * The streams pages reported (the newest `MAX_STREAMS`) and the viewer's spoiler notes, which
@@ -99,7 +170,13 @@ export function createStreamContexts(): StreamContexts {
   let notes: ReadonlyMap<string, string> | undefined;
   const keyOf = (site: Site, name: string): string => `${site}:${name}`;
   function contextOf(site: Site, stream: string, known: Known | undefined): StreamContext {
-    const base: StreamContext = { site, partition: stream, ...known };
+    const { relaxations = [], ...rest } = known ?? {};
+    const base: StreamContext = {
+      site,
+      partition: stream,
+      ...rest,
+      ...(relaxations.length === 0 ? {} : { relaxations }),
+    };
     const note = notes?.get(keyOf(site, stream));
     return note ? { ...base, spoilerNote: note } : base;
   }
@@ -116,6 +193,19 @@ export function createStreamContexts(): StreamContexts {
       streams.set(key, after);
       const changed =
         before === undefined || before.streamer !== after.streamer || before.title !== after.title;
+      return { context: contextOf(site, stream, after), changed };
+    },
+    classify(site, partition, info) {
+      const stream = streamOf(partition);
+      const key = keyOf(site, stream);
+      const before = streams.get(key);
+      const relaxations = RELAXABLE_CATEGORIES.filter((category) =>
+        info.relaxations.includes(category),
+      );
+      const after: Known = { ...before, genre: info.genre, relaxations };
+      streams.set(key, after);
+      const changed =
+        before?.genre !== after.genre || (before?.relaxations ?? []).join() !== relaxations.join();
       return { context: contextOf(site, stream, after), changed };
     },
     get(site, partition) {

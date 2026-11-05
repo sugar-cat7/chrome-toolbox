@@ -18,6 +18,7 @@ import {
   createLanguageMix,
   createLruCache,
   isAbusive,
+  isStreamCategory,
   llmCategoryJudge,
   needsTranslation,
   parseCommentBatch,
@@ -33,6 +34,8 @@ import {
   type LanguageMix,
   type LlamaClient,
   type LruCache,
+  type StreamCategory,
+  type StreamGenre,
   type Timers,
   type ToxicityJudge,
 } from '@chrome-toolbox/extension-core';
@@ -67,7 +70,13 @@ import type {
   VerdictSource,
 } from './protocol.ts';
 import { SUMMARY_WINDOWS } from './protocol.ts';
-import { contextHash, contextText, ownerOf, type StreamContext } from './stream-context.ts';
+import {
+  contextHash,
+  contextText,
+  ownerOf,
+  streamCategoriesOf,
+  type StreamContext,
+} from './stream-context.ts';
 import { summarize } from './summary.ts';
 
 /** A tab frame whose content script sent the comments; annotations go back to it. */
@@ -300,9 +309,10 @@ function categoryOf(
 }
 /**
  * The category of a post by the streamer, a moderator or a verified account (R38): never
- * abusive, spam or spoiler. A spam verdict of the model or a link makes it important (the
- * streamer's own "now playing" post), copypasta without a link chatter (R53), an abusive or
- * spoiler verdict chatter; anything else is the model's.
+ * abusive, spam or a stream category (spoiler and the genre categories, R62). A spam verdict of
+ * the model or a link makes it important (the streamer's own "now playing" post), copypasta
+ * without a link chatter (R53), an abusive verdict or a stream category chatter; anything else
+ * is the model's.
  */
 function trustedCategory(
   llm: CommentCategory | undefined,
@@ -312,7 +322,7 @@ function trustedCategory(
   if (hasLink(text)) return 'important';
   if (copypasta) return 'chatter';
   if (llm === 'spam') return 'important';
-  return llm === 'abusive' || llm === 'spoiler' ? 'chatter' : llm;
+  return llm === 'abusive' || (llm !== undefined && isStreamCategory(llm)) ? 'chatter' : llm;
 }
 
 type Channel = {
@@ -418,15 +428,17 @@ type MadeSummary = Readonly<{ mark: Mark; summary: Summary }>;
 
 /**
  * What a channel's stream context gives its comments: the owner its feedback is kept under
- * (the streamer, else the stream), the prompt text (title, spoiler targets), the owner's latest
- * corrections for the prompt and the prefix of its text cache keys (site, owner and a hash of
- * the text and the corrections: the same comment may be classified differently for another
- * streamer or context, or once the streamer's corrections changed, R53).
+ * (the streamer, else the stream), the prompt text (title, spoiler targets), the stream's genre
+ * and the stream categories it has on (R62), the owner's latest corrections for the prompt and
+ * the prefix of its text cache keys (site, owner and a hash of the text, the genre, the
+ * categories and the corrections: the same comment may be classified differently for another
+ * streamer, context or genre, or once the streamer's corrections changed, R53).
  */
 type Scope = Readonly<{
   owner: string;
   text: string;
-  spoilers: boolean;
+  genre: StreamGenre;
+  categories: readonly StreamCategory[];
   corrections: readonly CommentCorrection[];
   prefix: string;
 }>;
@@ -465,9 +477,10 @@ export function createCommentPipeline(deps: {
   judge: ToxicityJudge;
   detector: LanguageDetector;
   /**
-   * The stream context of a channel: its streamer (the key of its feedback) and the title and
-   * spoiler targets its batch prompts carry. Asked whenever a comment is judged, so a context
-   * that arrives later applies from then on.
+   * The stream context of a channel: its streamer (the key of its feedback), the title and
+   * spoiler targets its batch prompts carry, and its genre and relaxations, which decide its
+   * stream categories (R62). Asked whenever a comment is judged, so a context that arrives later
+   * applies from then on.
    */
   context: (site: Site, channel: string) => StreamContext;
   /**
@@ -645,14 +658,17 @@ export function createCommentPipeline(deps: {
     const context = deps.context(channel.site, channel.channel);
     const owner = ownerOf(context);
     const text = contextText(context);
+    const genre = context.genre ?? 'other';
+    const categories = streamCategoriesOf(context);
     const corrections = feedback.corrections(channel.site, owner);
     const learned = corrections.map((item) => `${item.category}\u0001${item.text}`);
-    const keyed = [text, ...learned].join('\u0000');
+    const keyed = [text, `${genre}\u0001${categories.join(',')}`, ...learned].join('\u0000');
     if (hashed?.text !== keyed) hashed = { text: keyed, hash: contextHash(keyed) };
     return {
       owner,
       text,
-      spoilers: context.spoilerNote !== undefined,
+      genre,
+      categories,
       corrections,
       prefix: `${channel.site}\u0000${owner}\u0000${hashed.hash}\u0000`,
     };
@@ -701,11 +717,13 @@ export function createCommentPipeline(deps: {
    * The category a comment shows with: Clef decides abuse at the streamer's threshold, and a
    * text the viewer marked fine for the streamer is chatter whatever the model, Clef or the text
    * cache said. Copypasta is spam by rule instead of the model's category, unless Clef found it
-   * abusive (R53). A question verdict on a Latin comment without a question mark or question
-   * word, or on one interjection (`WHAT??`), is chatter (R38, R60), and a post by the streamer, a
-   * moderator or a verified account follows `trustedCategory` instead of Clef and the feedback.
-   * Anyone else's spam verdict of the model stands only on a comment with a link (R60): without
-   * one the model mostly took a complaint about ads or advice for spam.
+   * abusive (R53). A stream category the stream does not have on is chatter (R31, R62: a
+   * spoiler in a chatting stream without spoiler targets, an instruction in a 参加型 stream). A
+   * question verdict on a Latin comment without a question mark or question word, or on one
+   * interjection (`WHAT??`), is chatter (R38, R60), and a post by the streamer, a moderator or a
+   * verified account follows `trustedCategory` instead of Clef and the feedback. Anyone else's
+   * spam verdict of the model stands only on a comment with a link (R60): without one the model
+   * mostly took a complaint about ads or advice for spam.
    */
   function decide(
     entry: Entry,
@@ -713,15 +731,17 @@ export function createCommentPipeline(deps: {
     abusive: number | undefined,
   ): { category: CommentCategory | undefined; source: VerdictSource | undefined } {
     const { site } = entry.channel;
-    const { owner, spoilers } = scopeOf(entry.channel);
+    const { owner, categories } = scopeOf(entry.channel);
     const rule = entry.copypasta;
-    // Without spoiler targets nothing can be a spoiler: the model's guess (a tier list) is chat (R31).
-    const spoiled = llm === 'spoiler' && !spoilers ? 'chatter' : llm;
+    // The grammar allows only the stream's own categories; another one (from a server that
+    // ignored the grammar) is chat (R31, R62).
+    const allowed =
+      llm !== undefined && isStreamCategory(llm) && !categories.includes(llm) ? 'chatter' : llm;
     const asked = rule
       ? 'spam'
-      : spoiled === 'question' && !mayBeQuestion(entry.comment.text)
+      : allowed === 'question' && !mayBeQuestion(entry.comment.text)
         ? 'chatter'
-        : spoiled;
+        : allowed;
     if (entry.comment.role !== undefined) {
       const trusted = trustedCategory(asked, entry.comment.text, rule);
       if (trusted === undefined) return { category: trusted, source: undefined };
@@ -1227,7 +1247,8 @@ export function createCommentPipeline(deps: {
             ...commentBatchPrompt({
               comments,
               context: scope.text,
-              spoilers: scope.spoilers,
+              genre: scope.genre,
+              categories: scope.categories,
               corrections: scope.corrections,
             }),
             model: deps.model,

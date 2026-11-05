@@ -4,6 +4,7 @@ import {
   ABUSIVE_THRESHOLD,
   commentCategorySchema,
   commentRecordSchema,
+  STREAM_CATEGORIES,
   type CommentCategory,
   type CommentCorrection,
   type StorageArea,
@@ -34,11 +35,14 @@ export const feedbackLimits = {
   translation: 1000,
 } as const;
 
-/** Categories the chat hides or blurs by default; the pipeline keeps these comments for review. */
-export const HIDDEN_CATEGORIES: ReadonlySet<CommentCategory> = new Set([
+/**
+ * Categories the chat removes or conceals by default (R54, R62): abusive, spam and every stream
+ * category (spoiler and the genre categories). The pipeline keeps these comments for review.
+ */
+export const HIDDEN_CATEGORIES: ReadonlySet<CommentCategory> = new Set<CommentCategory>([
   'abusive',
   'spam',
-  'spoiler',
+  ...STREAM_CATEGORIES,
 ]);
 
 /**

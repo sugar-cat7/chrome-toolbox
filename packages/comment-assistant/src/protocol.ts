@@ -75,8 +75,9 @@ export const annotationsMessageSchema = z.strictObject({
 export const feedbackVerdictSchema = z.enum(['ok', 'correct']);
 export type FeedbackVerdict = z.infer<typeof feedbackVerdictSchema>;
 /**
- * A comment the pipeline hid, blurred or flagged (abusive, spam or spoiler), kept in memory so
- * the viewer can review it: the newest 200 per channel. `at` is the comment's own time.
+ * A comment the pipeline hid, blurred or flagged (abusive, spam, spoiler or a genre category:
+ * instruction, relay, ghosting, privacy, sensitive, R62), kept in memory so the viewer can
+ * review it: the newest 200 per channel. `at` is the comment's own time.
  */
 export const hiddenEntrySchema = z.strictObject({
   id: z.string(),

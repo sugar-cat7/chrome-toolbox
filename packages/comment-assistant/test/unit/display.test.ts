@@ -62,6 +62,12 @@ describe('applyAnnotations', () => {
     { category: 'question', mode: 'highlight', label: '質問' },
     { category: 'important', mode: 'highlight', label: '重要情報' },
     { category: 'chatter', mode: 'show', label: '雑談' },
+    // R62: the genre categories, removed by default and labelled in Japanese.
+    { category: 'instruction', mode: 'hide', label: '指示' },
+    { category: 'relay', mode: 'hide', label: '他配信の話題' },
+    { category: 'ghosting', mode: 'hide', label: 'ゴースティング' },
+    { category: 'privacy', mode: 'hide', label: 'プライバシー' },
+    { category: 'sensitive', mode: 'hide', label: 'センシティブ' },
   ] as const)('applies $mode to $category by default', ({ category, mode, label }) => {
     const doc = load('youtube-live-chat');
     const root = rootOf(youtubeLiveChat, doc);
@@ -517,7 +523,20 @@ describe('display cost (R45)', () => {
       const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
       return ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
     };
-    const categories = ['abusive', 'spam', 'spoiler', 'question', 'important', 'chatter'];
+    const categories = [
+      'abusive',
+      'spam',
+      'spoiler',
+      'question',
+      'important',
+      'chatter',
+      // R62: the genre categories.
+      'instruction',
+      'relay',
+      'ghosting',
+      'privacy',
+      'sensitive',
+    ];
     const inks = categories.map((category) => {
       const rule = rules.find((line) => line.startsWith(`[data-ca-category="${category}"]{`));
       const color = /--ca-color:(#[\da-f]{6})/u.exec(rule ?? '')?.[1];
@@ -532,7 +551,19 @@ describe('display cost (R45)', () => {
           !hex.test(color ?? '') || !hex.test(ink ?? '') || contrast(color ?? '', ink ?? '') < 4.5,
       ),
     ).toEqual([]);
-    expect(inks).toHaveLength(6);
+    expect(inks).toHaveLength(11);
+    // Each category its own colour, far enough from every other to tell them apart (at least 60
+    // in RGB distance), so a concealed bar says which category it is.
+    const rgb = (hex: string): number[] =>
+      [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+    const close = inks.flatMap((a, i) =>
+      inks.slice(i + 1).flatMap((b) => {
+        const [ra, rb] = [rgb(a.color ?? ''), rgb(b.color ?? '')];
+        const distance = Math.hypot(...ra.map((value, k) => value - (rb[k] ?? 0)));
+        return distance < 60 ? [`${a.category}/${b.category}`] : [];
+      }),
+    );
+    expect(close).toEqual([]);
     // The label shows that ink as it is: no opacity of its own.
     const label = rules.find((rule) =>
       rule.startsWith('[data-ca-conceal="blur"]:not([data-ca-revealed])::before'),

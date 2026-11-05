@@ -282,6 +282,15 @@ describe('feedback store', () => {
         at: START + 1,
       }),
     );
+    // A genre category is saved and exported like any other (R62).
+    await store.record(
+      input({
+        text: 'came from another stream',
+        category: 'relay',
+        abusive: undefined,
+        at: START + 2,
+      }),
+    );
     const lines = store.export().trim().split('\n');
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
       {
@@ -293,6 +302,7 @@ describe('feedback store', () => {
         at: START,
       },
       { text: 'spam link', category: 'spam', source: 'rule', verdict: 'correct', at: START + 1 },
+      { text: 'came from another stream', category: 'relay', verdict: 'ok', at: START + 2 },
     ]);
     expect(store.export()).not.toContain('Someone');
     expect(store.export()).not.toContain('UC-a');

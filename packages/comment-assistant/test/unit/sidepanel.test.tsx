@@ -553,6 +553,41 @@ describe('side panel', () => {
     expect(list.textContent).not.toContain('fixture text h1');
   });
 
+  it.each([
+    { category: 'instruction', reason: '指示' },
+    { category: 'relay', reason: '他配信の話題' },
+    { category: 'ghosting', reason: 'ゴースティング' },
+    { category: 'privacy', reason: 'プライバシー' },
+    { category: 'sensitive', reason: 'センシティブ' },
+  ] as const)(
+    'gives a hidden $category comment the reason $reason (R62)',
+    async ({ category, reason }) => {
+      const entry = hiddenEntry('g1', AT, { category });
+      const { api } = fakeApi({
+        'comments/hidden': ({ channel }) => Ok(channel === 'fixture0001' ? [entry] : []),
+      });
+      render(<App port={panelPort(api)} />);
+      await screen.findByText('Fixture Quest Part 3');
+      const panel = await openTab('非表示');
+      const list = await within(panel).findByRole('list', { name: 'チャットから外したコメント' });
+      const [row] = await within(list).findAllByRole('listitem');
+      expect(row?.querySelector('p.text-xs span')?.textContent).toBe(reason);
+    },
+  );
+
+  it('offers the genre categories in the filters, removed by default (R62)', async () => {
+    const { api } = fakeApi();
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    for (const label of ['指示', '他配信の話題', 'ゴースティング', 'プライバシー', 'センシティブ'])
+      expect(
+        within(await within(panel).findByLabelText(label)).getByRole('option', {
+          name: '既定（消す）',
+        }),
+      ).toBeTruthy();
+  });
+
   it('marks a comment confirmed as correct and says when a verdict is saved later', async () => {
     const { api, of } = fakeApi({
       'comments/feedback': () => Ok({ persisted: false }),

@@ -132,7 +132,7 @@ describe('chat summary', () => {
     ]);
   });
 
-  it('gives the model neither hidden (abusive, spam, spoiler) nor unanswered (pending, failed) comments', () => {
+  it('gives the model neither hidden (abusive, spam, spoiler, genre categories) nor unanswered (pending, failed) comments', () => {
     const records = [
       record('kept done', 1),
       record('kept skipped', 1, { state: 'skipped', translation: undefined, category: undefined }),
@@ -140,6 +140,12 @@ describe('chat summary', () => {
       record('rude', 1, { category: 'abusive', abusive: 0.9 }),
       record('buy coins', 1, { category: 'spam' }),
       record('the boss dies', 1, { category: 'spoiler' }),
+      // The genre categories are taken out of the chat too (R62).
+      record('heal now', 1, { category: 'instruction' }),
+      record('she said it on her stream', 1, { category: 'relay' }),
+      record('they are in the tower', 1, { category: 'ghosting' }),
+      record('real name please', 1, { category: 'privacy' }),
+      record('vote for my party', 1, { category: 'sensitive' }),
       record('waiting', 1, { state: 'pending', translation: undefined, category: undefined }),
       record('broken', 1, { state: 'failed', translation: undefined, category: undefined }),
       record('🔥🔥', 1, { lang: 'und', state: 'skipped', translation: undefined }),
@@ -148,7 +154,19 @@ describe('chat summary', () => {
     // Translations stand for translated comments; a Japanese or untranslated one is as written.
     for (const kept of ['訳:kept done', 'kept skipped', '日本語のまま'])
       expect(text).toContain(kept);
-    for (const left of ['rude', 'coins', 'boss', 'waiting', 'broken', '🔥'])
+    for (const left of [
+      'rude',
+      'coins',
+      'boss',
+      'heal',
+      'her stream',
+      'tower',
+      'real name',
+      'party',
+      'waiting',
+      'broken',
+      '🔥',
+    ])
       expect(text).not.toContain(left);
   });
 

@@ -10,6 +10,12 @@ export const CATEGORY_LABELS: Readonly<Record<CommentCategory, string>> = {
   abusive: '攻撃的（Clef）',
   spam: 'スパム・宣伝',
   spoiler: 'ネタバレ',
+  // The genre categories (R62).
+  instruction: '指示',
+  relay: '他配信の話題',
+  ghosting: 'ゴースティング',
+  privacy: 'プライバシー',
+  sensitive: 'センシティブ',
   chatter: '雑談',
 };
 /** Why a comment was hidden, in the hidden-comment list. */
@@ -20,6 +26,11 @@ export const REASON_LABELS: Readonly<Record<CommentCategory, string>> = {
   abusive: '攻撃的',
   spam: 'スパム',
   spoiler: 'ネタバレ',
+  instruction: '指示',
+  relay: '他配信の話題',
+  ghosting: 'ゴースティング',
+  privacy: 'プライバシー',
+  sensitive: 'センシティブ',
 };
 export const MODE_LABELS: Readonly<Record<FilterMode, string>> = {
   show: '表示',

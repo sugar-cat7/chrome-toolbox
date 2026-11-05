@@ -53,8 +53,9 @@ const textOf = (record: CommentRecord): string => record.translation ?? record.t
 /** Emoji and marks alone say nothing a summary could use. */
 const hasText = (text: string): boolean => /[\p{L}\p{N}]/u.test(text);
 /**
- * A comment the chat shows: answered (not pending or failed) and not abusive, spam or spoiler,
- * or stored while its chat was not in front (R44), which has no category and reads as chat.
+ * A comment the chat shows: answered (not pending or failed) and not abusive, spam, spoiler or a
+ * genre category (`HIDDEN_CATEGORIES`, R62), or stored while its chat was not in front (R44),
+ * which has no category and reads as chat.
  */
 const usable = (record: CommentRecord): boolean =>
   (record.state === 'done' || record.state === 'skipped' || record.state === 'stored') &&
@@ -175,7 +176,7 @@ function inputOf(
 
 /**
  * The lines a summary gives the model, from the window's comments that the chat shows (not
- * abusive, spam or spoiler) and that were answered (done or skipped) or only stored (R44), as the
+ * abusive, spam, spoiler or a genre category) and that were answered (done or skipped) or only stored (R44), as the
  * viewer reads them (the translation; Japanese and stored comments as written, stored ones as
  * chat). The same text (`normalizeComment`) is one
  * line with its count. First the questions (the 40 most asked), then up to 8 texts of each busy

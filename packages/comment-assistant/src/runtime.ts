@@ -76,7 +76,7 @@ function commentPipelines({
   settings: SettingsStore;
   /** The viewer's verdicts on hidden comments, shared by every pipeline the settings build. */
   feedback: FeedbackStore;
-  /** The stream context of a channel (streamer, title, spoiler targets). */
+  /** The stream context of a channel (streamer, title, spoiler targets, genre). */
   context: (site: Site, channel: string) => StreamContext;
   fetch: Fetch;
   queue: Queue;
@@ -221,7 +221,10 @@ function fromExtensionPage(sender: Sender): boolean {
   return sender.origin !== 'null' && (sender.url?.startsWith(browser.runtime.getURL('/')) ?? false);
 }
 
-/** A stream as pages are told it: without the spoiler note, which only prompts need. */
+/**
+ * A stream as pages are told it: without the spoiler note, the genre and the relaxations, which
+ * only prompts need.
+ */
 const publicStream = ({ site, partition, streamer, title }: StreamContext): StreamContext => ({
   site,
   partition,

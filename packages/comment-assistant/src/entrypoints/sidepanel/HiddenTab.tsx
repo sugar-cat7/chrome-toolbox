@@ -26,8 +26,8 @@ function download(doc: Document, jsonl: string, now: Date): void {
 }
 
 /**
- * The stream's comments taken out of the chat (abusive, spam, spoiler: removed or concealed as
- * the filters say, R54), newest first with the reason, to review: "問題なし" puts the comment
+ * The stream's comments taken out of the chat (abusive, spam, spoiler and the genre categories:
+ * removed or concealed as the filters say, R54, R62), newest first with the reason, to review: "問題なし" puts the comment
  * back in the chat and keeps such text visible for the streamer, "正しい" confirms it. The saved verdicts can be exported as JSONL or cleared (after a confirmation).
  * The list is read when the tab opens, after each verdict and on "更新"; there is no polling.
  */
@@ -167,7 +167,7 @@ export function HiddenTab({
         <div>
           <h2 className="font-medium">チャットから外したコメント（この配信）</h2>
           <p className="text-xs text-slate-500">
-            攻撃的・スパム・ネタバレと判定したコメントを、理由と時刻つきで新しい順に表示します（チャットと動画のコメントそれぞれ最新
+            攻撃的・スパム・ネタバレのほか、指示・他配信の話題・ゴースティング・プライバシー・センシティブと判定したコメントを、理由と時刻つきで新しい順に表示します（チャットと動画のコメントそれぞれ最新
             200 件）。「問題なし」でチャットに戻します。
           </p>
         </div>

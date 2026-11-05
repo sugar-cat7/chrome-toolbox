@@ -53,14 +53,20 @@ export const defaultFilterSettings: FilterSettings = {
   holdUntilJudged: true,
 };
 /**
- * How a category shows until the viewer chooses. Abusive and spam comments are removed from the
- * chat (`hide`, 消す): highlighting or concealing them still draws the eye to them, and the
- * side panel lists them for review (R54). Spoilers are concealed as a bar (`blur`, 伏せる).
+ * How a category shows until the viewer chooses. Abusive and spam comments, and the genre
+ * categories (instruction, relay, ghosting, privacy, sensitive, R62), are removed from the chat
+ * (`hide`, 消す): highlighting or concealing them still draws the eye to them, and the side
+ * panel lists them for review (R54). Spoilers are concealed as a bar (`blur`, 伏せる).
  */
 export function defaultModeOf(category: CommentCategory): FilterMode {
   switch (category) {
     case 'abusive':
     case 'spam':
+    case 'instruction':
+    case 'relay':
+    case 'ghosting':
+    case 'privacy':
+    case 'sensitive':
       return 'hide';
     case 'spoiler':
       return 'blur';
@@ -75,8 +81,11 @@ export function defaultModeOf(category: CommentCategory): FilterMode {
 export const modeOf = (filters: FilterSettings, category: CommentCategory): FilterMode =>
   filters.modes[category] ?? defaultModeOf(category);
 
-/** The defaults of the panel before Task 5d, which saved every category's mode (R34). */
-const PRE_5D_MODES: Readonly<Record<CommentCategory, FilterMode>> = {
+/**
+ * The defaults of the panel before Task 5d, which saved the mode of each of its six categories
+ * (R34); the genre categories (R62) came later.
+ */
+const PRE_5D_MODES: Readonly<Partial<Record<CommentCategory, FilterMode>>> = {
   abusive: 'blur',
   spam: 'hide',
   spoiler: 'blur',
@@ -84,7 +93,7 @@ const PRE_5D_MODES: Readonly<Record<CommentCategory, FilterMode>> = {
   important: 'highlight',
   chatter: 'show',
 };
-const isCategory = (key: string): key is CommentCategory => Object.hasOwn(PRE_5D_MODES, key);
+const isLegacyCategory = (key: string): key is CommentCategory => Object.hasOwn(PRE_5D_MODES, key);
 /**
  * Settings that list all six categories were saved by the panel before it kept only choices:
  * the entries equal to that panel's defaults were never chosen, so they act as defaults again.
@@ -94,7 +103,7 @@ function withoutLegacyDefaults(settings: FilterSettings): FilterSettings {
   const entries = Object.entries(settings.modes);
   if (entries.length < Object.keys(PRE_5D_MODES).length) return settings;
   const chosen = entries.filter(
-    ([category, mode]) => !isCategory(category) || PRE_5D_MODES[category] !== mode,
+    ([category, mode]) => !isLegacyCategory(category) || PRE_5D_MODES[category] !== mode,
   );
   return { ...settings, modes: Object.fromEntries(chosen) };
 }

@@ -3,14 +3,20 @@ import {
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentBatchPrompt,
+  isStreamCategory,
   parseCommentBatch,
   parseSummary,
+  STREAM_CATEGORIES,
+  STREAM_GENRES,
+  streamCategories,
   subtitleOutputSchema,
   subtitlePrompt,
   summaryLimits,
   summaryLine,
   summaryLines,
   summaryPrompt,
+  type StreamCategory,
+  type StreamGenre,
 } from './prompts.ts';
 
 const user = (p: { messages: { content: string }[] }): string => p.messages.at(-1)?.content ?? '';
@@ -112,26 +118,114 @@ describe('commentBatchPrompt', () => {
     { text: 'gg wp', lang: 'und-Latn', translate: true },
   ];
 
-  it('keeps the system turn byte-identical with or without spoiler targets (prompt caching)', () => {
+  it('keeps the system turn byte-identical whatever the genre and the stream categories (prompt caching, R62)', () => {
     const plain = commentBatchPrompt({ comments: mixed, context: 'Title: Fixture Quest' });
-    const withNote = commentBatchPrompt({
-      comments: mixed,
-      context: 'Title: Fixture Quest\nSpoiler targets: the final boss',
-      spoilers: true,
-    });
-    expect(system(withNote)).toBe(system(plain));
-    expect(withNote.grammar).toBe(plain.grammar);
+    const systems = [
+      commentBatchPrompt({
+        comments: mixed,
+        context: 'Title: Fixture Quest\nSpoiler targets: the final boss',
+        genre: 'story',
+        categories: ['spoiler', 'instruction', 'relay', 'privacy', 'sensitive'],
+      }),
+      commentBatchPrompt({
+        comments: mixed,
+        context: 'Title: Fixture Royale',
+        genre: 'fps',
+        categories: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'],
+      }),
+      commentBatchPrompt({ comments: mixed, context: '', genre: 'chat', categories: ['relay'] }),
+    ].map(system);
+    expect(new Set([system(plain), ...systems]).size).toBe(1);
   });
 
-  it('defines the spoiler category in the user turn only when there are spoiler targets', () => {
-    const plain = commentBatchPrompt({ comments: mixed, context: '' });
-    const withNote = commentBatchPrompt({ comments: mixed, context: 'x', spoilers: true });
-    expect(user(plain)).not.toContain('Spoiler definition');
-    expect(user(withNote)).toContain('Spoiler definition');
-    expect(user(withNote)).toMatch(/tier lists, votes/u);
-    // The fixed prefix no longer defines it, and tells the model never to guess one.
-    expect(system(plain)).toContain('never use it');
-    expect(system(plain)).not.toContain('reveals plot');
+  it('defines in the system turn only the categories every stream has, and how to use the stream ones', () => {
+    const text = system(commentBatchPrompt({ comments: mixed, context: '' }));
+    for (const category of ['abusive', 'spam', 'question', 'important', 'chatter'] as const)
+      expect(text).toContain(`- ${COMMENT_CATEGORY_CODES[category]} = ${category}: `);
+    for (const category of STREAM_CATEGORIES) expect(text).not.toContain(`= ${category}:`);
+    expect(text).toContain(
+      'The user turn\'s "Stream categories" adds categories for this stream, each with its code and definition. Use one only for a comment that clearly fits its definition; it then comes before question and chatter. Most comments fit none of them. Never use a category the user turn does not define.',
+    );
+  });
+
+  it.each([
+    { genre: 'other', categories: [], grammar: 'code ::= [asqic]' },
+    {
+      genre: 'chat',
+      categories: ['relay', 'privacy', 'sensitive'],
+      grammar: 'code ::= [asqicrve]',
+    },
+    {
+      genre: 'fps',
+      categories: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'],
+      grammar: 'code ::= [asqicnrgve]',
+    },
+    {
+      genre: 'story',
+      categories: ['spoiler', 'instruction', 'relay', 'privacy', 'sensitive'],
+      grammar: 'code ::= [aspqicnrve]',
+    },
+  ] as const)(
+    'gives the $genre stream the base codes and only its own: $grammar',
+    ({ genre, categories, grammar }) => {
+      const p = commentBatchPrompt({ comments: mixed, context: '', genre, categories });
+      expect(p.grammar.split('\n')[1]).toBe(grammar);
+      const lines = user(p).split('\n');
+      // Each enabled category once, as a code line under "Stream categories"; none of the others.
+      for (const category of STREAM_CATEGORIES)
+        expect(
+          lines.filter((line) => line.startsWith(`- ${COMMENT_CATEGORY_CODES[category]} = `)),
+        ).toHaveLength((categories as readonly string[]).includes(category) ? 1 : 0);
+      expect(lines.some((line) => line.startsWith('Stream categories'))).toBe(
+        categories.length > 0,
+      );
+    },
+  );
+
+  it('names the genre and defines the stream categories in the user turn, between the context and the corrections', () => {
+    const corrections = [{ text: 'gg', category: 'relay' as const }];
+    const p = commentBatchPrompt({
+      comments: mixed,
+      context: 'Title: Fixture Royale',
+      genre: 'fps',
+      categories: ['instruction', 'ghosting'],
+      corrections,
+    });
+    const lines = user(p).split('\n');
+    const index = (header: string): number => lines.findIndex((line) => line.startsWith(header));
+    expect(lines[index('Stream genre')]).toBe(
+      'Stream genre: fps (FPS, battle royale, PvP or fighting game)',
+    );
+    expect(index('Stream context')).toBeLessThan(index('Stream genre'));
+    expect(index('Stream genre')).toBeLessThan(index('Stream categories'));
+    expect(index('Stream categories')).toBeLessThan(index('- n = instruction: '));
+    expect(index('- n = instruction: ')).toBeLessThan(index('- g = ghosting: '));
+    expect(index('- g = ghosting: ')).toBeLessThan(index('Viewer corrections'));
+    expect(index('Viewer corrections')).toBeLessThan(index('Comments'));
+    // The definitions name what is not the category: the tricky negatives (R62).
+    expect(lines[index('- n = instruction: ')]).toMatch(/Not instruction: questions about/u);
+    expect(lines[index('- g = ghosting: ')]).toMatch(/Not ghosting: /u);
+  });
+
+  it('names an unknown genre as such', () => {
+    const p = commentBatchPrompt({ comments: mixed, context: '' });
+    expect(user(p)).toContain('Stream genre: other (unknown)');
+    expect(user(p)).not.toContain('Stream categories');
+  });
+
+  it('defines spoilers by the spoiler targets, else by what the title names (R31, R62)', () => {
+    const p = commentBatchPrompt({
+      comments: mixed,
+      context: 'Title: Fixture Quest',
+      genre: 'story',
+      categories: ['spoiler'],
+    });
+    const line = user(p)
+      .split('\n')
+      .find((text) => text.startsWith('- p = spoiler: '));
+    expect(line).toMatch(/the spoiler targets in the stream context when it has them/u);
+    expect(line).toMatch(/what the stream title names/u);
+    expect(line).toMatch(/Not spoiler: guesses, tier lists, votes, opinions/u);
   });
 
   it('pins the compact line grammar of a mixed batch: id, code and a bounded ja where translated', () => {
@@ -139,7 +233,7 @@ describe('commentBatchPrompt', () => {
     expect(commentBatchPrompt({ comments: batch, context: '' }).grammar).toBe(
       [
         String.raw`root ::= "1\t" code "\t" ja1 "\n" "2\t" code "\n" "3\t" code "\t" ja3 "\n" "4\t" code "\t" ja4 "\n"`,
-        'code ::= [aspqic]',
+        'code ::= [asqic]',
         // Two characters per source character plus 16; 2000 at most (llama.cpp's repetition cap).
         // No angle brackets: a translation never carries markup such as a closing HTML tag.
         String.raw`ja1 ::= [^ \t\n<>] [^\t\n<>]{0,25}`,
@@ -151,9 +245,15 @@ describe('commentBatchPrompt', () => {
 
   it('defines one distinct one-letter code per category and explains every code', () => {
     const codes = Object.values(COMMENT_CATEGORY_CODES);
-    expect(new Set(codes).size).toBe(6);
+    expect(new Set(codes).size).toBe(11);
     expect(codes.every((code) => /^[a-z]$/u.test(code))).toBe(true);
-    const text = system(commentBatchPrompt({ comments: mixed, context: '' }));
+    const p = commentBatchPrompt({
+      comments: mixed,
+      context: '',
+      genre: 'fps',
+      categories: [...STREAM_CATEGORIES],
+    });
+    const text = `${system(p)}\n${user(p)}`;
     for (const [category, code] of Object.entries(COMMENT_CATEGORY_CODES))
       expect(text).toContain(`${code} = ${category}`);
   });
@@ -181,7 +281,7 @@ describe('commentBatchPrompt', () => {
     const text = system(commentBatchPrompt({ comments: mixed, context: '' }));
     expect(text).toContain('- q = question: asks for an answer or information\n');
     expect(text).toContain(
-      'Requests, instructions, suggestions, guesses and exclamations are chatter, even when they are addressed to the streamer.',
+      'Requests, instructions, suggestions, guesses and exclamations are chatter, not questions, even when they are addressed to the streamer, unless a stream category fits them.',
     );
   });
 
@@ -214,7 +314,7 @@ describe('commentBatchPrompt', () => {
     expect(system(p)).not.toContain('Fixture Quest');
     expect(user(p).split('\n')[0]).toBe(`Stream context: ${JSON.stringify(context)}`);
     expect(system(p)).toContain(
-      'The user turn\'s "Stream context" names the stream title and, sometimes, the viewer\'s spoiler targets: keep names and titles from it as written. Use the category spoiler only when the user turn has a "Spoiler definition"; without one, never use it.',
+      'The user turn\'s "Stream context" names the stream title and, sometimes, the viewer\'s spoiler targets, and "Stream genre" says what kind of stream it is: keep names and titles from the context as written.',
     );
   });
 
@@ -257,6 +357,78 @@ describe('commentBatchPrompt', () => {
   });
 });
 
+describe('streamCategories (R62)', () => {
+  const always = ['relay', 'privacy', 'sensitive'] as const;
+  const table: readonly { genre: StreamGenre; expected: readonly StreamCategory[] }[] = [
+    { genre: 'fps', expected: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'] },
+    { genre: 'story', expected: ['spoiler', 'instruction', ...always] },
+    { genre: 'horror', expected: ['spoiler', 'instruction', ...always] },
+    { genre: 'puzzle_rta', expected: ['spoiler', 'instruction', ...always] },
+    { genre: 'chat', expected: always },
+    { genre: 'singing', expected: always },
+    { genre: 'watchalong', expected: ['spoiler', ...always] },
+    { genre: 'sports_viewing', expected: ['spoiler', ...always] },
+    { genre: 'board', expected: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'] },
+    { genre: 'deduction', expected: ['relay', 'ghosting', 'privacy', 'sensitive'] },
+    { genre: 'other', expected: always },
+  ];
+
+  it('covers every genre once', () => {
+    expect(table.map((row) => row.genre).toSorted()).toEqual([...STREAM_GENRES].toSorted());
+  });
+
+  it.each(table)(
+    'enables for a $genre stream without spoiler targets: $expected',
+    ({ genre, expected }) => {
+      expect(streamCategories({ genre, relaxations: [], spoilerTargets: false })).toEqual(expected);
+    },
+  );
+
+  it.each(table)(
+    'enables spoilers for a $genre stream with spoiler targets (R31)',
+    ({ genre, expected }) => {
+      const categories = streamCategories({ genre, relaxations: [], spoilerTargets: true });
+      expect(categories).toEqual(
+        STREAM_CATEGORIES.filter((c) => c === 'spoiler' || expected.includes(c)),
+      );
+    },
+  );
+
+  it.each([
+    // The stream's own rules invite advice (【参加型】, 指示OK): instructions are fine there.
+    { genre: 'fps', relaxations: ['instruction'], without: ['instruction'] },
+    { genre: 'board', relaxations: ['instruction'], without: ['instruction'] },
+    // ネタバレOK, 2周目: the genre's spoilers are off; never the always-on categories.
+    { genre: 'story', relaxations: ['spoiler'], without: ['spoiler'] },
+    {
+      genre: 'horror',
+      relaxations: ['instruction', 'spoiler'],
+      without: ['spoiler', 'instruction'],
+    },
+    { genre: 'chat', relaxations: ['instruction', 'spoiler'], without: [] },
+  ] as const)(
+    'turns off $without for a $genre stream that relaxes $relaxations',
+    ({ genre, relaxations, without }) => {
+      const strict = streamCategories({ genre, relaxations: [], spoilerTargets: false });
+      expect(streamCategories({ genre, relaxations, spoilerTargets: false })).toEqual(
+        strict.filter((category) => !(without as readonly string[]).includes(category)),
+      );
+    },
+  );
+
+  it("keeps the viewer's own spoiler targets over a stream that allows spoilers", () => {
+    expect(
+      streamCategories({ genre: 'story', relaxations: ['spoiler'], spoilerTargets: true }),
+    ).toContain('spoiler');
+  });
+
+  it('tells the stream categories from the base ones', () => {
+    expect(STREAM_CATEGORIES.every(isStreamCategory)).toBe(true);
+    const base = ['abusive', 'spam', 'question', 'important', 'chatter'] as const;
+    expect(base.some((category) => isStreamCategory(category))).toBe(false);
+  });
+});
+
 describe('parseCommentBatch', () => {
   const comments = [
     { text: 'hello', lang: 'en', translate: true },
@@ -287,6 +459,24 @@ describe('parseCommentBatch', () => {
       expected: [
         { category: 'important', ja: 'x' },
         { category: 'question' },
+        { category: 'chatter', ja: 'y' },
+      ],
+    },
+    {
+      name: 'the instruction, relay and ghosting codes',
+      text: '1\tn\tx\n2\tr\n3\tg\ty\n',
+      expected: [
+        { category: 'instruction', ja: 'x' },
+        { category: 'relay' },
+        { category: 'ghosting', ja: 'y' },
+      ],
+    },
+    {
+      name: 'the privacy and sensitive codes',
+      text: '1\tv\tx\n2\te\n3\tc\ty\n',
+      expected: [
+        { category: 'privacy', ja: 'x' },
+        { category: 'sensitive' },
         { category: 'chatter', ja: 'y' },
       ],
     },

@@ -24,6 +24,49 @@ const hideSpoilers: FilterSettings = {
   modes: { ...defaultFilterSettings.modes, spoiler: 'hide' },
 };
 
+describe('defaultModeOf', () => {
+  it.each([
+    // R54: abuse and spam are removed, spoilers concealed, questions and news highlighted.
+    { category: 'abusive', mode: 'hide' },
+    { category: 'spam', mode: 'hide' },
+    { category: 'spoiler', mode: 'blur' },
+    { category: 'question', mode: 'highlight' },
+    { category: 'important', mode: 'highlight' },
+    { category: 'chatter', mode: 'show' },
+    // R62: the genre categories are removed (消す) until the viewer chooses.
+    { category: 'instruction', mode: 'hide' },
+    { category: 'relay', mode: 'hide' },
+    { category: 'ghosting', mode: 'hide' },
+    { category: 'privacy', mode: 'hide' },
+    { category: 'sensitive', mode: 'hide' },
+  ] as const)('shows $category as $mode by default', ({ category, mode }) => {
+    expect(defaultModeOf(category)).toBe(mode);
+  });
+
+  it('reads a version-2 record that lists only the old six categories as it is (R56, R62)', async () => {
+    const store = filterStore(fakeBrowser.storage.local);
+    const modes = {
+      abusive: 'blur',
+      spam: 'hide',
+      spoiler: 'blur',
+      question: 'highlight',
+      important: 'highlight',
+      chatter: 'show',
+    } as const;
+    await fakeBrowser.storage.local.set({
+      'filters:youtube:@FixtureStreamer': {
+        v: 2,
+        translate: true,
+        showOriginal: false,
+        modes,
+        holdUntilJudged: true,
+      },
+    });
+    const loaded = await store.load('youtube', '@FixtureStreamer');
+    expect(loaded).toEqual(Ok({ ...defaultFilterSettings, modes }));
+  });
+});
+
 describe('filterStore', () => {
   it('gives a streamer without saved filters the defaults, with no mode chosen', async () => {
     const store = filterStore(fakeBrowser.storage.local);

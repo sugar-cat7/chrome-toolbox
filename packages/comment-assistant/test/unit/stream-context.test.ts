@@ -9,6 +9,8 @@ import {
   MAX_STREAMS,
   MAX_TITLE,
   ownerOf,
+  relaxationsIn,
+  streamCategoriesOf,
   streamOf,
 } from '../../src/stream-context.ts';
 import { createTwitchChat } from '../../src/sites/twitch-chat.ts';
@@ -194,6 +196,61 @@ describe('stream keys and prompt context', () => {
     );
   });
 
+  it.each([
+    // The stream invites advice (R62): instructions are fine there.
+    { text: '【参加型】Fixture Royale カスタム', expected: ['instruction'] },
+    { text: '【APEX】視聴者参加型ランク', expected: ['instruction'] },
+    { text: 'アドバイス歓迎！初めてのランクマ', expected: ['instruction'] },
+    { text: '指示OKです', expected: ['instruction'] },
+    { text: '指示ＯＫ・攻略情報歓迎', expected: ['instruction'] },
+    { text: 'backseat me hard enough so i can pass this', expected: ['instruction'] },
+    { text: 'Backseating welcome tonight', expected: ['instruction'] },
+    // The stream allows spoilers.
+    { text: '【ネタバレあり】Fixture Quest 感想会', expected: ['spoiler'] },
+    { text: 'ネタバレOKで進めます', expected: ['spoiler'] },
+    { text: '【２周目】Fixture Quest 真エンド目指す', expected: ['spoiler'] },
+    { text: '二周目のんびり', expected: ['spoiler'] },
+    { text: 'spoilers ok, already beat it', expected: ['spoiler'] },
+    { text: '【参加型】2周目 Fixture Party', expected: ['instruction', 'spoiler'] },
+    // Traps: a game name, a ban, a warning to viewers, a 1st playthrough.
+    { text: '『ネタバレが激しすぎるRPG』を初見プレイ', expected: [] },
+    { text: '【初見】ネタバレ・指示禁止', expected: [] },
+    { text: '【ネタバレ注意】最終章', expected: [] },
+    { text: 'アドバイス禁止・指示NG', expected: [] },
+    { text: 'NoBackseating please', expected: [] },
+    { text: '参加型じゃないです', expected: [] },
+    { text: 'ネタバレありません', expected: [] },
+    { text: '', expected: [] },
+  ])('reads the relaxations of "$text": $expected', ({ text, expected }) => {
+    expect(relaxationsIn(text)).toEqual(expected);
+  });
+
+  it("gives a stream's categories from its genre, relaxations and spoiler note (R62)", () => {
+    const base = { site: 'youtube', partition: 'fixture0001' } as const;
+    // No genre yet (Task G2 detects it): other.
+    expect(streamCategoriesOf(base)).toEqual(['relay', 'privacy', 'sensitive']);
+    expect(streamCategoriesOf({ ...base, spoilerNote: 'past chapter 2' })).toEqual([
+      'spoiler',
+      'relay',
+      'privacy',
+      'sensitive',
+    ]);
+    expect(streamCategoriesOf({ ...base, genre: 'fps' })).toEqual([
+      'instruction',
+      'relay',
+      'ghosting',
+      'privacy',
+      'sensitive',
+    ]);
+    expect(
+      streamCategoriesOf({ ...base, genre: 'story', relaxations: ['instruction', 'spoiler'] }),
+    ).toEqual(['relay', 'privacy', 'sensitive']);
+    // The title's own words relax it too, whatever gave the context.
+    expect(
+      streamCategoriesOf({ ...base, genre: 'fps', title: '【参加型】Fixture Royale' }),
+    ).toEqual(['relay', 'ghosting', 'privacy', 'sensitive']);
+  });
+
   it('hashes a context to a short stable key', () => {
     const a = contextHash('Title: Fixture Quest Part 3');
     expect(a).toMatch(/^[0-9a-f]{8}$/u);
@@ -242,6 +299,46 @@ describe('createStreamContexts', () => {
     expect(contexts.get('youtube', 'video0').streamer).toBeUndefined();
     expect(contexts.get('youtube', 'video1').streamer).toBe('@streamer1');
     expect(contexts.get('youtube', `video${MAX_STREAMS}`).streamer).toBe(`@streamer${MAX_STREAMS}`);
+  });
+
+  it('keeps the genre and relaxations given for a stream (R62)', () => {
+    const contexts = createStreamContexts();
+    // Unknown until given: no genre (other) and no relaxations.
+    expect(contexts.get('youtube', 'fixture0001')).toEqual({
+      site: 'youtube',
+      partition: 'fixture0001',
+    });
+    const classified = contexts.classify('youtube', 'fixture0001#comments', {
+      genre: 'fps',
+      relaxations: [],
+    });
+    expect(classified).toEqual({
+      changed: true,
+      context: { site: 'youtube', partition: 'fixture0001', genre: 'fps' },
+    });
+    expect(contexts.classify('youtube', 'fixture0001', { genre: 'fps', relaxations: [] })).toEqual({
+      changed: false,
+      context: classified.context,
+    });
+    // A report keeps the genre; the title's own words relax the stream's categories.
+    contexts.report('youtube', 'fixture0001', { title: '【参加型】Fixture Royale' });
+    const reported = contexts.get('youtube', 'fixture0001');
+    expect(reported).toEqual({
+      site: 'youtube',
+      partition: 'fixture0001',
+      title: '【参加型】Fixture Royale',
+      genre: 'fps',
+    });
+    expect(streamCategoriesOf(reported)).not.toContain('instruction');
+    const story = contexts.classify('youtube', 'fixture0001', {
+      genre: 'story',
+      relaxations: ['spoiler'],
+    });
+    expect(story).toMatchObject({ changed: true, context: { relaxations: ['spoiler'] } });
+    expect(streamCategoriesOf(story.context)).toEqual(['relay', 'privacy', 'sensitive']);
+    expect(contexts.get('twitch', 'fixture0001')).not.toHaveProperty('genre');
+    contexts.clear();
+    expect(contexts.get('youtube', 'fixture0001')).not.toHaveProperty('genre');
   });
 
   it("adds each stream's own spoiler note, not its streamer's (R30)", () => {

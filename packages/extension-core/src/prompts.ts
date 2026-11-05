@@ -13,10 +13,36 @@ const COMMENT_CATEGORIES = [
   'question',
   'important',
   'chatter',
+  'instruction',
+  'relay',
+  'ghosting',
+  'privacy',
+  'sensitive',
 ] as const;
 export const commentCategorySchema = z.enum(COMMENT_CATEGORIES);
 export type CommentCategory = z.infer<typeof commentCategorySchema>;
-/** The one-letter code that stands for each category in a compact comment batch reply. */
+/**
+ * The categories a stream turns on or off (R62), defined in its batch prompts' user turn and
+ * allowed by their grammar only when on: spoilers (R31) and the genre categories. Every other
+ * category is in every prompt.
+ */
+export const STREAM_CATEGORIES = [
+  'spoiler',
+  'instruction',
+  'relay',
+  'ghosting',
+  'privacy',
+  'sensitive',
+] as const satisfies readonly CommentCategory[];
+export type StreamCategory = (typeof STREAM_CATEGORIES)[number];
+const STREAM_CATEGORY_SET: ReadonlySet<CommentCategory> = new Set(STREAM_CATEGORIES);
+export const isStreamCategory = (category: CommentCategory): category is StreamCategory =>
+  STREAM_CATEGORY_SET.has(category);
+/**
+ * The one-letter code that stands for each category in a compact comment batch reply: the
+ * category's first letter, or a later one when that is taken (spoiler `p`, instruction `n`,
+ * privacy `v`, sensitive `e`).
+ */
 export const COMMENT_CATEGORY_CODES = {
   abusive: 'a',
   spam: 's',
@@ -24,19 +50,125 @@ export const COMMENT_CATEGORY_CODES = {
   question: 'q',
   important: 'i',
   chatter: 'c',
+  instruction: 'n',
+  relay: 'r',
+  ghosting: 'g',
+  privacy: 'v',
+  sensitive: 'e',
 } as const satisfies Record<CommentCategory, string>;
 const CATEGORY_BY_CODE = new Map<string, CommentCategory>(
   COMMENT_CATEGORIES.map((category) => [COMMENT_CATEGORY_CODES[category], category]),
 );
-const CATEGORY_MEANINGS = {
+/** A category every prompt has. */
+type BaseCategory = Exclude<CommentCategory, StreamCategory>;
+/** The meaning of each category every prompt has, in the fixed system turn. */
+const BASE_MEANINGS = {
   abusive: 'insults, harassment, hate speech toward people',
   spam: 'ads, repeated copy-paste, scams, unrelated links',
-  spoiler: 'reveals plot or hidden game information',
   question: 'asks for an answer or information',
   important:
     'information a viewer would want to know (schedule, announcements, answers to common questions)',
   chatter: 'everything else (reactions, jokes, greetings)',
-} as const satisfies Record<CommentCategory, string>;
+} as const satisfies Record<BaseCategory, string>;
+/**
+ * The definition of each stream category, in the user turn of a stream that has it on (R62).
+ * Each one names what it is not: the reactions and questions that look like it (the research
+ * behind R62 lists them per type).
+ */
+const STREAM_DEFINITIONS = {
+  spoiler:
+    'reveals what happens later in what the stream plays or watches (the spoiler targets in the stream context when it has them, else what the stream title names): story events, twists, deaths, the ending, a hidden answer, a result seen ahead on a faster broadcast, or a hint that something big is coming ("次の章、泣く準備しといて", "the mentor dies in the last chapter"). Not spoiler: guesses, tier lists, votes, opinions, and talk about what the stream already showed.',
+  instruction:
+    'tells the streamer how to play right now without being asked, as an order or as advice (〜して, 〜したほうがいい, 〜しないで): what to do, where to go, which option to pick, how to solve a puzzle or which tile to discard ("左の通路を先に調べて", "reload before you peek", "ここは索子を切るべき"). Not instruction: questions about the plan ("この後どうするの？"), shouts of a word or two in the moment ("走れ！", "いけ！"), praise or criticism of play that already happened, and answers to what the streamer asked.',
+  relay:
+    'brings another streamer or another stream into this chat: what someone else is doing or did on their stream, "I came from X\'s stream", or a streamer who is not part of this stream ("○○くんの配信ではこのボスもう倒してた", "○○ちゃんの所から来ました"). A name with さん, ちゃん or くん that the title does not name, playing or streaming on their own, is another streamer. Not relay: people named in the stream title, characters of the game or show, and talk about this streamer.',
+  ghosting:
+    'relays what the streamer must not know during a match, or snipes them: where opponents are now or what they plan, seen on another stream, window or view (別窓, 他視点); other players\' hidden hands, waits or roles ("敵、北の倉庫に固まってるよ、他視点で見た", "インポスターは赤の人", "下家は筒子待ち"); or stream sniping: saying they joined or will join the streamer\'s match or table on purpose, or asking for the server or queue to do so ("ロビー合わせたから今から狙いに行く"). Not ghosting: guesses ("〜っぽい", "〜そう", "〜怪しくない？"), questions about the streamer\'s own play, and talk about a match or hand that is over ("さっきの試合", "〜だったね").',
+  privacy:
+    'pries into or reveals private information the streamer has not made public: real name, face, age, address or where they live, school or workplace, family, partner or love life, or the person behind a VTuber: who they were before or a claim to recognize them (前世, 中の人, "声で誰だかわかる"). Not privacy: ordinary questions about the stream, the game or the streamer\'s tastes and day, and the cast or characters of a game or show.',
+  sensitive:
+    'raises politics, religion or another divisive social issue, or baits the streamer into a statement on one: elections, parties, politicians, territorial disputes (asking the streamer to say a region is or is not a country), wars, or spreading a religion. Not sensitive: games, films, songs or shows about war or politics, idol popularity votes (総選挙), national teams in sports, and 神 as praise (神ゲー).',
+} as const satisfies Record<StreamCategory, string>;
+
+/** What kind of stream it is (R62); `other` while unknown. Task G2 detects it. */
+export const STREAM_GENRES = [
+  'fps',
+  'story',
+  'horror',
+  'puzzle_rta',
+  'chat',
+  'singing',
+  'watchalong',
+  'sports_viewing',
+  'board',
+  'deduction',
+  'other',
+] as const;
+export const streamGenreSchema = z.enum(STREAM_GENRES);
+export type StreamGenre = z.infer<typeof streamGenreSchema>;
+/** Each genre as the prompt names it, after its id. */
+const GENRE_NAMES = {
+  fps: 'FPS, battle royale, PvP or fighting game',
+  story: 'story game, RPG or adventure',
+  horror: 'horror game',
+  puzzle_rta: 'puzzle game or speedrun (RTA)',
+  chat: 'just chatting (雑談)',
+  singing: 'singing stream (歌枠)',
+  watchalong: 'watch-along of an anime, a film or a show (同時視聴)',
+  sports_viewing: 'sports or esports viewing (観戦)',
+  board: 'mahjong, board or card game',
+  deduction: 'social deduction game (人狼, Among Us)',
+  other: 'unknown',
+} as const satisfies Record<StreamGenre, string>;
+/** The stream categories a stream's own rules may turn off (R62): 【参加型】, ネタバレOK … */
+export const RELAXABLE_CATEGORIES = [
+  'instruction',
+  'spoiler',
+] as const satisfies readonly StreamCategory[];
+export type RelaxableCategory = (typeof RELAXABLE_CATEGORIES)[number];
+const INSTRUCTION_GENRES: ReadonlySet<StreamGenre> = new Set([
+  'fps',
+  'story',
+  'horror',
+  'puzzle_rta',
+  'board',
+]);
+const GHOSTING_GENRES: ReadonlySet<StreamGenre> = new Set(['fps', 'board', 'deduction']);
+const SPOILER_GENRES: ReadonlySet<StreamGenre> = new Set([
+  'story',
+  'horror',
+  'puzzle_rta',
+  'watchalong',
+  'sports_viewing',
+]);
+/**
+ * The stream categories a stream has on, in `STREAM_CATEGORIES` order (R62):
+ * - relay, privacy and sensitive always;
+ * - instruction in fps, story, horror, puzzle_rta and board streams, unless relaxed;
+ * - ghosting in fps, board and deduction streams;
+ * - spoiler with the viewer's spoiler targets (R31), whatever the stream's rules say: the viewer
+ *   asked for it. Without them in story, horror, puzzle_rta, watchalong and sports_viewing
+ *   streams, unless relaxed.
+ */
+export function streamCategories(
+  input: Readonly<{
+    genre: StreamGenre;
+    relaxations: readonly RelaxableCategory[];
+    /** The viewer wrote spoiler targets for the stream. */
+    spoilerTargets: boolean;
+  }>,
+): StreamCategory[] {
+  const relaxed = (category: RelaxableCategory): boolean => input.relaxations.includes(category);
+  const on: Record<StreamCategory, boolean> = {
+    spoiler: input.spoilerTargets || (SPOILER_GENRES.has(input.genre) && !relaxed('spoiler')),
+    instruction: INSTRUCTION_GENRES.has(input.genre) && !relaxed('instruction'),
+    relay: true,
+    ghosting: GHOSTING_GENRES.has(input.genre),
+    privacy: true,
+    sensitive: true,
+  };
+  return STREAM_CATEGORIES.filter((category) => on[category]);
+}
 
 export const subtitleOutputSchema = z.strictObject({ ja: z.string(), en: z.optional(z.string()) });
 
@@ -73,17 +205,24 @@ const translationLimit = (text: string): number => Math.min(2 * codePoints(text)
  * exists only for a translated comment (spec §7: Japanese comments are classified only), as
  * one line of at most `translationLimit` characters without `<` or `>` (live replies carried
  * stray HTML tags). Output tokens set the latency; a JSON item spent 19 tokens on keys and
- * whitespace where this line spends 5.
+ * whitespace where this line spends 5. The code is one of the categories every stream has or
+ * one of `categories`, the stream's own (R62).
  */
-const commentBatchGrammar = (comments: readonly BatchComment[]): string => {
+const commentBatchGrammar = (
+  comments: readonly BatchComment[],
+  categories: readonly StreamCategory[],
+): string => {
   const line = (comment: BatchComment, n: number): string =>
     `"${n}\\t" code ${comment.translate ? `"\\t" ja${n} ` : ''}"\\n"`;
   // One line of text that does not start with a space and has no markup.
   const translation = (comment: BatchComment, n: number): string =>
     `ja${n} ::= [^ \\t\\n<>] [^\\t\\n<>]{0,${translationLimit(comment.text) - 1}}`;
+  const allowed = COMMENT_CATEGORIES.filter(
+    (category) => !isStreamCategory(category) || categories.includes(category),
+  );
   return [
     `root ::= ${comments.map((comment, i) => line(comment, i + 1)).join(' ')}`,
-    `code ::= [${COMMENT_CATEGORIES.map((category) => COMMENT_CATEGORY_CODES[category]).join('')}]`,
+    `code ::= [${allowed.map((category) => COMMENT_CATEGORY_CODES[category]).join('')}]`,
     ...comments.flatMap((comment, i) => (comment.translate ? [translation(comment, i + 1)] : [])),
   ].join('\n');
 };
@@ -353,14 +492,16 @@ export const subtitlePrompt = (
 };
 
 /**
- * The spoiler category is defined only in the user turn, when the stream has spoiler targets
- * (`commentBatchPrompt`'s `spoilers`); the system turn stays one fixed prefix either way.
+ * The categories every stream has; a stream's own (R62) are defined in its user turn
+ * (`commentBatchPrompt`'s `categories`), so the system turn stays one fixed prefix.
  */
-const SPOILER_IN_SYSTEM =
-  'only when the user turn has a "Spoiler definition"; otherwise never use it';
 const CATEGORY_CODES = `Category codes:
-${COMMENT_CATEGORIES.map((category) => `- ${COMMENT_CATEGORY_CODES[category]} = ${category}: ${category === 'spoiler' ? SPOILER_IN_SYSTEM : CATEGORY_MEANINGS[category]}`).join('\n')}`;
-const SPOILER_DEFINITION = `Spoiler definition: a comment is a spoiler only when it reveals plot or hidden information about the spoiler targets in the stream context. Guesses, tier lists, votes and opinions are not spoilers.`;
+${COMMENT_CATEGORIES.filter((category): category is BaseCategory => !isStreamCategory(category))
+  .map(
+    (category) => `- ${COMMENT_CATEGORY_CODES[category]} = ${category}: ${BASE_MEANINGS[category]}`,
+  )
+  .join('\n')}
+The user turn's "Stream categories" adds categories for this stream, each with its code and definition. Use one only for a comment that clearly fits its definition; it then comes before question and chatter. Most comments fit none of them. Never use a category the user turn does not define.`;
 
 const COMMENT_SYSTEM = `You help a Japanese viewer follow live stream chat.
 For every comment, choose exactly one category and write its one-letter code.
@@ -369,8 +510,8 @@ When a comment's "translate" is true, also translate it into natural Japanese. W
 Write only the translation: no notes, no readings or romanization, no alternatives, no parenthetical remarks, no repetition of the original text and no markup.
 Leave emote names (one CamelCase word such as PauseChamp or KEKW) out of the translation and keep @mentions and URLs exactly as written; a comment with nothing else is copied as written.
 Translate cheers and chants by their meaning (vamos → いけー！). Write a word in katakana by its sound only when it is the name of a person or another proper noun.
-Requests, instructions, suggestions, guesses and exclamations are chatter, even when they are addressed to the streamer.
-The user turn's "Stream context" names the stream title and, sometimes, the viewer's spoiler targets: keep names and titles from it as written. Use the category spoiler only when the user turn has a "Spoiler definition"; without one, never use it.
+Requests, instructions, suggestions, guesses and exclamations are chatter, not questions, even when they are addressed to the streamer, unless a stream category fits them.
+The user turn's "Stream context" names the stream title and, sometimes, the viewer's spoiler targets, and "Stream genre" says what kind of stream it is: keep names and titles from the context as written.
 When the user turn has "Viewer corrections", the viewer marked those comments of this chat as fine although they had been put in the category "wrong": do not put similar comments in that category.
 ${DATA_NOT_INSTRUCTIONS}
 Reply with one line per comment, in order: the comment's id, a tab, the category code and, only when "translate" is true, a tab and the Japanese translation (Japanese only, one line).
@@ -381,15 +522,19 @@ Example: for {"id":1,"translate":true,"text":"what game is this?"}, {"id":2,"tra
 4\tc\tいけー！`;
 
 /**
- * The channel's stream context and viewer corrections go in the user turn, so the system turn
- * stays one fixed prefix that llama.cpp can reuse from its prompt cache.
+ * The channel's stream context, genre, stream categories and viewer corrections go in the user
+ * turn, so the system turn stays one fixed prefix that llama.cpp can reuse from its prompt cache
+ * (R25). The user turn defines only the stream categories that are on (`streamCategories`, R62),
+ * one line each, and the grammar allows only their codes besides the ones every stream has.
  */
 export const commentBatchPrompt = (
   input: Readonly<{
     comments: readonly BatchComment[];
     context: string;
-    /** The stream has spoiler targets: the user turn then defines the spoiler category. */
-    spoilers?: boolean;
+    /** What kind of stream it is; `other` when not given. */
+    genre?: StreamGenre;
+    /** The stream categories that are on, as `streamCategories` gives them; none when not given. */
+    categories?: readonly StreamCategory[];
     corrections?: readonly CommentCorrection[];
   }>,
 ): GrammarPrompt => {
@@ -397,10 +542,24 @@ export const commentBatchPrompt = (
   const lines = input.comments.map((c, i) =>
     JSON.stringify({ id: i + 1, lang: c.lang, translate: c.translate, text: c.text }),
   );
+  const genre = input.genre ?? 'other';
+  const categories = STREAM_CATEGORIES.filter((category) =>
+    (input.categories ?? []).includes(category),
+  );
   const corrections = (input.corrections ?? []).map((c) => ({ text: c.text, wrong: c.category }));
   const user = [
     `Stream context: ${JSON.stringify(input.context)}`,
-    ...(input.spoilers === true ? [SPOILER_DEFINITION] : []),
+    `Stream genre: ${genre} (${GENRE_NAMES[genre]})`,
+    ...(categories.length === 0
+      ? []
+      : [
+          `Stream categories (only for this stream):\n${categories
+            .map(
+              (category) =>
+                `- ${COMMENT_CATEGORY_CODES[category]} = ${category}: ${STREAM_DEFINITIONS[category]}`,
+            )
+            .join('\n')}`,
+        ]),
     // One line, so the comment lines stay the only ones that start with "{".
     ...(corrections.length === 0
       ? []
@@ -412,7 +571,7 @@ export const commentBatchPrompt = (
       { role: 'system', content: COMMENT_SYSTEM },
       { role: 'user', content: user },
     ],
-    grammar: commentBatchGrammar(input.comments),
+    grammar: commentBatchGrammar(input.comments, categories),
   };
 };
 

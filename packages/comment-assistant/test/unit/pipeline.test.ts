@@ -1431,9 +1431,12 @@ describe('comment pipeline', () => {
       };
       const plain = await bodies(undefined);
       const withNote = await bodies(noted('the final boss'));
-      expect(plain.messages[1]?.content).not.toContain('Spoiler definition');
-      expect(withNote.messages[1]?.content).toContain('Spoiler definition');
+      expect(plain.messages[1]?.content).not.toContain('- p = spoiler: ');
+      expect(withNote.messages[1]?.content).toContain('- p = spoiler: ');
       expect(withNote.messages[0]).toEqual(plain.messages[0]);
+      // The grammar allows the spoiler code only where it is defined (R62).
+      expect(plain.grammar.split('\n')[1]).toBe('code ::= [asqicrve]');
+      expect(withNote.grammar.split('\n')[1]).toBe('code ::= [aspqicrve]');
     });
   });
 
@@ -4046,5 +4049,174 @@ describe('only the chat in front of the viewer (R44)', () => {
       ['line 2', 'line 3', 'line 4'],
       ['line 1'],
     ]);
+  });
+});
+
+describe('genre categories (R62)', () => {
+  /** Every stream is titled and of `genre`, with `extra` (a title, relaxations, a note). */
+  const genred =
+    (genre: StreamContext['genre'], extra: Partial<StreamContext> = {}) =>
+    (site: StreamContext['site'], partition: string): StreamContext => ({
+      ...titled(site, partition),
+      genre,
+      ...extra,
+    });
+  const role = (id: string, text: string, author: RawComment['role']): RawComment => ({
+    ...comment(id, text),
+    ...(author === undefined ? {} : { role: author }),
+  });
+
+  it.each([
+    // Only the categories the stream enables stand; any other verdict of the model is chat.
+    {
+      name: 'an unknown genre',
+      context: genred(undefined),
+      llm: 'instruction',
+      expected: 'chatter',
+    },
+    { name: 'an FPS stream', context: genred('fps'), llm: 'instruction', expected: 'instruction' },
+    {
+      name: 'an FPS stream that invites advice (【参加型】 in the title)',
+      context: genred('fps', { title: '【参加型】Fixture Royale' }),
+      llm: 'instruction',
+      expected: 'chatter',
+    },
+    {
+      name: 'an FPS stream whose rules allow instructions',
+      context: genred('fps', { relaxations: ['instruction'] }),
+      llm: 'instruction',
+      expected: 'chatter',
+    },
+    { name: 'a chatting stream', context: genred('chat'), llm: 'ghosting', expected: 'chatter' },
+    {
+      name: 'a deduction stream',
+      context: genred('deduction'),
+      llm: 'ghosting',
+      expected: 'ghosting',
+    },
+    {
+      name: 'a singing stream',
+      context: genred('singing'),
+      llm: 'instruction',
+      expected: 'chatter',
+    },
+    // Always on: relay, privacy and sensitive.
+    { name: 'an unknown genre', context: genred(undefined), llm: 'relay', expected: 'relay' },
+    { name: 'a singing stream', context: genred('singing'), llm: 'privacy', expected: 'privacy' },
+    { name: 'a chatting stream', context: genred('chat'), llm: 'sensitive', expected: 'sensitive' },
+    // Spoilers: on without a note in a story stream, unless it allows spoilers.
+    { name: 'a story stream', context: genred('story'), llm: 'spoiler', expected: 'spoiler' },
+    {
+      name: 'a story stream on its 2周目',
+      context: genred('story', { title: '【2周目】Fixture Quest' }),
+      llm: 'spoiler',
+      expected: 'chatter',
+    },
+    { name: 'a chatting stream', context: genred('chat'), llm: 'spoiler', expected: 'chatter' },
+  ] as const)(
+    "shows the model's $llm in $name as $expected",
+    async ({ context, llm, expected }) => {
+      const text = 'a comment the model judged';
+      const llama = fakeLlama(echo({ [text]: llm }));
+      const { annotations, pipeline } = setup({ fetch: llama.fetch, context });
+      pipeline.ingest(target, { ...channel, comments: [comment('1', text)] });
+      await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+      // A copy answered from the text cache is judged the same way.
+      pipeline.ingest(target, { ...channel, comments: [comment('2', text)] });
+      expect(annotations().map((a) => a.category)).toEqual([expected, expected]);
+      expect(llama.state.bodies).toHaveLength(1);
+      expect(pipeline.hidden(channel.site, channel.channel).map((h) => h.category)).toEqual(
+        expected === 'chatter' ? [] : [expected, expected],
+      );
+    },
+  );
+
+  it.each(['owner', 'moderator', 'verified'] as const)(
+    'never gives a genre category to a post by the %s (R38, R53, R62)',
+    async (author) => {
+      const verdicts = {
+        'go left first': 'instruction',
+        'saw this on another stream': 'relay',
+        'they are in the tower': 'ghosting',
+        'where do you live': 'privacy',
+        'who did you vote for': 'sensitive',
+        'the twist is coming': 'spoiler',
+      } as const;
+      const llama = fakeLlama(echo(verdicts));
+      const { annotations, pipeline } = setup({
+        fetch: llama.fetch,
+        context: genred('fps', { spoilerNote: 'the final boss' }),
+      });
+      const texts = Object.keys(verdicts);
+      pipeline.ingest(target, {
+        ...channel,
+        comments: texts.map((text, i) => role(String(i + 1), text, author)),
+      });
+      await vi.waitFor(() => expect(annotations()).toHaveLength(texts.length));
+      expect(new Set(annotations().map((a) => a.category))).toEqual(new Set(['chatter']));
+      expect(pipeline.hidden(channel.site, channel.channel)).toEqual([]);
+    },
+  );
+
+  it('names the genre and defines only its categories in the prompt, and the grammar allows only their codes', async () => {
+    const llama = fakeLlama(echo());
+    const { annotations, pipeline } = setup({ fetch: llama.fetch, context: genred('fps') });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    const [body] = llama.state.bodies;
+    const user = body?.messages[1]?.content ?? '';
+    expect(user).toContain('Stream genre: fps (');
+    for (const code of [
+      'n = instruction',
+      'r = relay',
+      'g = ghosting',
+      'v = privacy',
+      'e = sensitive',
+    ])
+      expect(user).toContain(`- ${code}: `);
+    expect(user).not.toContain('- p = spoiler: ');
+    expect(body?.grammar.split('\n')[1]).toBe('code ::= [asqicnrgve]');
+  });
+
+  it('judges a text again once the genre of its stream changed (the cache scope)', async () => {
+    const llama = fakeLlama(echo({ 'try the left path': 'instruction' }));
+    let genre: StreamContext['genre'] = 'chat';
+    const { annotations, pipeline } = setup({
+      fetch: llama.fetch,
+      context: (site, partition) => genred(genre)(site, partition),
+    });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'try the left path')] });
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    genre = 'story';
+    pipeline.ingest(target, { ...channel, comments: [comment('2', 'try the left path')] });
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    expect(llama.state.bodies).toHaveLength(2);
+    expect(annotations().map((a) => a.category)).toEqual(['chatter', 'instruction']);
+  });
+
+  it('lists a genre category for review and counts it for the badge (R54)', async () => {
+    const llama = fakeLlama(echo({ 'came over from another stream': 'relay' }));
+    const counts: number[] = [];
+    const { annotations, pipeline } = setup({
+      fetch: llama.fetch,
+      onHiddenChange: (_site, _name, count) => counts.push(count),
+    });
+    pipeline.ingest(target, {
+      ...channel,
+      comments: [comment('1', 'came over from another stream')],
+    });
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(pipeline.hidden(channel.site, channel.channel)).toEqual([
+      {
+        id: '1',
+        ...channel,
+        text: 'came over from another stream',
+        translation: '訳:came over from another stream',
+        category: 'relay',
+        source: 'model',
+        at: START,
+      },
+    ]);
+    expect(counts).toEqual([1]);
   });
 });
