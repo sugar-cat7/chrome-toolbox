@@ -1,37 +1,32 @@
 import { captureSync } from '@chrome-toolbox/contracts';
 import type { CommentCategory } from '@chrome-toolbox/extension-core';
 import type { FilterMode } from '../../filters.ts';
+import { CATEGORY_NAMES } from '../../labels.ts';
 import type { SummaryWindow } from '../../protocol.ts';
 
-/** Category names as the side panel shows them (the order of the filter rows). */
-export const CATEGORY_LABELS: Readonly<Record<CommentCategory, string>> = {
-  question: '質問',
-  important: '重要情報',
+/** The filter rows, in the order the side panel lists them. */
+export const FILTER_CATEGORIES: readonly CommentCategory[] = [
+  'question',
+  'important',
+  'abusive',
+  'spam',
+  'spoiler',
+  // The genre categories (R62).
+  'instruction',
+  'relay',
+  'ghosting',
+  'privacy',
+  'sensitive',
+  'chatter',
+];
+/** Where a filter row says more than the category's name: who judges abuse, what spam covers. */
+const FILTER_NAMES: Readonly<Partial<Record<CommentCategory, string>>> = {
   abusive: '攻撃的（Clef）',
   spam: 'スパム・宣伝',
-  spoiler: 'ネタバレ',
-  // The genre categories (R62).
-  instruction: '指示',
-  relay: '他配信の話題',
-  ghosting: 'ゴースティング',
-  privacy: 'プライバシー',
-  sensitive: 'センシティブ',
-  chatter: '雑談',
 };
-/** Why a comment was hidden, in the hidden-comment list. */
-export const REASON_LABELS: Readonly<Record<CommentCategory, string>> = {
-  question: '質問',
-  important: '重要情報',
-  chatter: '雑談',
-  abusive: '攻撃的',
-  spam: 'スパム',
-  spoiler: 'ネタバレ',
-  instruction: '指示',
-  relay: '他配信の話題',
-  ghosting: 'ゴースティング',
-  privacy: 'プライバシー',
-  sensitive: 'センシティブ',
-};
+/** A category's filter row label: `CATEGORY_NAMES`, or what `FILTER_NAMES` adds. */
+export const filterLabel = (category: CommentCategory): string =>
+  FILTER_NAMES[category] ?? CATEGORY_NAMES[category];
 export const MODE_LABELS: Readonly<Record<FilterMode, string>> = {
   show: '表示',
   highlight: 'ハイライト',

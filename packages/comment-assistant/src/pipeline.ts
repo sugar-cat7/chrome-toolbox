@@ -654,12 +654,28 @@ export function createCommentPipeline(deps: {
    * one stream.
    */
   let hashed: { text: string; hash: string } | undefined;
+  /**
+   * The latest stream's categories by what decides them (title, genre, relaxations, a spoiler
+   * note or none): `scopeOf` runs several times per comment, and reading the title's relaxations
+   * normalizes it and runs two patterns (review G1 M3).
+   */
+  let categorized: { key: string; categories: readonly StreamCategory[] } | undefined;
+  function categoriesOf(context: StreamContext): readonly StreamCategory[] {
+    const key = [
+      context.title ?? '',
+      context.genre ?? 'other',
+      (context.relaxations ?? []).join(','),
+      context.spoilerNote === undefined ? '' : 'noted',
+    ].join('\u0000');
+    if (categorized?.key !== key) categorized = { key, categories: streamCategoriesOf(context) };
+    return categorized.categories;
+  }
   function scopeOf(channel: Channel): Scope {
     const context = deps.context(channel.site, channel.channel);
     const owner = ownerOf(context);
     const text = contextText(context);
     const genre = context.genre ?? 'other';
-    const categories = streamCategoriesOf(context);
+    const categories = categoriesOf(context);
     const corrections = feedback.corrections(channel.site, owner);
     const learned = corrections.map((item) => `${item.category}\u0001${item.text}`);
     const keyed = [text, `${genre}\u0001${categories.join(',')}`, ...learned].join('\u0000');

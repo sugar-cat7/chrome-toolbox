@@ -10,11 +10,8 @@ import {
 } from '../../filters.ts';
 import type { PanelPort } from '../../panel.ts';
 import { ownerOf, type StreamContext } from '../../stream-context.ts';
-import { CATEGORY_LABELS, explain, HOLD_LABEL, MODE_LABELS } from './text.ts';
+import { explain, FILTER_CATEGORIES, filterLabel, HOLD_LABEL, MODE_LABELS } from './text.ts';
 
-const CATEGORIES = Object.keys(CATEGORY_LABELS).filter((category): category is CommentCategory =>
-  Object.hasOwn(CATEGORY_LABELS, category),
-);
 /** The select value of the default option: no mode chosen. */
 const DEFAULT_MODE = '';
 const MODES: readonly FilterMode[] = ['show', 'highlight', 'blur', 'hide'];
@@ -210,9 +207,9 @@ export function FilterTab({
       </fieldset>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">カテゴリごとの表示</legend>
-        {CATEGORIES.map((category) => (
+        {FILTER_CATEGORIES.map((category) => (
           <label key={category} className="flex items-center justify-between gap-2">
-            {CATEGORY_LABELS[category]}
+            {filterLabel(category)}
             <select
               value={shown.modes[category] ?? DEFAULT_MODE}
               onChange={(event) => setMode(category, event.target.value)}

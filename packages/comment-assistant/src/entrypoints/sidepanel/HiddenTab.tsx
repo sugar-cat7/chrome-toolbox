@@ -3,7 +3,8 @@ import { launch } from '@chrome-toolbox/contracts';
 import type { PanelPort } from '../../panel.ts';
 import type { FeedbackVerdict, HiddenEntry } from '../../protocol.ts';
 import type { StreamContext } from '../../stream-context.ts';
-import { clockTime, explain, REASON_LABELS } from './text.ts';
+import { CATEGORY_NAMES } from '../../labels.ts';
+import { clockTime, explain } from './text.ts';
 
 type Rows =
   | { status: 'loading' }
@@ -267,7 +268,7 @@ function HiddenRow({
         </p>
       )}
       <p className="flex flex-wrap gap-x-2 text-xs text-slate-500">
-        <span>{REASON_LABELS[entry.category]}</span>
+        <span>{CATEGORY_NAMES[entry.category]}</span>
         {entry.abusive !== undefined && <span>Clef {Math.round(entry.abusive * 100)}%</span>}
         <time dateTime={new Date(entry.at).toISOString()}>{clockTime(entry.at)}</time>
       </p>

@@ -1,22 +1,10 @@
 import { createLruCache, type CommentCategory } from '@chrome-toolbox/extension-core';
 import { modeOf, type FilterSettings } from './filters.ts';
+import { CATEGORY_NAMES } from './labels.ts';
 import { HOLDING_ATTRIBUTE, WAIT_ATTRIBUTE } from './hold.ts';
 import type { Annotation } from './protocol.ts';
 import { ID_ATTRIBUTE, type SiteAdapter } from './sites/types.ts';
 
-const LABELS: Readonly<Record<CommentCategory, string>> = {
-  abusive: '攻撃的',
-  spam: 'スパム',
-  spoiler: 'ネタバレ',
-  question: '質問',
-  important: '重要情報',
-  chatter: '雑談',
-  instruction: '指示',
-  relay: '他配信の話題',
-  ghosting: 'ゴースティング',
-  privacy: 'プライバシー',
-  sensitive: 'センシティブ',
-};
 /**
  * Each category's colour, and the opaque ink of the label on its bar: black or white, whichever
  * keeps WCAG contrast of at least 4.5:1 with the colour (5.0:1 or more). Both are fixed, so a
@@ -205,7 +193,7 @@ function show(
   set(message, 'data-ca-mode', mode);
   if (mode === 'hide' || mode === 'blur') set(message, CONCEAL, mode);
   else if (message.hasAttribute(CONCEAL)) message.removeAttribute(CONCEAL);
-  set(message, 'data-ca-label', LABELS[annotation.category]);
+  set(message, 'data-ca-label', CATEGORY_NAMES[annotation.category]);
   const holder = adapter.textElement(message);
   if (!holder) return;
   // An empty translation is no translation.

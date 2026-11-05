@@ -4194,6 +4194,35 @@ describe('genre categories (R62)', () => {
     expect(annotations().map((a) => a.category)).toEqual(['chatter', 'instruction']);
   });
 
+  it('learns from an ok verdict on a genre category: a correction in the next prompt and the text allowlisted (R53, R62)', async () => {
+    const text = 'came over from another stream';
+    const llama = fakeLlama(echo({ [text]: 'relay' }));
+    const { annotations, pipeline } = setup({
+      fetch: llama.fetch,
+      feedback: createFeedbackStore(),
+    });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', text)] });
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(annotations()[0]).toMatchObject({ category: 'relay' });
+    expect(await pipeline.review(channel.site, channel.channel, '1', 'ok')).toEqual(
+      Ok({ persisted: true }),
+    );
+    // A copy is chat whatever the model says, and the next batch carries the correction.
+    pipeline.ingest(target, {
+      ...channel,
+      comments: [comment('2', text), comment('3', 'hello there')],
+    });
+    await vi.waitFor(() =>
+      expect(annotations().filter((a) => a.id === '2' || a.id === '3')).toHaveLength(2),
+    );
+    expect(annotations().find((a) => a.id === '2')).toMatchObject({ category: 'chatter' });
+    expect(pipeline.hidden(channel.site, channel.channel).map((h) => h.id)).toEqual([]);
+    const user = llama.state.bodies.at(-1)?.messages[1]?.content ?? '';
+    expect(user).toContain(
+      `Viewer corrections (JSON): ${JSON.stringify([{ text, wrong: 'relay' }])}`,
+    );
+  });
+
   it('lists a genre category for review and counts it for the badge (R54)', async () => {
     const llama = fakeLlama(echo({ 'came over from another stream': 'relay' }));
     const counts: number[] = [];

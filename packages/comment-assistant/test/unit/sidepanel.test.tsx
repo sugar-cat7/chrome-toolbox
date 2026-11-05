@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
+import { commentCategorySchema } from '@chrome-toolbox/extension-core';
 import { App } from '../../src/entrypoints/sidepanel/App.tsx';
+import { FILTER_CATEGORIES } from '../../src/entrypoints/sidepanel/text.ts';
 import { defaultFilterSettings, filterKey } from '../../src/filters.ts';
 import { panelPort, type PanelApi } from '../../src/panel.ts';
 import {
@@ -574,6 +576,10 @@ describe('side panel', () => {
       expect(row?.querySelector('p.text-xs span')?.textContent).toBe(reason);
     },
   );
+
+  it('lists every category once among the filter rows', () => {
+    expect(FILTER_CATEGORIES.toSorted()).toEqual(commentCategorySchema.options.toSorted());
+  });
 
   it('offers the genre categories in the filters, removed by default (R62)', async () => {
     const { api } = fakeApi();
