@@ -106,9 +106,11 @@ export function contextText(context: StreamContext): string {
 /**
  * A Japanese word that negates or bans what precedes it, after `は` or `も` too: `ネタバレOKじゃない`,
  * `指示OKではありません`, `参加型なし`, `参加型ありません`, `参加型はなし`, `ネタバレ有無`, `ネタバレ禁止`,
- * `アドバイス歓迎しない`.
+ * `アドバイス歓迎しない`; or a negated verb later in the same clause (up to 10 characters, before
+ * any 、。！？・/ or bracket): `参加型やってません`, `参加型は行っておりません`, `指示OKな日ではありません`,
+ * `参加型はやらないです`. `ないで` that invites (`遠慮しないでね`) is no negation.
  */
-const JA_NOT = String.raw`(?![\s　]*(?:[はも][\s　]*)?(?:じゃ|では|ない|なし|無|禁止|ません|しない|しません|(?:あり|有り?)ません|ng|×|✕))`;
+const JA_NOT = String.raw`(?![\s　]*(?:[はも][\s　]*)?(?:じゃ|では|ない|なし|無|禁止|ません|しない|しません|(?:あり|有り?)ません|ng|×|✕))(?![^\n、。,.!！?？・|｜/／【】[\]()（）]{0,10}?(?:ません|ない(?!よう|で(?!す))|なし|無し|禁止|お断り))`;
 /**
  * An English negation that governs the phrase: right before it (`no spoilers allowed`, `don't
  * backseat me`, `do not backseat me`, `never backseat me`) or before one word that narrows it

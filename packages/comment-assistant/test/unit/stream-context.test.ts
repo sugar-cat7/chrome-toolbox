@@ -374,6 +374,18 @@ describe('stream keys and prompt context', () => {
     { text: '参加型はありません', expected: [] },
     { text: '参加型はなし', expected: [] },
     { text: '参加型はじめます', expected: ['instruction'] },
+    // A verb negated later in the clause relaxes nothing either (review G2 minor 2).
+    { text: '参加型やってません', expected: [] },
+    { text: '参加型はしていません', expected: [] },
+    { text: '参加型は行っておりません', expected: [] },
+    { text: '指示OKな日ではありません', expected: [] },
+    { text: 'ネタバレOKの回ではないです', expected: [] },
+    { text: '参加型はやらないです', expected: [] },
+    // ... but a negation in another clause, or one that invites, leaves it relaxed.
+    { text: '参加型！初見さんも遠慮しないでね', expected: ['instruction'] },
+    { text: '【参加型】ランクじゃないよ', expected: ['instruction'] },
+    { text: '参加型、ネタバレはなしで', expected: ['instruction'] },
+    { text: 'ネタバレあり、苦手な方はご注意ください', expected: ['spoiler'] },
     { text: 'no big spoilers allowed', expected: [] },
     { text: 'not backseating welcome', expected: [] },
     { text: '【初見】指示OKではありません', expected: [] },
