@@ -1,15 +1,17 @@
 // A local stand-in for llama.cpp's HTTP server, so extension E2E tests never depend on a real
 // model server. It runs in Node (outside src/) and speaks the formats the extensions send:
-// health, props and models, the compact comment batch and the chat summary
+// health, props and models, the compact comment batch, the chat summary and the genre guess
 // (`/v1/chat/completions`, prompts.ts) and Clef (`/v1/systemone`, toxicity.ts).
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
   COMMENT_CATEGORY_CODES,
   commentBatchPrompt,
+  genrePrompt,
   summaryPrompt,
   type ChatMessage,
   type CommentCategory,
+  type StreamGenre,
 } from '../src/index.ts';
 
 /** The body of a `/v1/chat/completions` request, as the llama client sends it. */
@@ -49,6 +51,9 @@ export type LlamaStub = {
 const COMMENT_SYSTEM = commentBatchPrompt({ comments: [], context: '' }).messages[0]?.content;
 const SUMMARY_SYSTEM = summaryPrompt({ windowMinutes: 5, questions: [], peaks: [], others: [] })
   .messages[0]?.content;
+const GENRE_SYSTEM = genrePrompt({}).messages[0]?.content;
+/** The genre the stub guesses for every stream. */
+export const STUB_GENRE: StreamGenre = 'story';
 /**
  * Words that steer the stub (R37, R43): the model calls a text with `BAD` or `ROUGH` abusive, and
  * Clef scores a text with `BAD` or `HARSH` as abusive.
@@ -155,8 +160,9 @@ const NOT_FOUND: StubReply = { status: 404, body: { error: { code: 404 } } };
 /**
  * llama.cpp as the extensions use it: a healthy server with one model and 2 slots, a comment
  * batch and summary reply built by `commentBatchReply` (a text with `BAD` or `ROUGH` is abusive)
- * and `summaryReply`, and Clef scoring a text with `BAD` or `HARSH` as abusive (0.95). Other
- * requests get 404. In router mode every request carries a `model`; the stub ignores it.
+ * and `summaryReply`, `STUB_GENRE` for a genre guess, and Clef scoring a text with `BAD` or
+ * `HARSH` as abusive (0.95). Other requests get 404. In router mode every request carries a
+ * `model`; the stub ignores it.
  */
 export function defaultResponder(request: StubRequest): StubReply {
   switch (`${request.method} ${request.path}`) {
@@ -174,6 +180,7 @@ export function defaultResponder(request: StubRequest): StubReply {
       if (user === undefined) return NOT_FOUND;
       if (system === COMMENT_SYSTEM) return chatCompletion(commentBatchReply(user));
       if (system === SUMMARY_SYSTEM) return chatCompletion(summaryReply(user));
+      if (system === GENRE_SYSTEM) return chatCompletion(STUB_GENRE);
       return NOT_FOUND;
     }
     default:

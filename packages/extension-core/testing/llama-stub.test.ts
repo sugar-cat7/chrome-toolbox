@@ -4,13 +4,21 @@ import {
   createClefJudge,
   createLlamaClient,
   createQueue,
+  genrePrompt,
   parseCommentBatch,
+  parseGenre,
   parseSummary,
   summaryPrompt,
   type LlamaClient,
   type SummaryInput,
 } from '../src/index.ts';
-import { startLlamaStub, STUB_ABUSIVE, STUB_BENIGN, type LlamaStub } from './llama-stub.ts';
+import {
+  startLlamaStub,
+  STUB_ABUSIVE,
+  STUB_BENIGN,
+  STUB_GENRE,
+  type LlamaStub,
+} from './llama-stub.ts';
 
 // The stub speaks what the extensions send, through the real client: if a prompt or reply
 // format changes, this fails before any browser test does.
@@ -26,6 +34,11 @@ describe('llama.cpp stub', () => {
   });
   afterEach(async () => {
     await stub.stop();
+  });
+
+  test('answers a genre guess with one genre id', async () => {
+    const reply = await client.chat(genrePrompt({ title: 'Fixture Quest Part 3' }));
+    expect(reply.ok && parseGenre(reply.value.text)).toBe(STUB_GENRE);
   });
 
   test('answers a comment batch line per comment: questions by "?", BAD and ROUGH as abusive, translations for marked ones', async () => {

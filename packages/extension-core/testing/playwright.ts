@@ -26,6 +26,7 @@ export {
   defaultResponder,
   summaryReply,
   STUB_ABUSIVE,
+  STUB_GENRE,
   STUB_QUESTION,
   STUB_TOPIC,
   type LlamaStub,

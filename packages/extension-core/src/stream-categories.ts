@@ -60,7 +60,10 @@ export const STREAM_CATEGORY_DEFINITIONS = {
     'raises politics, religion or another divisive social issue, or baits the streamer into a statement on one (elections, parties, politicians, territorial disputes such as asking the streamer to say a region is or is not a country, wars, spreading a religion); compares the streamer with another named or identifiable streamer, or puts either down, whether the comparison is kind or not ("○○ちゃんより歌うまいね", "○○の方が面白かった"); makes sexual remarks, requests or advances to the streamer or another real person (their body, their voice described sexually, asking for outfits, poses or camera angles); or jokes about, provokes or baits on a real disaster, accident, death or tragedy (不謹慎). Not sensitive: games, films, songs or shows about war, politics or disasters, idol popularity votes (総選挙), national teams in sports, 神 as praise (神ゲー), a neutral mention that another streamer exists or has played the same game, and compliments that are not sexual ("声きれい").',
 } as const satisfies Record<StreamCategory, string>;
 
-/** What kind of stream it is (R62); `other` while unknown. Task G2 detects it. */
+/**
+ * What kind of stream it is (R62); `other` while unknown. The comment assistant detects it from
+ * the stream's page or guesses it once (`genrePrompt`), and the viewer may choose it (R63).
+ */
 export const STREAM_GENRES = [
   'fps',
   'story',

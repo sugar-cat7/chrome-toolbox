@@ -6,6 +6,8 @@ import {
   isStreamCategory,
   STREAM_CATEGORIES,
   STREAM_CATEGORY_DEFINITIONS,
+  STREAM_GENRES,
+  streamGenreSchema,
   type BaseCategory,
   type CommentCategory,
   type StreamCategory,
@@ -452,6 +454,50 @@ export const commentBatchPrompt = (
     grammar: commentBatchGrammar(input.comments, categories),
   };
 };
+
+/**
+ * Reply tokens of a genre guess: the longest id (`sports_viewing`) takes about 4, and the
+ * grammar ends the reply after one.
+ */
+export const GENRE_MAX_TOKENS = 8;
+
+const GENRE_SYSTEM = `You help a Japanese viewer choose the comment filters of a live stream.
+Classify the stream into exactly one genre by its title and, when given, the game it shows.
+Genres:
+${STREAM_GENRES.filter((genre) => genre !== 'other')
+  .map((genre) => `- ${genre}: ${GENRE_NAMES[genre]}`)
+  .join('\n')}
+- other: none of these, or the title and game do not tell
+Words in 【】 at the start or end of a title often name the kind of stream. A game title alone names its genre.
+${DATA_NOT_INSTRUCTIONS}
+Reply with the genre id only.`;
+
+/**
+ * The one guess of a stream's genre (R63, Task G2 step 5): the fixed system turn defines every
+ * genre id, the user turn gives the title and the game (each JSON-encoded, the game `null` when
+ * the page shows none), and the grammar allows exactly one id.
+ */
+export const genrePrompt = (
+  input: Readonly<{ title?: string | undefined; game?: string | undefined }>,
+): GrammarPrompt => ({
+  messages: [
+    { role: 'system', content: GENRE_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        `Title (JSON string): ${JSON.stringify(input.title ?? '')}`,
+        `Game (JSON string or null): ${JSON.stringify(input.game ?? null)}`,
+      ].join('\n'),
+    },
+  ],
+  grammar: `root ::= ${STREAM_GENRES.map((genre) => `"${genre}"`).join(' | ')}`,
+});
+
+/** The genre a guess names; anything but one genre id is no answer: `other`. */
+export function parseGenre(text: string): StreamGenre {
+  const decoded = streamGenreSchema.safeParse(text.trim());
+  return decoded.success ? decoded.data : 'other';
+}
 
 /** One distinct text of a summary input and how many comments wrote it. */
 export type SummaryText = Readonly<{ text: string; count: number }>;
