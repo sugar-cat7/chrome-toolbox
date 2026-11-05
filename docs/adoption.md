@@ -216,6 +216,30 @@ Service worker:
 - On 5,000 comments of 5 minutes in Node, `summarize` took 18.4 ms before and 7.2 ms after. That is 4.2 and 1.6 times one normalization of every comment. It made 3 normalizations a comment before and at most 1 after.
 - `isCopypasta` on 1,000 characters with no repeated phrase took 2.1 ms (Latin) and 8.5 ms (kana) before, and 0.04 ms after. Its answers equal those of the full search (property test).
 
+### Genre categories (R62, 2026-11-05)
+
+The comment prompt gained per-stream categories (`spoiler` and the genre categories `instruction` `n`, `relay` `r`, `ghosting` `g`, `privacy` `v`, `sensitive` `e`): the fixed system turn keeps only `a`, `s`, `q`, `i` and `c`, the user turn names the genre and defines the categories the stream has on (`streamCategories`), and the grammar allows only their codes. `pnpm bench:genre -- --server http://127.0.0.1:18083 --model gemma4-e4b` (`tools/bench/genre.ts`) sends the self-written sets of `packages/extension-core/test/fixtures/genre-eval/` with that prompt and grammar: per genre in file order, batches of 3, temperature 0, no slot pinned, a made-up title per genre, no relaxation and no spoiler note. Japanese lines are classified only, as in the extension. Results go to `bench-data/results/genre-*.jsonl` (local).
+
+Server: the router server of [llama-server.md](llama-server.md) at `http://127.0.0.1:18083` (`/props` `build_info` `b1-620d222`, the llama.cpp commit `620d2225cc43` above), model gemma4-e4b with MTP, `--parallel 3`; it was not restarted or reconfigured. Other applications were running.
+
+Sets: 238 made-up lines, six genres (fps 45, story 40, horror 39, chat 39, singing 35, board 40), every line `{text, genre, expected}`, with tricky negatives per genre (「次どこ降りる？」, guesses, talk about a finished match or hand, 神 as praise, 総選挙, 前世 in a story, small talk, a one-word shout). 108 lines expect `chatter`, 148 `chatter`, `question` or `important`. Positives: spoiler 10, instruction 19, relay 18, ghosting 9, privacy 18, sensitive 16. No real chat, streamer, agency or viewer name.
+
+"Chatter FP" is the share of lines expected `chatter` that the model put in a stream category; the target is precision 0.8 or more for the new categories and chatter FP 3% or less.
+
+| Run | Definitions                              | spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP   | Chatter, question, important FP |
+| --- | ---------------------------------------- | ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------ | ------------------------------- |
+| 1   | first draft                              | 1.00 / 1.00   | 0.95 / 0.95       | 1.00 / 0.89 | 0.60 / 0.67    | 0.88 / 0.78   | 1.00 / 0.81     | 3.7% (4/108) | 4.7% (7/148)                    |
+| 2   | revision 1                               | 0.91 / 1.00   | 0.95 / 1.00       | 0.94 / 0.89 | 0.71 / 0.56    | 0.76 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 6.1% (9/148)                    |
+| 3   | revision 2 (kept)                        | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.94 | 0.89 / 0.89    | 0.84 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.1% (6/148)                    |
+| 4   | revision 3 (reverted)                    | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.89 | 0.88 / 0.78    | 0.80 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.7% (7/148)                    |
+| 5   | revision 2 again (final, confirms run 3) | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.94 | 0.89 / 0.89    | 0.84 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.1% (6/148)                    |
+
+- Run 1's examples came from the research and some equalled set lines (「対面の待ち三六索」, 「覚悟しとけ、この後泣くぞ」, 「今日の晩ご飯なに？」), so it overstates. From revision 1 on, no example in a definition is a set line; what overlaps is generic cue wording (〜たほうがいい, から来ました, さっきの試合).
+- Revision 1 made ghosting a stated fact during a match and widened privacy, relay and sensitive; ghosting lost sniping lines and privacy took small-talk questions (a birthday, a voice actor) once its "not" list named them. Revision 2 wrote ghosting as relaying or sniping with guesses and finished rounds left out, dropped the priming words from privacy's "not" list, and added "Most comments fit none of them." to the system turn. Revision 3 (guesses as never spoiler or ghosting, people in a game or show as never privacy) did worse and was reverted.
+- Kept (runs 3 and 5, identical): precision 0.84-1.00 for every new category (target met). **Chatter FP 3.7% (4/108) misses the 3% target** in every run. The four lines: a guess about the last boss called a spoiler, 「この人怪しくない？」 about a character called privacy, a guess about a hand (〜そう) called ghosting, and 「逃げてー！」 in horror called an instruction (a shout the set labels chatter; arguably an instruction). Other ordinary lines flagged: a birthday question and a voice-actor question, both as privacy. Missed positives: a sensitive question wrapped in 「麻雀は置いといて」, a ghosting wait without a source, a line about another streamer's birthday stream (relay), and a 前世 claim and a partner question (privacy).
+- Prompt size (llama-server `/tokenize`, one comment): system turn 616 tokens, the same for every stream; user turn 367 tokens for an `other` stream (relay, privacy, sensitive defined) and 688 for an `fps` stream (five categories), against about 30 before R62. The user-turn prefix repeats from batch to batch of a stream, so llama.cpp's prompt cache keeps it on a slot that last served that stream. Batches in the final run: p50 311 ms, p95 844 ms.
+- Limits: 9-19 positives per category, written by the same person who wrote the definitions; no real chat. A real-stream check is part of Task G2.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
