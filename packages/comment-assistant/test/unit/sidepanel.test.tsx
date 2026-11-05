@@ -749,6 +749,49 @@ describe('side panel', () => {
     expect(select.ownerDocument.activeElement).toBe(select);
   });
 
+  it('follows the service worker once it answered a pick, also when it drops the choice later', async () => {
+    let chosen: string | undefined;
+    const { api, events } = fakeApi({
+      'comments/stream': () =>
+        Ok({
+          stream,
+          genre: {
+            genre: chosen ?? 'other',
+            reason: chosen === undefined ? 'none' : 'viewer',
+            detected: 'other',
+            detectedReason: 'none',
+            categories: ['relay', 'privacy', 'sensitive'],
+          },
+        }),
+      'comments/genre': ({ genre }) => {
+        chosen = typeof genre === 'string' ? genre : undefined;
+        return Ok({ persisted: true });
+      },
+    });
+    const announce = (): void =>
+      act(() => {
+        for (const listener of events.message.listeners)
+          (listener as (message: unknown) => void)({ type: 'comments/stream-changed' });
+      });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const select = (await within(panel).findByLabelText('この配信のジャンル')) as HTMLSelectElement;
+    await userEvent.selectOptions(select, 'FPS・対戦');
+    expect(select.value).toBe('fps');
+    // The service worker answers the choice ...
+    announce();
+    expect(await within(panel).findByText('この配信用に保存しました')).toBeTruthy();
+    await vi.waitFor(() =>
+      expect(within(panel).getByRole('option', { name: 'FPS・対戦' })).toBeTruthy(),
+    );
+    // ... and later drops it (another Twitch category, or the feedback cleared): 自動 again.
+    chosen = undefined;
+    announce();
+    await vi.waitFor(() => expect(select.value).toBe(''));
+    expect(select.ownerDocument.activeElement).toBe(select);
+  });
+
   it('says that a Twitch channel keeps its genre until the category changes (R69)', async () => {
     const twitch = {
       site: 'twitch',

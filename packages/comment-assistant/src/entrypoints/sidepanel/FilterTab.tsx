@@ -44,8 +44,9 @@ const AUTO_GENRE = '';
 /**
  * The stream's genre (R63): the detected one and what decided it, and the viewer's choice for
  * the stream (`自動` for none). It stays mounted (and focused) across the service worker's
- * answers: a choice shows at once and gives way to the service worker's answer once that
- * changes, or when saving it failed (`failed`).
+ * answers: a choice shows at once and gives way to the next answer that differs from the one it
+ * was made over (the panel keeps an unchanged answer as the same object), or to the same answer
+ * when saving it failed (`failed`). With no pick in flight it shows the latest answer.
  */
 function GenreField({
   genre,
@@ -56,8 +57,10 @@ function GenreField({
 }) {
   const chosen = genre?.reason === 'viewer' ? genre.genre : AUTO_GENRE;
   /** The viewer's pick and the answer it was made over. */
-  const [pick, setPick] = useState<Readonly<{ value: string; over: string }> | undefined>();
-  const value = pick !== undefined && pick.over === chosen ? pick.value : chosen;
+  const [pick, setPick] = useState<
+    Readonly<{ value: string; over: GenreView | undefined }> | undefined
+  >();
+  const value = pick !== undefined && pick.over === genre ? pick.value : chosen;
   // A label of its own: the genre names (雑談 …) stay out of the label text of other rows.
   const id = useId();
   const detection = useId();
@@ -75,7 +78,7 @@ function GenreField({
           aria-describedby={genre === undefined ? undefined : detection}
           onChange={(event) => {
             const picked = event.target.value;
-            setPick({ value: picked, over: chosen });
+            setPick({ value: picked, over: genre });
             onChoose(
               STREAM_GENRES.find((candidate) => candidate === picked),
               () => setPick(undefined),
