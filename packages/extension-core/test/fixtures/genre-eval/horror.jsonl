@@ -15,7 +15,7 @@
 {"text": "このゲーム何時間で終わる？", "genre": "horror", "expected": "question"}
 {"text": "走らないで歩いたほうがいいよ", "genre": "horror", "expected": "instruction"}
 {"text": "夜中に見るんじゃなかった", "genre": "horror", "expected": "chatter"}
-{"text": "ぬいまるの配信から来た", "genre": "horror", "expected": "relay"}
+{"text": "ぬいまるの配信から来た", "genre": "horror", "expected": "chatter"}
 {"text": "がんばれ〜", "genre": "horror", "expected": "chatter"}
 {"text": "心霊より政治の方が怖いよね、次の選挙誰に入れる？", "genre": "horror", "expected": "sensitive"}
 {"text": "逃げてー！", "genre": "horror", "expected": "chatter"}
@@ -39,3 +39,5 @@
 {"text": "見てるだけで怖い", "genre": "horror", "expected": "chatter"}
 {"text": "被災地の心霊スポット凸してみてよ、不謹慎なほど伸びるって", "genre": "horror", "expected": "sensitive"}
 {"text": "災害から脱出するホラー、リアルで怖い", "genre": "horror", "expected": "chatter"}
+{"text": "主人公は助かるって信じてる", "genre": "horror", "expected": "chatter"}
+{"text": "ぺんたさんの配信、今めっちゃ怖いとこやってるから見に行こ", "genre": "horror", "expected": "relay"}

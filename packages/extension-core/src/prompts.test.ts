@@ -198,8 +198,8 @@ describe('commentBatchPrompt', () => {
     expect(index('- g = ghosting: ')).toBeLessThan(index('Viewer corrections'));
     expect(index('Viewer corrections')).toBeLessThan(index('Comments'));
     // The definitions name what is not the category: the tricky negatives (R62).
-    expect(lines[index('- n = instruction: ')]).toMatch(/Not instruction: emotional shouts/u);
-    expect(lines[index('- g = ghosting: ')]).toMatch(/Not ghosting: /u);
+    expect(lines[index('- n = instruction: ')]).toMatch(/are not instructions\./u);
+    expect(lines[index('- g = ghosting: ')]).toMatch(/are not ghosting\./u);
   });
 
   it('names an unknown genre as such', () => {
@@ -220,8 +220,7 @@ describe('commentBatchPrompt', () => {
       .find((text) => text.startsWith('- p = spoiler: '));
     expect(line).toMatch(/the spoiler targets in the stream context when it has them/u);
     expect(line).toMatch(/what the stream title names/u);
-    expect(line).toMatch(/Not spoiler: a viewer's guess, prediction or wondering/u);
-    expect(line).toMatch(/tier lists, votes, opinions/u);
+    expect(line).toMatch(/A guess, a hope or a belief about what will happen is not a spoiler/u);
   });
 
   it('pins the compact line grammar of a mixed batch: id, code and a bounded ja where translated', () => {

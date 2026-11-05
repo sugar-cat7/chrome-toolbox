@@ -16,7 +16,7 @@
 {"text": "今のショートカット神", "genre": "puzzle_rta", "expected": "chatter"}
 {"text": "RTAより選挙の話して、どの党に入れた？", "genre": "puzzle_rta", "expected": "sensitive"}
 {"text": "タイマー見てるだけで緊張する", "genre": "puzzle_rta", "expected": "chatter"}
-{"text": "ぺんたさんも今同じカテゴリ走ってる", "genre": "puzzle_rta", "expected": "relay"}
+{"text": "ぺんたさんも今同じカテゴリ走ってる", "genre": "puzzle_rta", "expected": "chatter"}
 {"text": "このゲーム何年前の？", "genre": "puzzle_rta", "expected": "question"}
 {"text": "the final level is the first level backwards lol", "genre": "puzzle_rta", "expected": "spoiler"}
 {"text": "gg that was clean", "genre": "puzzle_rta", "expected": "chatter"}
@@ -37,3 +37,5 @@
 {"text": "初見ですがすごい", "genre": "puzzle_rta", "expected": "chatter"}
 {"text": "ふわりさんの方が速いよ、遅すぎ", "genre": "puzzle_rta", "expected": "sensitive"}
 {"text": "崩れた街を直すパズルって設定いいね", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "乱数来い！", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "もちこさんの枠で同じ面クリアできずに台パンしてた", "genre": "puzzle_rta", "expected": "relay"}

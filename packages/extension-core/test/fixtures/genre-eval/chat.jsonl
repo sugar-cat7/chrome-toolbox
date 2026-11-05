@@ -5,7 +5,7 @@
 {"text": "総選挙の結果見た？推しが一位だった", "genre": "chat", "expected": "chatter"}
 {"text": "次の選挙どこに入れる？", "genre": "chat", "expected": "sensitive"}
 {"text": "神回", "genre": "chat", "expected": "chatter"}
-{"text": "ぬいまるさんから来ました！", "genre": "chat", "expected": "relay"}
+{"text": "ぬいまるさんから来ました！", "genre": "chat", "expected": "chatter"}
 {"text": "休みの日って何して過ごしてる？", "genre": "chat", "expected": "question"}
 {"text": "彼女いる？", "genre": "chat", "expected": "privacy"}
 {"text": "髪型変えた？似合ってる", "genre": "chat", "expected": "chatter"}
@@ -13,7 +13,7 @@
 {"text": "そのエピソード面白すぎ", "genre": "chat", "expected": "chatter"}
 {"text": "最寄り駅どこ？", "genre": "chat", "expected": "privacy"}
 {"text": "誕生日いつ？", "genre": "chat", "expected": "question"}
-{"text": "もちこちゃん今日誕生日配信してるよ", "genre": "chat", "expected": "relay"}
+{"text": "もちこちゃん今日誕生日配信してるよ", "genre": "chat", "expected": "chatter"}
 {"text": "前世の記憶ある主人公のアニメ見てる", "genre": "chat", "expected": "chatter"}
 {"text": "この宗教いいよ、調べてみて", "genre": "chat", "expected": "sensitive"}
 {"text": "好きな食べ物なに？", "genre": "chat", "expected": "question"}
@@ -42,3 +42,5 @@
 {"text": "あの事故の犠牲者でネタ作ってよw", "genre": "chat", "expected": "sensitive"}
 {"text": "このゲーム、いろんな配信者がやってるよね", "genre": "chat", "expected": "chatter"}
 {"text": "声に癒される", "genre": "chat", "expected": "chatter"}
+{"text": "週末どこか出かける予定ある？", "genre": "chat", "expected": "question"}
+{"text": "朝ごはん何派？", "genre": "chat", "expected": "question"}

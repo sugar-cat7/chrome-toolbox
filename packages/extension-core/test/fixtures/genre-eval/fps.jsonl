@@ -13,7 +13,7 @@
 {"text": "さっきの試合、敵ずっと2階にいたね", "genre": "fps", "expected": "chatter"}
 {"text": "リング縮むから早く移動しな", "genre": "fps", "expected": "instruction"}
 {"text": "キャラの声優さん誰？", "genre": "fps", "expected": "question"}
-{"text": "ぺんたさんの枠から来ました！", "genre": "fps", "expected": "relay"}
+{"text": "ぺんたさんの枠から来ました！", "genre": "fps", "expected": "chatter"}
 {"text": "回復しながら戦うのうますぎ", "genre": "fps", "expected": "chatter"}
 {"text": "次の選挙どこに入れるの？", "genre": "fps", "expected": "sensitive"}
 {"text": "nice clutch!!", "genre": "fps", "expected": "chatter"}
@@ -23,7 +23,7 @@
 {"text": "このスキン可愛い", "genre": "fps", "expected": "chatter"}
 {"text": "声で中の人わかったわ、前世あの人でしょ", "genre": "fps", "expected": "privacy"}
 {"text": "右から来るの読んでたの？", "genre": "fps", "expected": "question"}
-{"text": "もちこちゃんも今ランクやってるよ", "genre": "fps", "expected": "relay"}
+{"text": "もちこちゃんも今ランクやってるよ", "genre": "fps", "expected": "chatter"}
 {"text": "今日調子いいね", "genre": "fps", "expected": "chatter"}
 {"text": "スナイパー拾わないで、SMGにして", "genre": "fps", "expected": "instruction"}
 {"text": "ランクいくつ？", "genre": "fps", "expected": "question"}
@@ -47,3 +47,8 @@
 {"text": "カメラもうちょい下から映して", "genre": "fps", "expected": "sensitive"}
 {"text": "災害がテーマのサバイバルFPSって珍しいね", "genre": "fps", "expected": "chatter"}
 {"text": "このゲーム、もちこさんも昔やってたよね", "genre": "fps", "expected": "chatter"}
+{"text": "敵チーム、今日は籠もりがちっぽいね", "genre": "fps", "expected": "chatter"}
+{"text": "いい武器出てくれー", "genre": "fps", "expected": "chatter"}
+{"text": "今の弾どこから飛んできた？", "genre": "fps", "expected": "question"}
+{"text": "昨日何時に寝た？", "genre": "fps", "expected": "question"}
+{"text": "みんなでぺんたさんの枠に凸しようぜ", "genre": "fps", "expected": "relay"}

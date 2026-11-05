@@ -17,7 +17,7 @@
 {"text": "前世の記憶がある主人公って設定いいよね", "genre": "story", "expected": "chatter"}
 {"text": "そのパズル、上の石を先に動かせば解ける", "genre": "story", "expected": "instruction"}
 {"text": "声優さん豪華だよね", "genre": "story", "expected": "chatter"}
-{"text": "もちこちゃんの枠から来ました", "genre": "story", "expected": "relay"}
+{"text": "もちこちゃんの枠から来ました", "genre": "story", "expected": "chatter"}
 {"text": "このゲームクリアまで何時間くらい？", "genre": "story", "expected": "question"}
 {"text": "the king is the final boss btw", "genre": "story", "expected": "spoiler"}
 {"text": "this soundtrack is amazing", "genre": "story", "expected": "chatter"}
@@ -40,3 +40,5 @@
 {"text": "宝箱いっぱいあるね", "genre": "story", "expected": "chatter"}
 {"text": "ぬいまるちゃんの実況の方が面白かったな", "genre": "story", "expected": "sensitive"}
 {"text": "このゲーム、配信者に人気だよね", "genre": "story", "expected": "chatter"}
+{"text": "ヒロインは最後まで生きてるって信じてる", "genre": "story", "expected": "chatter"}
+{"text": "さっきぬいまるさんの枠でこのボスに10回負けてたよ", "genre": "story", "expected": "relay"}

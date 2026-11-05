@@ -17,7 +17,7 @@
 {"text": "役満見たい", "genre": "board", "expected": "chatter"}
 {"text": "麻雀は置いといて、首相の発言どう思う？", "genre": "board", "expected": "sensitive"}
 {"text": "点数計算はやい", "genre": "board", "expected": "chatter"}
-{"text": "ぺんたさんの枠から来ました", "genre": "board", "expected": "relay"}
+{"text": "ぺんたさんの枠から来ました", "genre": "board", "expected": "chatter"}
 {"text": "この役なんて名前？", "genre": "board", "expected": "question"}
 {"text": "ドラ切らないで、字牌から切って", "genre": "board", "expected": "instruction"}
 {"text": "神引き", "genre": "board", "expected": "chatter"}
@@ -40,3 +40,14 @@
 {"text": "ドラ多いね", "genre": "board", "expected": "chatter"}
 {"text": "ぺんたさんより打ち方下手だね", "genre": "board", "expected": "sensitive"}
 {"text": "このアプリ、たくさんの配信者が使ってるよね", "genre": "board", "expected": "chatter"}
+{"text": "対面、今日は押しが強いっぽいね", "genre": "board", "expected": "chatter"}
+{"text": "上家、鳴きが多いタイプかもね", "genre": "board", "expected": "chatter"}
+{"text": "赤ドラ来てくれ！", "genre": "board", "expected": "chatter"}
+{"text": "頼む、裏ドラ乗ってくれ", "genre": "board", "expected": "chatter"}
+{"text": "ツモ来い！", "genre": "board", "expected": "chatter"}
+{"text": "下家、索子多そうで怖い", "genre": "board", "expected": "chatter"}
+{"text": "今のロン、どこ待ちだったの？", "genre": "board", "expected": "question"}
+{"text": "最近ハマってる趣味ある？", "genre": "board", "expected": "question"}
+{"text": "対面の手、別視点で見たけど七対子テンパイしてる", "genre": "board", "expected": "ghosting"}
+{"text": "その中は鳴かずにスルーして", "genre": "board", "expected": "instruction"}
+{"text": "ぺんたさんの卓で今役満出たって！みんな見に行こ", "genre": "board", "expected": "relay"}

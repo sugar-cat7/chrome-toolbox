@@ -4,14 +4,14 @@
 {"text": "歌い方で中の人わかった", "genre": "singing", "expected": "privacy"}
 {"text": "鳥肌立った", "genre": "singing", "expected": "chatter"}
 {"text": "何曲目？", "genre": "singing", "expected": "question"}
-{"text": "もちこさんの歌枠から来ました", "genre": "singing", "expected": "relay"}
+{"text": "もちこさんの歌枠から来ました", "genre": "singing", "expected": "chatter"}
 {"text": "この曲好き", "genre": "singing", "expected": "chatter"}
 {"text": "選挙近いし、どの政党支持してるか教えて", "genre": "singing", "expected": "sensitive"}
 {"text": "声優さんの曲だよねこれ", "genre": "singing", "expected": "chatter"}
 {"text": "カラオケどこの店行ってるの？近所？", "genre": "singing", "expected": "privacy"}
 {"text": "次の歌枠いつ？", "genre": "singing", "expected": "question"}
 {"text": "原曲より好きかも", "genre": "singing", "expected": "chatter"}
-{"text": "ふわりさんも今歌枠してるね", "genre": "singing", "expected": "relay"}
+{"text": "ふわりさんも今歌枠してるね", "genre": "singing", "expected": "chatter"}
 {"text": "アンコール！", "genre": "singing", "expected": "chatter"}
 {"text": "歌詞の話じゃないけど、首相ってどう思う？", "genre": "singing", "expected": "sensitive"}
 {"text": "キー上げた？", "genre": "singing", "expected": "question"}

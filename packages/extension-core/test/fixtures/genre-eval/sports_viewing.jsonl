@@ -12,7 +12,7 @@
 {"text": "このチーム何連覇中？", "genre": "sports_viewing", "expected": "question"}
 {"text": "the official stream is ahead, they already scored again", "genre": "sports_viewing", "expected": "spoiler"}
 {"text": "国歌斉唱のとこ鳥肌", "genre": "sports_viewing", "expected": "chatter"}
-{"text": "もちこちゃんのウォッチパーティーから来た", "genre": "sports_viewing", "expected": "relay"}
+{"text": "もちこちゃんのウォッチパーティーから来た", "genre": "sports_viewing", "expected": "chatter"}
 {"text": "延長ってあるの？", "genre": "sports_viewing", "expected": "question"}
 {"text": "一緒に見てる人誰？彼女？", "genre": "sports_viewing", "expected": "privacy"}
 {"text": "いけー！", "genre": "sports_viewing", "expected": "chatter"}
@@ -32,3 +32,5 @@
 {"text": "観戦ありがとう", "genre": "sports_viewing", "expected": "chatter"}
 {"text": "昔の墜落事故ネタでこの選手いじろうぜ", "genre": "sports_viewing", "expected": "sensitive"}
 {"text": "他の配信者さんもこの試合見てるらしいね", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "絶対逆転するって信じてる", "genre": "sports_viewing", "expected": "chatter"}
+{"text": "ぺんたさんの観戦枠に凸しようぜ", "genre": "sports_viewing", "expected": "relay"}
