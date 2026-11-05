@@ -5,21 +5,29 @@ import { cut } from './types.ts';
 export const MAX_DESCRIPTION = 5000;
 /** Lines of one rules section after its heading. */
 const MAX_RULE_LINES = 20;
-/** Characters of a heading line: a sentence that only mentions a rule is none. */
+/** Characters of a heading line. */
 const MAX_HEADING = 30;
 /**
- * A heading of a stream's rules (R63): お約束, おやくそく, Rule, ルール (配信ルール), 禁止事項,
- * 注意事項 and お願い as a noun (`★お願い★`, not `お願いします`), after NFKC and in lower case.
+ * A heading of a stream's rules (R63, R68), after NFKC and in lower case: the keyword (お約束,
+ * おやくそく, Rule, ルール, 禁止事項, 注意事項, お願い) and nothing but decoration, brackets or a
+ * colon around it (`【お約束】`, `■配信ルール`, `ルール：`, `⚠️注意事項⚠️`), maybe after a scope
+ * (`配信`, `コメント欄の`, `chat `) and before a closing aside (`配信ルール（ご協力お願いします）`). A
+ * greeting or a sentence is none: `よろしくお願いいたします`, `お願い致します`, `Please read the rules
+ * below`, `ルール説明はこちら`.
  */
-const HEADING = /お約束|おやくそく|\brules?\b|ルール|禁止事項|注意事項|お願い(?!し)/u;
+const HEADING =
+  /^[\p{P}\p{S}\p{M}\p{Cf}\s]*(?:[\p{L}\p{N}]{1,8}の|配信|コメント|チャット|視聴|[a-z]+\s+)?(?:お約束|おやくそく|rules?|ルール|禁止事項|注意事項|お願い)[\p{P}\p{S}\p{M}\p{Cf}\s]*$/u;
+/** A closing aside in brackets after a heading: `（ご協力お願いします）`. */
+const ASIDE = /[(（][^()（）]{0,30}[)）][\p{P}\p{S}\p{M}\p{Cf}\s]*$/u;
 /** A line of symbols only: a separator (`━━━━`, `-----`). */
 const SEPARATOR = /^[\p{P}\p{S}\s]+$/u;
 /** A line that starts another section: a bracketed heading of its own, or hashtags. */
 const NEXT_SECTION = /^(?:【[^】]*】$|#)/u;
-const isHeading = (line: string): boolean => {
-  const text = line.normalize('NFKC').toLowerCase();
-  return text.length <= MAX_HEADING && HEADING.test(text);
-};
+/** Whether a line of a description is a heading of the stream's rules (`HEADING`). */
+export function isRulesHeading(line: string): boolean {
+  const text = line.normalize('NFKC').toLowerCase().trim();
+  return text.length <= MAX_HEADING && HEADING.test(text.replace(ASIDE, ''));
+}
 
 /**
  * The rules sections of a stream description (R63): each heading line and the lines after it,
@@ -35,7 +43,7 @@ export function rulesOf(description: string): string {
   while (i < lines.length) {
     const heading = lines[i] ?? '';
     i += 1;
-    if (!isHeading(heading)) continue;
+    if (!isRulesHeading(heading)) continue;
     const section = [heading];
     for (; i < lines.length && section.length <= MAX_RULE_LINES; i += 1) {
       const line = lines[i] ?? '';
@@ -44,7 +52,7 @@ export function rulesOf(description: string): string {
         if (section.length > 1) break;
         continue;
       }
-      if (isHeading(line) || NEXT_SECTION.test(line)) break;
+      if (isRulesHeading(line) || NEXT_SECTION.test(line)) break;
       section.push(line);
     }
     sections.push(section.join('\n'));

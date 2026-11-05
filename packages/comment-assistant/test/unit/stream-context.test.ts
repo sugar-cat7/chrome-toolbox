@@ -275,6 +275,17 @@ describe('description rules', () => {
         '◆おやくそく◆\n・雑談配信です\n★お願い★\n・連投しないでね\nRules\nbe nice\n禁止事項\n・宣伝\n注意事項\n・音量注意',
     },
     {
+      name: 'a heading with a colon, a mark or a scope before it',
+      text: 'ルール：\n・指示OKです\n\n■配信ルール\n・ネタバレ禁止\n\nコメント欄のお約束\n・連投NG\n\n⚠️注意事項⚠️\n・音量注意',
+      rules:
+        'ルール：\n・指示OKです\n■配信ルール\n・ネタバレ禁止\nコメント欄のお約束\n・連投NG\n⚠️注意事項⚠️\n・音量注意',
+    },
+    {
+      name: 'nothing: a greeting, a pointer or a sentence is no heading',
+      text: '今日もよろしくお願いいたします！\n・歌枠です\n\nお願い致します\n・雑談です\n\nPlease read the rules below\n・horror\n\nルール説明はこちら\n・FPS\n\nルールを守って楽しい配信にしよう\n・RTA',
+      rules: '',
+    },
+    {
       name: 'nothing: a request to subscribe is no heading',
       text: 'チャンネル登録よろしくお願いします！\n高評価もお願いします\n#fixture',
       rules: '',

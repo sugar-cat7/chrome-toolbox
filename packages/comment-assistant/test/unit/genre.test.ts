@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { streamGenreSchema } from '@chrome-toolbox/extension-core';
 import { GAME_GENRES } from '../../src/game-genres.ts';
+import { rulesOf } from '../../src/sites/rules.ts';
 import {
   createGenreBook,
   detectGenre,
@@ -46,6 +47,7 @@ describe('genre words', () => {
     // Traps: a simulcast is no watch-along, a chat "speedrun" no RTA, viewers no watch-along.
     { title: '【Twitch同時配信】Fixture Quest', genre: undefined },
     { title: '【雑談配信RTA】30分で寝る', genre: 'chat' },
+    { title: '【雑談配信 RTA】30分で寝る', genre: 'chat' },
     { title: '【同時視聴者100人目標】Fixture Quest', genre: undefined },
     // A frame rate is no FPS; a game named after spoilers names no genre.
     { title: '【120fps】Fixture Royale', genre: undefined },
@@ -93,19 +95,22 @@ describe('game table', () => {
 });
 
 describe('detectGenre', () => {
-  const rules = '【お約束】\n・雑談配信です。ゆっくりしていってね';
-  it('takes the rules first, then the title, the tags and the game (R63)', () => {
+  const rules = '【お約束】\n・この配信は雑談配信です。ゆっくりしていってね';
+  it('takes the title first, then the tags, the description rules and the game (R68)', () => {
     const all = {
       rules,
       title: '【ホラー】Fixture Haunt',
       tags: ['FPS'],
-      game: 'Fixture Quest',
+      game: 'Apex Legends',
     };
-    expect(detectGenre(all)).toEqual({ genre: 'chat', reason: 'rules' });
-    expect(detectGenre({ ...all, rules: undefined })).toEqual({ genre: 'horror', reason: 'title' });
-    expect(detectGenre({ tags: ['日本語', 'FPS'], game: 'just-chatting' })).toEqual({
+    expect(detectGenre(all)).toEqual({ genre: 'horror', reason: 'title' });
+    expect(detectGenre({ ...all, title: 'Fixture Haunt' })).toEqual({
       genre: 'fps',
       reason: 'tags',
+    });
+    expect(detectGenre({ ...all, title: 'Fixture Haunt', tags: [] })).toEqual({
+      genre: 'chat',
+      reason: 'rules',
     });
     expect(detectGenre({ title: 'Fixture Quest', game: 'Apex Legends' })).toEqual({
       genre: 'fps',
@@ -116,16 +121,93 @@ describe('detectGenre', () => {
     expect(detectGenre({})).toBeUndefined();
   });
 
+  it.each([
+    // The review's cases: an explicit title wins over a channel's standard rules ...
+    {
+      name: 'a warning to viewers under a 【雑談】 title',
+      source: {
+        title: '【雑談】のんびり',
+        rules: '【配信ルール】\nホラーが苦手な方はブラウザバック推奨です',
+      },
+      expected: { genre: 'chat', reason: 'title' },
+    },
+    // ... and a conditional or negated rule names no genre at all.
+    {
+      name: 'a rule for singing streams under an Apex title',
+      source: {
+        title: '【APEX】ランク',
+        game: 'Apex Legends',
+        rules: '【お約束】\n・歌枠ではリクエストは受け付けていません\n・指示コメはお控えください',
+      },
+      expected: { genre: 'fps', reason: 'game' },
+    },
+    {
+      name: 'a rule for singing streams without a title genre or game',
+      source: {
+        title: 'ランク',
+        rules: '【お約束】\n・歌枠ではリクエストは受け付けていません\n・指示コメはお控えください',
+      },
+      expected: undefined,
+    },
+    {
+      name: 'a warning to viewers without a title genre',
+      source: { title: 'のんびり', rules: '【配信ルール】\nホラーが苦手な方はご注意ください' },
+      expected: undefined,
+    },
+    // Rules read from a description by `rulesOf`: a greeting or a pointer is no heading, so
+    // these descriptions have no rules at all.
+    {
+      name: 'a greeting before links under an 【FPS】 title',
+      source: {
+        title: '【FPS】Fixture Royale',
+        rules: rulesOf(
+          '今日もよろしくお願いいたします！\n過去の歌枠はこちら▼\nhttps://example.com/',
+        ),
+      },
+      expected: { genre: 'fps', reason: 'title' },
+    },
+    {
+      name: 'a pointer to the rules before a schedule',
+      source: { rules: rulesOf('Please read the rules below\nWe play horror games on Fridays') },
+      expected: undefined,
+    },
+    // A genre counts in a heading of the rules or in a line about this stream.
+    {
+      name: 'a heading that names the stream',
+      source: { title: 'Fixture night', rules: '【歌枠のお約束】\n・リクエストは受け付けます' },
+      expected: { genre: 'singing', reason: 'rules' },
+    },
+    {
+      name: 'a line about this stream',
+      source: { title: 'Fixture night', rules: '■配信ルール\n今回はホラーゲームを遊びます' },
+      expected: { genre: 'horror', reason: 'rules' },
+    },
+    {
+      name: 'a line that is neither',
+      source: { title: 'Fixture night', rules: '【お約束】\n毎週金曜はホラーゲームを遊びます' },
+      expected: undefined,
+    },
+    {
+      name: 'a line about this stream that negates',
+      source: { title: 'Fixture night', rules: '【お約束】\n・今日の配信は雑談ではないです' },
+      expected: undefined,
+    },
+    {
+      name: 'a line about this stream that speaks of other streams',
+      source: { title: 'Fixture night', rules: '【お約束】\n・この配信以外の歌枠の話はしないでね' },
+      expected: undefined,
+    },
+  ])('reads $name', ({ source, expected }) => {
+    expect(detectGenre(source)).toEqual(expected);
+  });
+
   it('skips a rule that bans or restrains: it is about the viewers, not the stream', () => {
     expect(
       detectGenre({
-        rules: '【お約束】\n・リスナー同士の雑談はお控えください\n・他の方の歌枠の話はNG',
+        rules:
+          '【お約束】\n・この配信でのリスナー同士の雑談はお控えください\n・他の方の歌枠の話はNG',
       }),
     ).toBeUndefined();
-    expect(detectGenre({ rules: '【配信ルール】\nホラーが苦手な方はご注意ください' })).toEqual({
-      genre: 'horror',
-      reason: 'rules',
-    });
   });
 
   it('reads the relaxations of the rules and the tags, negation-safe (R62)', () => {

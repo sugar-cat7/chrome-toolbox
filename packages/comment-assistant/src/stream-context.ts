@@ -42,11 +42,11 @@ export type StreamInfo = Readonly<{
   rules?: string | undefined;
 }>;
 /**
- * Why a detected stream has its genre (R63), in the order that decides it: the description's
- * rules, the title's 【】, Twitch's tags or the game name it, the model guessed it once, or
+ * Why a detected stream has its genre (R63, R68), in the order that decides it: the title's 【】,
+ * Twitch's tags, the description's rules or the game name it, the model guessed it once, or
  * nothing did (`other`).
  */
-export const DETECTED_REASONS = ['rules', 'title', 'tags', 'game', 'guess', 'none'] as const;
+export const DETECTED_REASONS = ['title', 'tags', 'rules', 'game', 'guess', 'none'] as const;
 export type DetectedReason = (typeof DETECTED_REASONS)[number];
 /** Why a stream has its genre: the viewer chose it for the stream, or it was detected. */
 export const GENRE_REASONS = ['viewer', ...DETECTED_REASONS] as const;

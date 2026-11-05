@@ -11,6 +11,7 @@ import {
   type StreamGenre,
 } from '@chrome-toolbox/extension-core';
 import { GAME_GENRES } from './game-genres.ts';
+import { isRulesHeading } from './sites/rules.ts';
 import type { Site } from './sites/types.ts';
 import {
   DETECTED_REASONS,
@@ -22,7 +23,7 @@ import {
   type StreamInfo,
 } from './stream-context.ts';
 
-/** What decides a stream's genre and relaxations: what its page shows (R63). */
+/** What decides a stream's genre and relaxations: what its page shows (R63, R68). */
 export type GenreSource = Pick<StreamInfo, 'title' | 'game' | 'tags' | 'rules'>;
 /** A genre and why it was given. */
 export type Detected = Readonly<{ genre: StreamGenre; reason: DetectedReason }>;
@@ -32,7 +33,7 @@ type NamedGenre = Exclude<StreamGenre, 'other'>;
 const NAMED_GENRES = STREAM_GENRES.filter((genre): genre is NamedGenre => genre !== 'other');
 /**
  * The words that name a kind of stream (R63), after NFKC and in lower case. Traps: a frame rate
- * is no FPS (`120fps`), a chat stream run against the clock no RTA (`雑談配信RTA`), concurrent
+ * is no FPS (`120fps`), a chat stream run against the clock no RTA (`雑談配信RTA`, `雑談配信 RTA`), concurrent
  * viewers no watch-along (`同時視聴者`), and a simulcast (`Twitch同時配信`) has no word here.
  * `ウォッチパーティー` is a sports or esports viewing (R62); Twitch's Watch Parties category is a
  * watch-along (`GAME_GENRES`), which turns on the same categories.
@@ -41,7 +42,7 @@ const GENRE_WORDS: Readonly<Record<NamedGenre, RegExp>> = {
   fps: /\b(?:fps|tps|pvp)\b|バトロワ|バトルロ[イワ]イヤル|格ゲー|格闘ゲーム|ランクマ/u,
   story: /\b[aj]?rpg\b|ストーリー|アドベンチャー|ノベルゲー/u,
   horror: /ホラ[ーゲ]|\bhorror\b/u,
-  puzzle_rta: /(?<!配信)\brta\b|\bspeedrun|スピードラン|パズル|謎解き|脱出ゲーム|\bpuzzle/u,
+  puzzle_rta: /(?<!配信\s*)\brta\b|\bspeedrun|スピードラン|パズル|謎解き|脱出ゲーム|\bpuzzle/u,
   chat: /雑談|\bzatsudan\b|フリートーク|\bfree ?talk\b|\b(?:just ?)?chatting\b|おしゃべり|マシュマロ/u,
   singing: /歌枠|\butawaku\b|歌配信|カラオケ|\bkaraoke\b|弾き語り|\bsinging\b|アカペラ/u,
   watchalong: /同時視聴(?!者)|同時試聴|\bwatch[ -]?along\b/u,
@@ -60,7 +61,7 @@ function soleGenre(text: string): StreamGenre | undefined {
 /** A title's bracketed parts: 【】, 〖〗 and [] (full-width ［］ after NFKC). */
 const BRACKETS = /【([^【】]*)】|〖([^〖〗]*)〗|\[([^[\]]*)\]/gu;
 /**
- * The genre the words in a title's 【】 name (R63 step 3); words outside them do not count (a
+ * The genre the words in a title's 【】 name (R68 step 2); words outside them do not count (a
  * title's prose often names other things), and two genres decide nothing.
  */
 export function titleGenre(title: string): StreamGenre | undefined {
@@ -69,18 +70,33 @@ export function titleGenre(title: string): StreamGenre | undefined {
   );
   return soleGenre(parts.join('\n'));
 }
+/** A line of the description's rules about this stream: この配信, 本配信, 今日の配信, 今回. */
+const THIS_STREAM = /この配信|本配信|今日の配信|今回/u;
 /**
  * A rule that bans or restrains something is about the viewers, not the stream (`リスナー同士の
- * 雑談はお控えください`, `他の方の歌枠の話はNG`): its words name no genre.
+ * 雑談はお控えください`, `他の方の歌枠の話はNG`); one that sets a condition, negates or speaks of
+ * another stream is not about this one (`歌枠ではリクエストは受け付けていません`, `ホラーが苦手な
+ * 方は`, `この配信以外の`). Their words name no genre. The heading words 禁止事項 and 注意事項 are
+ * no restraint of their own.
  */
-const RESTRAINT =
-  /禁止|控え|遠慮|やめ|止め|ないで|ダメ|だめ|お断り|厳禁|不可|\bng\b|×|✕|❌|🚫|\bno\b|\bnot\b|\bdon[’']?t\b/u;
-/** The genre the description's rules name (R63 step 2), from the rules that restrain nothing. */
+const ASIDE =
+  /禁止|控え|遠慮|やめ|止め|ないで|ダメ|だめ|お断り|厳禁|不可|\bng\b|×|✕|❌|🚫|\bno\b|\bnot\b|\bdon[’']?t\b|では|の時|のとき|の際|場合|苦手|注意|ません|ない|以外|他の/u;
+const HEADING_WORDS = /禁止事項|注意事項/gu;
+/**
+ * The genre the description's rules name (R68 step 3): only in a heading of the rules (`【歌枠の
+ * お約束】`) or a line about this stream (`今回はホラーゲームを遊びます`), never in a line that
+ * restrains, sets a condition, negates or speaks of another stream (`ASIDE`). A channel's
+ * standard rules thus seldom name one.
+ */
 function rulesGenre(rules: string): StreamGenre | undefined {
-  const lines = normalized(rules)
-    .split('\n')
-    .filter((line) => !RESTRAINT.test(line));
-  return soleGenre(lines.join('\n'));
+  const lines = rules.split('\n').filter((line) => {
+    const text = normalized(line);
+    return (
+      (isRulesHeading(line) || THIS_STREAM.test(text)) &&
+      !ASIDE.test(text.replace(HEADING_WORDS, ''))
+    );
+  });
+  return soleGenre(normalized(lines.join('\n')));
 }
 /** The genre Twitch's tags name, each tag on its own. */
 const tagsGenre = (tags: readonly string[]): StreamGenre | undefined =>
@@ -94,22 +110,22 @@ export const gameKey = (name: string): string => normalized(name).replace(/[^\p{
 const GAME_INDEX: ReadonlyMap<string, StreamGenre> = new Map(
   GAME_GENRES.flatMap((entry) => entry.names.map((name) => [gameKey(name), entry.genre] as const)),
 );
-/** The genre of a game YouTube's card or Twitch's category names (R63 step 4), when listed. */
+/** The genre of a game YouTube's card or Twitch's category names (R68 step 4), when listed. */
 export const gameGenre = (game: string): StreamGenre | undefined => {
   const key = gameKey(game);
   return key === '' ? undefined : GAME_INDEX.get(key);
 };
 
 /**
- * The genre what the page shows decides, in this order (R63): the description's rules, the
- * title's 【】, Twitch's tags, the game. Undefined when none decides: the stream's one guess
- * comes next (step 5), then `other`.
+ * The genre what the page shows decides, in this order (R68, which put the title before the
+ * description of R63): the title's 【】, Twitch's tags, the description's rules, the game.
+ * Undefined when none decides: the stream's one guess comes next (step 5), then `other`.
  */
 export function detectGenre(source: GenreSource): Detected | undefined {
   const steps: readonly [DetectedReason, () => StreamGenre | undefined][] = [
-    ['rules', () => (source.rules === undefined ? undefined : rulesGenre(source.rules))],
     ['title', () => (source.title === undefined ? undefined : titleGenre(source.title))],
     ['tags', () => (source.tags === undefined ? undefined : tagsGenre(source.tags))],
+    ['rules', () => (source.rules === undefined ? undefined : rulesGenre(source.rules))],
     ['game', () => (source.game === undefined ? undefined : gameGenre(source.game))],
   ];
   for (const [reason, step] of steps) {
