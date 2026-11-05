@@ -17,6 +17,7 @@ import {
   type Annotation,
 } from '../../src/protocol.ts';
 import { createTwitchChat } from '../../src/sites/twitch-chat.ts';
+import type { SiteAdapter } from '../../src/sites/types.ts';
 import { youtubeComments } from '../../src/sites/youtube-comments.ts';
 import { youtubeLiveChat } from '../../src/sites/youtube-live-chat.ts';
 import { installIntersection, restorePage, setVisibility } from './intersection.ts';
@@ -86,6 +87,9 @@ const annotate = async (payload: Annotation[]): Promise<void> => {
   // Annotations are fire-and-forget: the content script never answers.
   expect(replies.every((reply) => reply === undefined)).toBe(true);
 };
+/** An adapter's page reads, spied on. */
+type ReadInfo = NonNullable<SiteAdapter['streamInfo']>;
+type WatchInfo = NonNullable<SiteAdapter['watchStreamInfo']>;
 const line = (id: string): HTMLElement | null => document.getElementById(id);
 const caAttributes = (doc: Document): string[] =>
   [...doc.querySelectorAll('*')].flatMap((element) =>
@@ -400,6 +404,86 @@ describe('startChat', () => {
     await vi.advanceTimersByTimeAsync(FLUSH);
     expect(contexts.at(-1)).toMatchObject({ rules: '【お約束】\n・指示OKです' });
     expect(contexts).toHaveLength(3);
+    stop();
+  });
+
+  it("reads the stream's page only while it is visible, and again when it shows (R44)", async () => {
+    vi.useFakeTimers();
+    const { contexts, send } = stubWorker();
+    const doc = load('/watch?v=fixture0001', 'youtube-comments');
+    const streamInfo = vi.fn<ReadInfo>((page, channel) =>
+      youtubeComments.streamInfo?.(page, channel),
+    );
+    const watchStreamInfo = vi.fn<WatchInfo>(
+      (page, channel, ready) =>
+        youtubeComments.watchStreamInfo?.(page, channel, ready) ?? (() => undefined),
+    );
+    const comments = { ...youtubeComments, streamInfo, watchStreamInfo };
+    setVisibility(doc, 'hidden');
+    const stop = startPage(doc, [youtubeLiveChat, comments], { send });
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    // A background tab: the stream is named, its page is not read and nothing waits on it.
+    expect(contexts).toEqual([{ site: 'youtube', partition: 'fixture0001#comments' }]);
+    // Nor does the service worker's ping.
+    const answers: unknown[] = [];
+    const replies = await fakeBrowser.runtime.onMessage.trigger(
+      { type: 'comments/ping' },
+      {},
+      (answer) => answers.push(answer),
+    );
+    expect(replies.every((reply) => reply === undefined)).toBe(true);
+    expect(answers).toEqual([{ site: 'youtube', partition: 'fixture0001#comments' }]);
+    expect(streamInfo).not.toHaveBeenCalled();
+    expect(watchStreamInfo).not.toHaveBeenCalled();
+    // In front again: read at once.
+    setVisibility(doc, 'visible');
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    expect(contexts.at(-1)).toMatchObject({
+      streamer: '@FixtureStreamer',
+      title: 'Fixture Quest Part 3: the frozen bridge',
+      game: 'Fixture Quest',
+    });
+    stop();
+  });
+
+  it('stores a hidden Twitch chat and follows its channel without reading its page (R44)', async () => {
+    vi.useFakeTimers();
+    const { contexts, sent, send } = stubWorker();
+    const doc = load('/fixturechannel', 'twitch-chat');
+    const twitch = createTwitchChat('s1');
+    const streamInfo = vi.fn<ReadInfo>((page, channel) => twitch.streamInfo?.(page, channel));
+    const watchStreamInfo = vi.fn<WatchInfo>(
+      (page, channel, ready) => twitch.watchStreamInfo?.(page, channel, ready) ?? (() => undefined),
+    );
+    const navigation = new EventTarget();
+    setVisibility(doc, 'hidden');
+    const stop = startChat({ ...twitch, streamInfo, watchStreamInfo }, doc, { send, navigation });
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    expect(contexts).toEqual([{ site: 'twitch', partition: 'fixturechannel' }]);
+    // A new line is only stored, and its batch reads nothing of the page.
+    const container = twitch.container(doc);
+    const wrapper = container?.lastElementChild?.cloneNode(true);
+    if (!(wrapper instanceof Element)) throw new Error('fixture changed');
+    wrapper.querySelector('[data-ca-id]')?.removeAttribute('data-ca-id');
+    container?.append(wrapper);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(sent.some((ingest) => ingest.payload.process === false)).toBe(true);
+    // Another channel while hidden: named, not read.
+    window.history.replaceState(null, '', '/secondchannel');
+    navigation.dispatchEvent(new Event('navigatesuccess'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contexts.at(-1)).toEqual({ site: 'twitch', partition: 'secondchannel' });
+    expect(streamInfo).not.toHaveBeenCalled();
+    expect(watchStreamInfo).not.toHaveBeenCalled();
+    // In front: read, and waited on until it shows the channel.
+    setVisibility(doc, 'visible');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contexts.at(-1)).toEqual({
+      site: 'twitch',
+      partition: 'secondchannel',
+      streamer: 'secondchannel',
+    });
+    expect(watchStreamInfo).toHaveBeenCalledTimes(1);
     stop();
   });
 

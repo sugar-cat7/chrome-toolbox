@@ -36,6 +36,11 @@ function filtersOf(value: unknown): FilterSettings {
   const decoded = decode(filterSettingsSchema, value);
   return decoded.ok ? settingsOf(decoded.value) : defaultFilterSettings;
 }
+/**
+ * Whether the page is in front of the viewer (not a background tab or a minimized window): only
+ * then is what it shows about its stream read (R44).
+ */
+const visible = (doc: Document): boolean => doc.visibilityState === 'visible';
 /** The Navigation API of the page's window, where the browser has it. */
 function navigationOf(doc: Document): EventTarget | undefined {
   const view = doc.defaultView;
@@ -214,12 +219,13 @@ export function startChat(
     load();
   }
   /**
-   * Reports the channel's stream when what the page shows about it changed. A read that finds
+   * Reports the channel's stream when what the page shows about it changed. The page is read
+   * only while it is visible (R44): a background tab names its channel alone. A read that finds
    * nothing (the page is moving to the next video) keeps what was shown.
    */
   function report(): void {
     if (stopped || channel === undefined || isInvalid()) return;
-    const read = adapter.streamInfo?.(doc, channel);
+    const read = visible(doc) ? adapter.streamInfo?.(doc, channel) : undefined;
     const page = read?.title === undefined ? shown : read;
     shown = {
       streamer: read?.streamer ?? shown.streamer,
@@ -238,13 +244,24 @@ export function startChat(
   /**
    * While the page does not show all of the channel's stream info yet (YouTube's metadata and
    * description, Twitch's stream information arrive after the navigation), waits for it and
-   * reports it then; the adapter watches nothing when nothing is missing.
+   * reports it then; the adapter watches nothing when nothing is missing. Only while the page is
+   * visible: a background tab is read once it comes in front (`onVisibility`).
    */
   function awaitInfo(): void {
     stopWaiting?.();
     stopWaiting = undefined;
-    if (stopped || channel === undefined) return;
+    if (stopped || channel === undefined || !visible(doc)) return;
     stopWaiting = adapter.watchStreamInfo?.(doc, channel, report);
+  }
+  /** The page came in front: read what it shows now; it went: stop waiting on it. */
+  function onVisibility(): void {
+    if (!visible(doc)) {
+      stopWaiting?.();
+      stopWaiting = undefined;
+      return;
+    }
+    report();
+    awaitInfo();
   }
   /**
    * Follows a channel change (Twitch moves between channels without a reload). The channel left
@@ -384,6 +401,7 @@ export function startChat(
   browser.runtime.onMessage.addListener(onMessage);
   browser.storage.local.onChanged.addListener(onStorageChanged);
   navigation?.addEventListener('navigatesuccess', onNavigate);
+  doc.addEventListener('visibilitychange', onVisibility);
   report();
   if (streamer === undefined) load();
   awaitInfo();
@@ -406,6 +424,7 @@ export function startChat(
     hold.stop();
     stopWaiting?.();
     navigation?.removeEventListener('navigatesuccess', onNavigate);
+    doc.removeEventListener('visibilitychange', onVisibility);
     browser.runtime.onMessage.removeListener(onMessage);
     browser.storage.local.onChanged.removeListener(onStorageChanged);
     const root = adapter.container(doc);
@@ -468,8 +487,9 @@ export function startPage(
       sendResponse({});
       return undefined;
     }
-    // With what the page shows, so a restarted service worker learns the stream again.
-    const info = running.streamInfo?.(doc, partition);
+    // With what the page shows, so a restarted service worker learns the stream again; a
+    // background tab is not read (R44).
+    const info = visible(doc) ? running.streamInfo?.(doc, partition) : undefined;
     sendResponse({ site: running.site, partition, ...knownInfo(info ?? {}) });
     return undefined;
   }
