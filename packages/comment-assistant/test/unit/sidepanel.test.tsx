@@ -707,6 +707,48 @@ describe('side panel', () => {
     });
   });
 
+  it('keeps the genre select, its focus and its description across answers of the service worker', async () => {
+    let detected = 'other';
+    const { api, events } = fakeApi({
+      'comments/stream': () =>
+        Ok({
+          stream,
+          genre: {
+            genre: detected,
+            reason: detected === 'other' ? 'none' : 'guess',
+            detected,
+            detectedReason: detected === 'other' ? 'none' : 'guess',
+            categories: ['relay', 'privacy', 'sensitive'],
+          },
+        }),
+      'comments/genre': () => Ok({ persisted: true }),
+    });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const select = (await within(panel).findByLabelText('この配信のジャンル')) as HTMLSelectElement;
+    // The 判定 line describes the select, also once the viewer chose another genre.
+    expect(select.getAttribute('aria-describedby')).toBeTruthy();
+    expect(
+      panel.ownerDocument.getElementById(select.getAttribute('aria-describedby') ?? '')
+        ?.textContent,
+    ).toBe('判定: その他（理由: なし）');
+    select.focus();
+    // The guess arrives: the service worker announces it and the panel asks again.
+    detected = 'story';
+    act(() => {
+      for (const listener of events.message.listeners)
+        (listener as (message: unknown) => void)({ type: 'comments/stream-changed' });
+    });
+    expect(await within(panel).findByText('判定: ストーリー・RPG（理由: 推定）')).toBeTruthy();
+    expect(within(panel).getByLabelText('この配信のジャンル')).toBe(select);
+    expect(select.ownerDocument.activeElement).toBe(select);
+    // A choice shows at once, before the service worker answers again.
+    await userEvent.selectOptions(select, 'ホラー');
+    expect(select.value).toBe('horror');
+    expect(select.ownerDocument.activeElement).toBe(select);
+  });
+
   it('says that a Twitch channel keeps its genre until the category changes (R69)', async () => {
     const twitch = {
       site: 'twitch',
@@ -728,6 +770,17 @@ describe('side panel', () => {
     expect(
       await within(panel).findByText('この配信用に保存しました（カテゴリが変わるまで）'),
     ).toBeTruthy();
+  });
+
+  it('puts the select back when the service worker refused the choice', async () => {
+    const { api } = fakeApi({ 'comments/genre': () => Err(failure('ipc_failed')) });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const select = (await within(panel).findByLabelText('この配信のジャンル')) as HTMLSelectElement;
+    await userEvent.selectOptions(select, '歌枠');
+    expect(await within(panel).findByText(/^保存できませんでした。/u)).toBeTruthy();
+    expect(select.value).toBe('');
   });
 
   it('says when the genre could not be saved', async () => {

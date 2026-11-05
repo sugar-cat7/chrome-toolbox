@@ -43,21 +43,24 @@ type Status =
 const AUTO_GENRE = '';
 /**
  * The stream's genre (R63): the detected one and what decided it, and the viewer's choice for
- * the stream (`自動` for none). Remounted for each new answer of the service worker, so a choice
- * shows at once and then follows what the service worker says.
+ * the stream (`自動` for none). It stays mounted (and focused) across the service worker's
+ * answers: a choice shows at once and gives way to the service worker's answer once that
+ * changes, or when saving it failed (`failed`).
  */
 function GenreField({
   genre,
   onChoose,
 }: {
   genre: GenreView | undefined;
-  onChoose: (genre: StreamGenre | undefined) => void;
+  onChoose: (genre: StreamGenre | undefined, failed: () => void) => void;
 }) {
-  const [picked, setPicked] = useState<string>(
-    genre?.reason === 'viewer' ? genre.genre : AUTO_GENRE,
-  );
+  const chosen = genre?.reason === 'viewer' ? genre.genre : AUTO_GENRE;
+  /** The viewer's pick and the answer it was made over. */
+  const [pick, setPick] = useState<Readonly<{ value: string; over: string }> | undefined>();
+  const value = pick !== undefined && pick.over === chosen ? pick.value : chosen;
   // A label of its own: the genre names (雑談 …) stay out of the label text of other rows.
   const id = useId();
+  const detection = useId();
   const auto =
     genre === undefined
       ? '自動'
@@ -68,11 +71,15 @@ function GenreField({
         <label htmlFor={id}>この配信のジャンル</label>
         <select
           id={id}
-          value={picked}
+          value={value}
+          aria-describedby={genre === undefined ? undefined : detection}
           onChange={(event) => {
-            const value = event.target.value;
-            setPicked(value);
-            onChoose(STREAM_GENRES.find((candidate) => candidate === value));
+            const picked = event.target.value;
+            setPick({ value: picked, over: chosen });
+            onChoose(
+              STREAM_GENRES.find((candidate) => candidate === picked),
+              () => setPick(undefined),
+            );
           }}
           className="rounded border border-slate-300 px-1 py-0.5"
         >
@@ -85,7 +92,7 @@ function GenreField({
         </select>
       </div>
       {genre !== undefined && (
-        <p className="text-xs text-slate-500">
+        <p id={detection} className="text-xs text-slate-500">
           判定: {GENRE_LABELS[genre.detected]}（理由: {GENRE_REASON_LABELS[genre.detectedReason]}）
         </p>
       )}
@@ -246,18 +253,23 @@ export function FilterTab({
       },
     );
   }
-  function choose(next: StreamGenre | undefined): void {
+  function choose(next: StreamGenre | undefined, failed: () => void): void {
     if (stream === undefined) return;
     const shownStream = stream;
     launch(
       async () => {
         const saved = await port.chooseGenre(shownStream, next);
         if (!mounted.current) return;
-        if (!saved.ok) setStatus({ kind: 'failed', code: saved.error.internalCode });
-        else setStatus({ kind: saved.value.persisted ? 'genreSaved' : 'genreUnsaved' });
+        if (saved.ok) setStatus({ kind: saved.value.persisted ? 'genreSaved' : 'genreUnsaved' });
+        else {
+          failed();
+          setStatus({ kind: 'failed', code: saved.error.internalCode });
+        }
       },
       () => {
-        if (mounted.current) setStatus({ kind: 'failed', code: 'unexpected_failure' });
+        if (!mounted.current) return;
+        failed();
+        setStatus({ kind: 'failed', code: 'unexpected_failure' });
       },
     );
   }
@@ -282,7 +294,7 @@ export function FilterTab({
     <form className="flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">ジャンル</legend>
-        <GenreField key={JSON.stringify(genre ?? null)} genre={genre} onChoose={choose} />
+        <GenreField genre={genre} onChoose={choose} />
       </fieldset>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">翻訳</legend>
