@@ -7,6 +7,7 @@ import {
   type HostPermissions,
   type SettingsStore,
   type StorageArea,
+  type StreamGenre,
 } from '@chrome-toolbox/extension-core';
 import {
   filterStore,
@@ -21,6 +22,7 @@ import {
   type CommentStats,
   type FeedbackVerdict,
   type HiddenEntry,
+  type GenreView,
   type Summary,
   type SummaryWindow,
 } from './protocol.ts';
@@ -62,6 +64,9 @@ export function sidePanelPort(
   });
 }
 
+/** The stream a tab shows, with its genre and the stream categories on for it (R63). */
+export type ShownStream = Readonly<{ stream: StreamContext; genre?: GenreView | undefined }>;
+
 /** Everything the side panel does goes through this port; it registers nothing until `watch`. */
 export type PanelPort = {
   connection: ConnectionPort;
@@ -71,8 +76,17 @@ export type PanelPort = {
   filters: FilterStore;
   /** Spoiler targets per stream (R30); the stream's batch prompts carry them. */
   notes: SpoilerNoteStore;
-  /** The stream the active tab of this window shows; undefined when it shows none. */
-  stream(this: void): Promise<Result<StreamContext | undefined>>;
+  /** The stream the active tab of this window shows, and its genre; undefined when it shows none. */
+  stream(this: void): Promise<Result<ShownStream | undefined>>;
+  /**
+   * The viewer's genre for the stream (R63), or none to detect it again; `persisted: false` when
+   * it could not be saved (it is used all the same).
+   */
+  chooseGenre(
+    this: void,
+    stream: StreamContext,
+    genre: StreamGenre | undefined,
+  ): Promise<Result<{ persisted: boolean }>>;
   /**
    * Calls `changed` when another tab becomes active, the shown tab finishes loading, or a page
    * reports a change of its stream; returns the removal of every listener it added.
@@ -109,7 +123,7 @@ export function panelPort(api: PanelApi = browser): PanelPort {
     settings: settingsStore(api.storage.local),
     filters: filterStore(api.storage.local),
     notes: spoilerNoteStore(api.storage.local),
-    async stream(): Promise<Result<StreamContext | undefined>> {
+    async stream(): Promise<Result<ShownStream | undefined>> {
       const tabs = await capture(
         () => api.tabs.query({ active: true, currentWindow: true }),
         'ipc_failed',
@@ -119,8 +133,16 @@ export function panelPort(api: PanelApi = browser): PanelPort {
       shownTab = tab?.id;
       if (tab?.id === undefined) return Ok(undefined);
       const answer = await commentProtocol.send(send, 'comments/stream', { tabId: tab.id });
-      return answer.ok ? Ok(answer.value.stream) : answer;
+      if (!answer.ok) return answer;
+      const { stream, genre } = answer.value;
+      return Ok(stream === undefined ? undefined : { stream, genre });
     },
+    chooseGenre: (stream, genre) =>
+      commentProtocol.send(send, 'comments/genre', {
+        site: stream.site,
+        partition: stream.partition,
+        ...(genre === undefined ? {} : { genre }),
+      }),
     watch(changed) {
       function onActivated(): void {
         changed();

@@ -1,8 +1,9 @@
 import { captureSync } from '@chrome-toolbox/contracts';
-import type { CommentCategory } from '@chrome-toolbox/extension-core';
+import type { CommentCategory, StreamGenre } from '@chrome-toolbox/extension-core';
 import type { FilterMode } from '../../filters.ts';
 import { CATEGORY_NAMES } from '../../labels.ts';
 import type { SummaryWindow } from '../../protocol.ts';
+import type { DetectedReason } from '../../stream-context.ts';
 
 /** The filter rows, in the order the side panel lists them. */
 export const FILTER_CATEGORIES: readonly CommentCategory[] = [
@@ -34,6 +35,30 @@ export const MODE_LABELS: Readonly<Record<FilterMode, string>> = {
   // Removed from the chat; the 非表示 tab lists it and puts it back (R54).
   hide: '消す',
 };
+/** Each genre as the filter tab names it (R63). */
+export const GENRE_LABELS: Readonly<Record<StreamGenre, string>> = {
+  fps: 'FPS・対戦',
+  story: 'ストーリー・RPG',
+  horror: 'ホラー',
+  puzzle_rta: 'パズル・RTA',
+  chat: '雑談',
+  singing: '歌枠',
+  watchalong: '同時視聴',
+  sports_viewing: '観戦',
+  board: '麻雀・ボード・カード',
+  deduction: '人狼・推理',
+  other: 'その他',
+};
+/** What decided a detected genre, as the filter tab names it (R63). */
+export const GENRE_REASON_LABELS: Readonly<Record<DetectedReason, string>> = {
+  rules: '概要欄',
+  title: 'タイトル',
+  tags: 'タグ',
+  game: 'ゲーム',
+  guess: '推定',
+  none: 'なし',
+};
+
 /** The switch that lets a new line into the chat only once it is judged (R52). */
 export const HOLD_LABEL = '判定してから表示する（最大 2 秒）';
 

@@ -4,9 +4,20 @@ import {
   commentRecordSchema,
   defineProtocol,
   llmProtocolSpec,
+  STREAM_CATEGORIES,
+  streamGenreSchema,
   type ProtocolHandlers,
 } from '@chrome-toolbox/extension-core';
-import { MAX_STREAMER, MAX_TITLE } from './stream-context.ts';
+import {
+  DETECTED_REASONS,
+  GENRE_REASONS,
+  MAX_GAME,
+  MAX_RULES,
+  MAX_STREAMER,
+  MAX_TAG,
+  MAX_TAGS,
+  MAX_TITLE,
+} from './stream-context.ts';
 
 const siteSchema = commentRecordSchema.shape.site;
 /**
@@ -99,6 +110,17 @@ export type HiddenEntry = Readonly<z.infer<typeof hiddenEntrySchema>>;
 /** What a page reported about its stream: the streamer key and the title, each optional. */
 const streamerSchema = z.string().check(z.minLength(1), z.maxLength(MAX_STREAMER));
 const titleSchema = z.string().check(z.minLength(1), z.maxLength(MAX_TITLE));
+/**
+ * What decides the stream's genre (R63), as a page with the title shows it: YouTube's game card
+ * or Twitch's category slug, Twitch's tags and the rules sections of a YouTube description.
+ */
+const genreSourceShape = {
+  game: z.optional(z.string().check(z.minLength(1), z.maxLength(MAX_GAME))),
+  tags: z.optional(
+    z.array(z.string().check(z.minLength(1), z.maxLength(MAX_TAG))).check(z.maxLength(MAX_TAGS)),
+  ),
+  rules: z.optional(z.string().check(z.minLength(1), z.maxLength(MAX_RULES))),
+};
 /** One stream as the service worker knows it (`StreamContext` without the spoiler note). */
 export const streamSchema = z.strictObject({
   site: siteSchema,
@@ -138,6 +160,7 @@ export const pingReplySchema = z.strictObject({
   partition: z.optional(channelSchema),
   streamer: z.optional(streamerSchema),
   title: z.optional(titleSchema),
+  ...genreSourceShape,
 });
 export type PingReply = z.infer<typeof pingReplySchema>;
 
@@ -180,6 +203,20 @@ export const summarySchema = z.strictObject({
   modelFailed: z.optional(z.literal(true)),
 });
 export type Summary = Readonly<z.infer<typeof summarySchema>>;
+
+/**
+ * A stream's genre as the side panel shows it (R63): the genre in effect and why (`viewer` when
+ * the viewer chose it for the stream), what detection found whatever the viewer chose, and the
+ * stream categories on for the stream (R62: genre, relaxations, spoiler note).
+ */
+export const genreViewSchema = z.strictObject({
+  genre: streamGenreSchema,
+  reason: z.enum(GENRE_REASONS),
+  detected: streamGenreSchema,
+  detectedReason: z.enum(DETECTED_REASONS),
+  categories: z.array(z.enum(STREAM_CATEGORIES)),
+});
+export type GenreView = z.infer<typeof genreViewSchema>;
 
 export const commentStatsSchema = z.strictObject({
   /** The channel's comments in the store (the last 30 minutes, at most 5,000). */
@@ -284,9 +321,9 @@ export const commentProtocolSpec = {
   /**
    * A content script's frame reports its stream: on load, after a navigation and when the page
    * shows new metadata. The live chat frame sends only its partition; the watch page and Twitch
-   * add the streamer and title. Without a partition the tab's top frame left its stream (YouTube
-   * home after a watch page, Twitch's directory). Content scripts only (the sender's tab and
-   * frame matter).
+   * add the streamer and title, and with the title what decides the genre (R63: game, tags,
+   * rules). Without a partition the tab's top frame left its stream (YouTube home after a watch
+   * page, Twitch's directory). Content scripts only (the sender's tab and frame matter).
    */
   'comments/context': {
     request: z.strictObject({
@@ -294,6 +331,7 @@ export const commentProtocolSpec = {
       partition: z.optional(channelSchema),
       streamer: z.optional(streamerSchema),
       title: z.optional(titleSchema),
+      ...genreSourceShape,
     }),
     response: z.strictObject({}),
   },
@@ -301,12 +339,27 @@ export const commentProtocolSpec = {
   // sender is a web page, gets `sender_forbidden`.
   /**
    * The stream the tab shows: its top frame names the partition, the service worker adds what
-   * the pages reported (streamer, title). `{}` when the tab shows no stream or has no content
-   * script.
+   * the pages reported (streamer, title) and the stream's genre (R63). `{}` when the tab shows
+   * no stream or has no content script.
    */
   'comments/stream': {
     request: z.strictObject({ tabId: z.int().check(z.nonnegative()) }),
-    response: z.strictObject({ stream: z.optional(streamSchema) }),
+    response: z.strictObject({
+      stream: z.optional(streamSchema),
+      genre: z.optional(genreViewSchema),
+    }),
+  },
+  /**
+   * The viewer's genre for one stream (R63), or none to detect it again; in effect at once.
+   * `persisted: false` means it could not be saved and lasts for this service worker only.
+   */
+  'comments/genre': {
+    request: z.strictObject({
+      site: siteSchema,
+      partition: channelSchema,
+      genre: z.optional(streamGenreSchema),
+    }),
+    response: z.strictObject({ persisted: z.boolean() }),
   },
   /** The channel's hidden comments, oldest first. */
   'comments/hidden': { request: partitionSchema, response: z.array(hiddenEntrySchema) },

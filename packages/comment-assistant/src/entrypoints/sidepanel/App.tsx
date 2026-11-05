@@ -1,7 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { launch } from '@chrome-toolbox/contracts';
-import type { PanelPort } from '../../panel.ts';
-import type { StreamContext } from '../../stream-context.ts';
+import type { PanelPort, ShownStream } from '../../panel.ts';
 import { FilterTab } from './FilterTab.tsx';
 import { HiddenTab } from './HiddenTab.tsx';
 import { SettingsTab } from './SettingsTab.tsx';
@@ -17,11 +16,14 @@ type TabId = (typeof TABS)[number]['id'];
 
 type StreamState =
   | { status: 'loading' }
-  | { status: 'ready'; stream: StreamContext | undefined }
+  | { status: 'ready'; shown: ShownStream | undefined }
   | { status: 'failed' };
 
-/** The same stream as before (asked again after a tab or page event): keep the old object. */
-const sameStream = (a: StreamContext | undefined, b: StreamContext | undefined): boolean =>
+/**
+ * The same stream and genre as before (asked again after a tab or page event): keep the old
+ * object.
+ */
+const sameStream = (a: ShownStream | undefined, b: ShownStream | undefined): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
 /**
@@ -50,9 +52,9 @@ export function App({ port }: { port: PanelPort }) {
             return;
           }
           setState((previous) =>
-            previous.status === 'ready' && sameStream(previous.stream, found.value)
+            previous.status === 'ready' && sameStream(previous.shown, found.value)
               ? previous
-              : { status: 'ready', stream: found.value },
+              : { status: 'ready', shown: found.value },
           );
         },
         () => {
@@ -68,7 +70,8 @@ export function App({ port }: { port: PanelPort }) {
     };
   }, [port]);
 
-  const stream = state.status === 'ready' ? state.stream : undefined;
+  const shown = state.status === 'ready' ? state.shown : undefined;
+  const stream = shown?.stream;
   // Each tab starts afresh for another stream (or streamer): no state of the previous one.
   const streamKey =
     stream === undefined
@@ -127,7 +130,9 @@ export function App({ port }: { port: PanelPort }) {
         className="flex flex-col gap-3 p-3"
       >
         {tab === 'summary' && <SummaryTab key={chatKey} port={port} stream={stream} />}
-        {tab === 'filters' && <FilterTab key={streamKey} port={port} stream={stream} />}
+        {tab === 'filters' && (
+          <FilterTab key={streamKey} port={port} stream={stream} genre={shown?.genre} />
+        )}
         {tab === 'hidden' && <HiddenTab key={streamKey} port={port} stream={stream} />}
         {tab === 'settings' && <SettingsTab key={streamKey} port={port} stream={stream} />}
       </section>
@@ -139,7 +144,7 @@ function StreamLine({ state }: { state: StreamState }) {
   if (state.status === 'loading') return <p className="text-slate-500">配信を確認しています…</p>;
   if (state.status === 'failed')
     return <p className="text-slate-500">このタブの配信を確認できませんでした。</p>;
-  const { stream } = state;
+  const stream = state.shown?.stream;
   if (stream === undefined) return <p className="text-slate-500">このタブには配信がありません</p>;
   return (
     <p className="flex flex-wrap items-baseline gap-x-2">

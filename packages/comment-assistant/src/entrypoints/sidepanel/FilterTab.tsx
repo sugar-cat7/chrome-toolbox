@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { launch } from '@chrome-toolbox/contracts';
-import type { CommentCategory } from '@chrome-toolbox/extension-core';
+import {
+  isStreamCategory,
+  STREAM_GENRES,
+  type CommentCategory,
+  type StreamGenre,
+} from '@chrome-toolbox/extension-core';
 import {
   defaultFilterSettings,
   MAX_SPOILER_NOTE,
@@ -9,8 +14,17 @@ import {
   type FilterSettings,
 } from '../../filters.ts';
 import type { PanelPort } from '../../panel.ts';
+import type { GenreView } from '../../protocol.ts';
 import { ownerOf, type StreamContext } from '../../stream-context.ts';
-import { explain, FILTER_CATEGORIES, filterLabel, HOLD_LABEL, MODE_LABELS } from './text.ts';
+import {
+  explain,
+  FILTER_CATEGORIES,
+  filterLabel,
+  GENRE_LABELS,
+  GENRE_REASON_LABELS,
+  HOLD_LABEL,
+  MODE_LABELS,
+} from './text.ts';
 
 /** The select value of the default option: no mode chosen. */
 const DEFAULT_MODE = '';
@@ -20,8 +34,64 @@ type Status =
   | { kind: 'idle' }
   | { kind: 'saved' }
   | { kind: 'noteSaved' }
+  | { kind: 'genreSaved' }
+  | { kind: 'genreUnsaved' }
   | { kind: 'unreadable' }
   | { kind: 'failed'; code: string };
+
+/** The select value of the automatic genre: none chosen. */
+const AUTO_GENRE = '';
+/**
+ * The stream's genre (R63): the detected one and what decided it, and the viewer's choice for
+ * the stream (`自動` for none). Remounted for each new answer of the service worker, so a choice
+ * shows at once and then follows what the service worker says.
+ */
+function GenreField({
+  genre,
+  onChoose,
+}: {
+  genre: GenreView | undefined;
+  onChoose: (genre: StreamGenre | undefined) => void;
+}) {
+  const [picked, setPicked] = useState<string>(
+    genre?.reason === 'viewer' ? genre.genre : AUTO_GENRE,
+  );
+  // A label of its own: the genre names (雑談 …) stay out of the label text of other rows.
+  const id = useId();
+  const auto =
+    genre === undefined
+      ? '自動'
+      : `自動（${GENRE_LABELS[genre.detected]}・${GENRE_REASON_LABELS[genre.detectedReason]}）`;
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id}>この配信のジャンル</label>
+        <select
+          id={id}
+          value={picked}
+          onChange={(event) => {
+            const value = event.target.value;
+            setPicked(value);
+            onChoose(STREAM_GENRES.find((candidate) => candidate === value));
+          }}
+          className="rounded border border-slate-300 px-1 py-0.5"
+        >
+          <option value={AUTO_GENRE}>{auto}</option>
+          {STREAM_GENRES.map((candidate) => (
+            <option key={candidate} value={candidate}>
+              {GENRE_LABELS[candidate]}
+            </option>
+          ))}
+        </select>
+      </div>
+      {genre !== undefined && (
+        <p className="text-xs text-slate-500">
+          判定: {GENRE_LABELS[genre.detected]}（理由: {GENRE_REASON_LABELS[genre.detectedReason]}）
+        </p>
+      )}
+    </>
+  );
+}
 
 /** Typing pause after which the spoiler targets are saved. */
 const NOTE_DELAY_MS = 500;
@@ -59,18 +129,22 @@ function noteSaver(): NoteSaver {
 }
 
 /**
- * How the chat shows each category, translations and the original text, and whether a new line
- * waits for its judgement (R52), saved per streamer (or per stream while the streamer is
- * unknown), and the spoiler targets, saved per stream
- * (R30). Filter changes are saved at once; the spoiler targets after a short pause in typing,
- * when the field is left and when the panel closes.
+ * The stream's genre, detected or chosen for the stream (R63); how the chat shows each category
+ * on for the stream (the genre's own and the ones every stream has, R62), translations and the
+ * original text, and whether a new line waits for its judgement (R52), saved per streamer (or
+ * per stream while the streamer is unknown, R29); and the spoiler targets, saved per stream
+ * (R30). Filter and genre changes are saved at once; the spoiler targets after a short pause in
+ * typing, when the field is left and when the panel closes.
  */
 export function FilterTab({
   port,
   stream,
+  genre,
 }: {
   port: PanelPort;
   stream: StreamContext | undefined;
+  /** The stream's genre and categories; every category is listed without it. */
+  genre?: GenreView | undefined;
 }) {
   const site = stream?.site;
   const owner = stream && ownerOf(stream);
@@ -172,6 +246,26 @@ export function FilterTab({
       },
     );
   }
+  function choose(next: StreamGenre | undefined): void {
+    if (stream === undefined) return;
+    const shownStream = stream;
+    launch(
+      async () => {
+        const saved = await port.chooseGenre(shownStream, next);
+        if (!mounted.current) return;
+        if (!saved.ok) setStatus({ kind: 'failed', code: saved.error.internalCode });
+        else setStatus({ kind: saved.value.persisted ? 'genreSaved' : 'genreUnsaved' });
+      },
+      () => {
+        if (mounted.current) setStatus({ kind: 'failed', code: 'unexpected_failure' });
+      },
+    );
+  }
+  // The categories on for the stream: the ones every stream has and the stream's own (R62).
+  const categories = FILTER_CATEGORIES.filter(
+    (category) =>
+      genre === undefined || !isStreamCategory(category) || genre.categories.includes(category),
+  );
   function setMode(category: CommentCategory, value: string): void {
     const mode = MODES.find((candidate): candidate is FilterMode => candidate === value);
     // The default option has no mode: the explicit one is removed.
@@ -186,6 +280,10 @@ export function FilterTab({
 
   return (
     <form className="flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="mb-1 text-xs text-slate-500">ジャンル</legend>
+        <GenreField key={JSON.stringify(genre ?? null)} genre={genre} onChoose={choose} />
+      </fieldset>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">翻訳</legend>
         <label className="flex items-center justify-between gap-2">
@@ -207,7 +305,12 @@ export function FilterTab({
       </fieldset>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">カテゴリごとの表示</legend>
-        {FILTER_CATEGORIES.map((category) => (
+        {genre !== undefined && (
+          <p className="text-xs text-slate-500">
+            この配信のジャンルで有効なカテゴリです。表示方法は配信者ごとに保存します。
+          </p>
+        )}
+        {categories.map((category) => (
           <label key={category} className="flex items-center justify-between gap-2">
             {filterLabel(category)}
             <select
@@ -268,7 +371,10 @@ function statusText(status: Status, byStreamer: boolean): string {
     case 'saved':
       return byStreamer ? 'この配信者用に保存しました' : 'この配信用に保存しました';
     case 'noteSaved':
+    case 'genreSaved':
       return 'この配信用に保存しました';
+    case 'genreUnsaved':
+      return 'ジャンルを保存できませんでした（一時的に使います）';
     case 'unreadable':
       return '保存済みの設定を読めなかったため、既定値を表示しています';
     case 'failed':

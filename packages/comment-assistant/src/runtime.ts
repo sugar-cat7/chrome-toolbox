@@ -19,6 +19,7 @@ import {
 import { createHiddenBadge } from './badge.ts';
 import { createFeedbackStore, type FeedbackStore } from './feedback.ts';
 import { SPOILER_NOTES_KEY, spoilerNotesOf } from './filters.ts';
+import { createGenreBook, genreOf, type GenreBook, type GenreSource } from './genre.ts';
 import {
   createCommentPipeline,
   MAX_COMMENT_CONCURRENCY,
@@ -33,10 +34,17 @@ import {
   type CommentProtocolHandlers,
   type CommentStats,
   type HiddenEntry,
+  type GenreView,
   type Summary,
 } from './protocol.ts';
 import type { Site } from './sites/types.ts';
-import { createStreamContexts, type StreamContext, type StreamContexts } from './stream-context.ts';
+import {
+  createStreamContexts,
+  streamCategoriesOf,
+  type StreamContext,
+  type StreamContexts,
+  type StreamInfo,
+} from './stream-context.ts';
 
 /** Frames remembered as told their streamer (a few tabs × frames). */
 const TOLD_FRAMES = 64;
@@ -195,6 +203,7 @@ function commentPipelines({
  */
 type PageRoute =
   | 'comments/stream'
+  | 'comments/genre'
   | 'comments/summary'
   | 'comments/hidden'
   | 'comments/feedback'
@@ -255,10 +264,13 @@ function announceStreamChange(): void {
     () => undefined,
   );
 }
-/** The stream a tab's top frame shows (partition, streamer, title), if it has one. */
+/**
+ * The stream a tab's top frame shows (partition, streamer, title, and what decides its genre),
+ * if it has one.
+ */
 async function streamOfTab(
   tabId: number,
-): Promise<Result<{ site: Site; partition: string; streamer?: string; title?: string }>> {
+): Promise<Result<StreamInfo & { site: Site; partition: string }>> {
   const answer = await capture(
     () => browser.tabs.sendMessage(tabId, { type: 'comments/ping' }, { frameId: 0 }),
     'resource_missing',
@@ -266,15 +278,64 @@ async function streamOfTab(
   if (!answer.ok) return answer;
   const reply = decode(pingReplySchema, answer.value);
   if (!reply.ok) return reply;
-  const { site, partition, streamer, title } = reply.value;
+  const { site, partition, ...info } = reply.value;
   return site === undefined || partition === undefined
     ? Err(failure('resource_missing'))
-    : Ok({
-        site,
-        partition,
-        ...(streamer === undefined ? {} : { streamer }),
-        ...(title === undefined ? {} : { title }),
-      });
+    : Ok({ site, partition, ...info });
+}
+/** What decides the genre (R63) among what a page reported; undefined without its title. */
+const genreSourceOf = ({ title, game, tags, rules }: StreamInfo): GenreSource | undefined =>
+  title === undefined
+    ? undefined
+    : {
+        title,
+        ...(game === undefined ? {} : { game }),
+        ...(tags === undefined ? {} : { tags }),
+        ...(rules === undefined ? {} : { rules }),
+      };
+
+/**
+ * Every stream's genre (R63): kept in `book`, applied to the stream contexts (which the batch
+ * prompts read), and guessed once by the model for a stream nothing else decides.
+ */
+function streamGenres(
+  book: GenreBook,
+  contexts: StreamContexts,
+): {
+  /** Applies the stream's kept genre to its context; returns whether the context changed. */
+  apply(this: void, site: Site, partition: string): boolean;
+  /**
+   * What the page shows decides the genre again; returns whether the genre, its reason or the
+   * relaxations changed.
+   */
+  observe(this: void, site: Site, partition: string, source: GenreSource): boolean;
+  /** The genre as the side panel shows it, with the stream categories on for `context`. */
+  info(this: void, context: StreamContext): GenreView;
+} {
+  function apply(site: Site, partition: string): boolean {
+    const kept = genreOf(book.get(site, partition));
+    if (kept === undefined) return false;
+    const { genre, relaxations } = kept;
+    return contexts.classify(site, partition, { genre, relaxations }).changed;
+  }
+  return {
+    apply,
+    observe(site, partition, source) {
+      const changed = book.observe(site, partition, source);
+      return apply(site, partition) || changed;
+    },
+    info(context) {
+      const record = book.get(context.site, context.partition);
+      const kept = genreOf(record);
+      return {
+        genre: kept?.genre ?? 'other',
+        reason: kept?.reason ?? 'none',
+        detected: record?.genre ?? 'other',
+        detectedReason: record?.reason ?? 'none',
+        categories: streamCategoriesOf(context),
+      };
+    },
+  };
 }
 
 /**
@@ -336,6 +397,9 @@ export function startBackground(): () => void {
   // What pages reported about their streams (streamer, title) and the streams' spoiler notes.
   const contexts = createStreamContexts();
   const notes = spoilerNotes(contexts);
+  // Every stream's genre, kept in extension storage across service worker restarts (R63).
+  const book = createGenreBook(browser.storage.local);
+  const genres = streamGenres(book, contexts);
   /** Frames already told their stream's streamer after an ingest without it. */
   const told = createLruCache<string, true>({ max: TOLD_FRAMES });
   // The toolbar badge counts each tab's removed comments without a verdict (R54).
@@ -357,6 +421,27 @@ export function startBackground(): () => void {
     clefQueue,
     onHiddenChange: badge.counted,
   });
+  /**
+   * The stream's one genre guess (R63 step 5), when nothing on its page decided the genre; asked
+   * for a chat in front of the viewer only (R44), and never waited for: the batches go on with
+   * the genre known until the answer comes.
+   */
+  function guessGenre(site: Site, partition: string, title: string | undefined): void {
+    const input = book.guessInput(site, partition, title);
+    if (input === undefined) return;
+    launch(
+      async () => {
+        const pipeline = await pipelines.current();
+        if (!pipeline.ok) return;
+        const guessed = await pipeline.value.guessGenre(input);
+        // No answer (llama.cpp down): nothing is kept, and a later service worker may ask again.
+        if (!guessed.ok) return;
+        const kept = book.guessed(site, partition, guessed.value);
+        if (genres.apply(site, partition) || kept) announceStreamChange();
+      },
+      () => undefined,
+    );
+  }
   const handlers: Omit<CommentProtocolHandlers, FrameRoute | PageRoute> = {
     ...llmHandlers({ fetch: fetcher, queue }),
     'comments/stats': async ({ site, channel }): Promise<Result<CommentStats>> => {
@@ -379,16 +464,40 @@ export function startBackground(): () => void {
       const pipeline = await pipelines.current();
       return pipeline.ok ? pipeline.value.summary(site, channel, windowMinutes) : pipeline;
     },
-    'comments/stream': async ({ tabId }): Promise<Result<{ stream?: StreamContext }>> => {
+    'comments/stream': async ({
+      tabId,
+    }): Promise<Result<{ stream?: StreamContext; genre?: GenreView }>> => {
       // The tab's top frame is asked each time: a tab that navigated away answers nothing.
       const shown = await streamOfTab(tabId);
       if (!shown.ok) return Ok({});
       const { site, partition, ...info } = shown.value;
       // What the page shows is the newest (and all there is after a service worker restart).
-      const { context, changed } = contexts.report(site, partition, info);
-      if (changed && context.streamer !== undefined)
-        sendToTab(tabId, { type: 'comments/stream-info', payload: publicStream(context) });
-      return Ok({ stream: publicStream(context) });
+      const { context: reported, changed } = contexts.report(site, partition, info);
+      if (changed && reported.streamer !== undefined)
+        sendToTab(tabId, { type: 'comments/stream-info', payload: publicStream(reported) });
+      const loaded = await book.load();
+      if (!loaded.ok) return loaded;
+      const source = genreSourceOf(info);
+      if (source === undefined) genres.apply(site, partition);
+      else genres.observe(site, partition, source);
+      // The categories count the stream's spoiler note (R64).
+      const noted = await notes.load();
+      if (!noted.ok) return noted;
+      const context = contexts.get(site, partition);
+      return Ok({ stream: publicStream(context), genre: genres.info(context) });
+    },
+    'comments/genre': async ({
+      site,
+      partition,
+      genre,
+    }): Promise<Result<{ persisted: boolean }>> => {
+      const loaded = await book.load();
+      if (!loaded.ok) return loaded;
+      const chosen = await book.choose(site, partition, genre);
+      if (!chosen.ok) return chosen;
+      genres.apply(site, partition);
+      announceStreamChange();
+      return chosen;
     },
     'comments/hidden': async ({ site, channel }): Promise<Result<HiddenEntry[]>> => {
       const pipeline = await pipelines.current();
@@ -420,6 +529,7 @@ export function startBackground(): () => void {
   const forbidden = (): Promise<Result<never>> => Promise.resolve(Err(failure('sender_forbidden')));
   const contentHandlers: Pick<CommentProtocolHandlers, PageRoute> = {
     'comments/stream': forbidden,
+    'comments/genre': forbidden,
     'comments/summary': forbidden,
     'comments/hidden': forbidden,
     'comments/feedback': forbidden,
@@ -442,6 +552,9 @@ export function startBackground(): () => void {
         partition,
         streamer,
         title,
+        game,
+        tags,
+        rules,
       }): Promise<Result<Record<string, never>>> => {
         const tabId = sender.tab?.id;
         if (tabId === undefined || sender.frameId === undefined || fromExtensionPage(sender))
@@ -456,12 +569,17 @@ export function startBackground(): () => void {
           ...(streamer === undefined ? {} : { streamer }),
           ...(title === undefined ? {} : { title }),
         });
+        // A page that shows the title shows what decides the genre (R63): detected again.
+        const loaded = await book.load();
+        if (!loaded.ok) return loaded;
+        const source = genreSourceOf({ title, game, tags, rules });
+        const detected = source !== undefined && genres.observe(site, partition, source);
         // The stream's spoiler note is read before the frame's comments are judged.
         const noted = await notes.load();
         if (!noted.ok) return noted;
         if (context.streamer !== undefined)
           sendToTab(tabId, { type: 'comments/stream-info', payload: publicStream(context) });
-        if (changed) announceStreamChange();
+        if (changed || detected) announceStreamChange();
         return Ok({});
       },
       // Annotations return to the frame that sent the comments, so ingest needs the sender.
@@ -503,6 +621,18 @@ export function startBackground(): () => void {
         // The stream's spoiler note joins the prompts from the first batch on.
         const noted = await notes.load();
         if (!noted.ok) return noted;
+        // So does its kept genre (after a restart or an eviction too); a stream no page described
+        // (a popout alone) is detected from its title (R63).
+        const loaded = await book.load();
+        if (!loaded.ok) return loaded;
+        const described =
+          book.get(site, channel) !== undefined || context.title === undefined
+            ? genres.apply(site, channel)
+            : genres.observe(site, channel, { title: context.title });
+        if (described) announceStreamChange();
+        // Only a chat in front of the viewer may ask for the stream's one guess (R44).
+        if (process !== false && left !== true && comments.length > 0)
+          guessGenre(site, channel, context.title);
         // `process: false`: the comments are only stored (R44); `left`: the frame's chat left
         // the viewer, so the waiting comments only it shows are stored too (R49).
         return Ok(

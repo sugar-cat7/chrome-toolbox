@@ -4,6 +4,8 @@ import {
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentCategorySchema,
+  GENRE_MAX_TOKENS,
+  genrePrompt,
   createClefJudge,
   createLanguageDetector,
   createLlamaClient,
@@ -3034,6 +3036,39 @@ describe('comment slots shared with the chat summary', () => {
     expect(events).toEqual(['first@1', 'exclusive@1', 'second@1']);
   });
 
+  it('starts a spare exclusive only on a slot no waiting batch wants (the genre guess, R63)', async () => {
+    const door = gate();
+    const llama = fakeLlama(echo());
+    const events: string[] = [];
+    const fetch: Fetch = async (input, init) => {
+      events.push(requestOf(init));
+      await door.opened;
+      return llama.fetch(input, init);
+    };
+    const { annotations, pipeline } = setup({ fetch });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+    await vi.waitFor(() => expect(events).toEqual(['first@1']));
+    const guess = pipeline.exclusive(
+      async (slot): Promise<Result<number>> => {
+        events.push(`spare@${slot}`);
+        return Ok(slot);
+      },
+      'guess',
+      { spare: true },
+    );
+    pipeline.ingest(target, { ...channel, comments: [comment('2', 'second')] });
+    door.open();
+    // The batch queued meanwhile goes first; the guess takes the slot once nothing waits.
+    expect(await guess).toEqual(Ok(1));
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    expect(events).toEqual(['first@1', 'second@1', 'spare@1']);
+    // On a free slot it starts at once.
+    const now = pipeline.exclusive(async (slot): Promise<Result<number>> => Ok(slot), 'guess', {
+      spare: true,
+    });
+    expect(await now).toEqual(Ok(1));
+  });
+
   /** Answers summary requests with `answer()` (503 when undefined) and the rest as `fetch` does. */
   const withSummaries = (fetch: Fetch, answer: () => string | undefined) => {
     const state = { summaries: 0 };
@@ -4247,5 +4282,50 @@ describe('genre categories (R62)', () => {
       },
     ]);
     expect(counts).toEqual([1]);
+  });
+});
+
+describe('genre guess (R63)', () => {
+  /** A server that answers the genre prompt with `reply` and records each request body. */
+  const genreServer = (reply: string | undefined) => {
+    const bodies: ChatBody[] = [];
+    const fetch: Fetch = async (_input, init) => {
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as ChatBody;
+      bodies.push(body);
+      return reply === undefined
+        ? new Response('down', { status: 503 })
+        : Response.json({ choices: [{ message: { content: reply }, finish_reason: 'stop' }] });
+    };
+    return { bodies, fetch };
+  };
+
+  it('asks the model once on a comment slot, never the subtitle slot, with the genre grammar', async () => {
+    const server = genreServer('horror');
+    const { pipeline } = setup({ fetch: server.fetch });
+    expect(
+      await pipeline.guessGenre({ title: 'Fixture Haunt night', game: 'Fixture Haunt' }),
+    ).toEqual(Ok('horror'));
+    expect(server.bodies).toHaveLength(1);
+    const [body] = server.bodies;
+    expect(body).toMatchObject({
+      model: 'gemma4-e4b',
+      id_slot: 1,
+      max_tokens: GENRE_MAX_TOKENS,
+      temperature: 0,
+      grammar: genrePrompt({}).grammar,
+    });
+    expect(body?.messages[1]?.content).toBe(
+      'Title (JSON string): "Fixture Haunt night"\nGame (JSON string or null): "Fixture Haunt"',
+    );
+  });
+
+  it('reads an answer outside the genre ids as other, and passes a failed request on', async () => {
+    expect(
+      await setup({ fetch: genreServer('rpg').fetch }).pipeline.guessGenre({ title: 'x' }),
+    ).toEqual(Ok('other'));
+    const failed = await setup({ fetch: genreServer(undefined).fetch }).pipeline.guessGenre({
+      title: 'x',
+    });
+    expect(failed).toMatchObject({ ok: false, error: { internalCode: 'network_failed' } });
   });
 });

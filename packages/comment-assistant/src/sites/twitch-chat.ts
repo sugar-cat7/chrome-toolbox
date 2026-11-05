@@ -1,5 +1,6 @@
+import { captureSync } from '@chrome-toolbox/contracts';
 import type { AuthorRole } from '../protocol.ts';
-import { MAX_TITLE } from '../stream-context.ts';
+import { MAX_GAME, MAX_TAG, MAX_TAGS, MAX_TITLE, type StreamInfo } from '../stream-context.ts';
 import {
   byAttribute,
   clip,
@@ -20,6 +21,10 @@ import {
 // (p[data-a-target="stream-title"]); on an in-app channel switch (History API, seen by the
 // Navigation API's navigatesuccess in a content script) the URL changes first and the same
 // section is re-rendered in place, so its title is the channel's only while it links to it.
+// Verified on live channels on 2026-11-05 (R63): the same section holds the category link
+// (a[data-a-target="stream-game-link"], /directory/category/<slug>; its text follows the page
+// language, 雑談 or Just Chatting, the slug does not) and the tags (a.tw-tag,
+// /directory/all/tags/<tag>, its aria-label translated with the page).
 // Author badges, seen on live channels on 2026-10-29: each is an img.chat-badge inside a
 // button[data-a-target="chat-badge"] in the line's .chat-line__username-container, its src the
 // global badge's image (static-cdn.jtvnw.net/badges/v1/<id>/1) and its alt translated with the
@@ -39,6 +44,8 @@ const SELECTORS = {
   keep: 'a, [data-a-target="chat-message-mention"], .mention-fragment',
   info: '#live-channel-stream-information',
   title: '[data-a-target="stream-title"]',
+  game: 'a[data-a-target="stream-game-link"][href]',
+  tag: 'a[href^="/directory/all/tags/"]',
   badge: '.chat-line__username-container img.chat-badge',
 } as const;
 /** Twitch's global badges by image id, the same in every page language. */
@@ -117,11 +124,37 @@ const showsChannel = (info: Element, login: string): boolean =>
   [...info.querySelectorAll('a[href]')].some(
     (link) => link.getAttribute('href')?.toLowerCase() === `/${login}`,
   );
-/** The title the stream information shows for `login`; empty while it shows another channel. */
-function titleOf(doc: Document, login: string): string {
+/** The stream information while it shows `login`; null while it shows another channel. */
+function infoOf(doc: Document, login: string): Element | null {
   const info = doc.querySelector(SELECTORS.info);
-  if (!info || !showsChannel(info, login)) return '';
-  return clip(info.querySelector(SELECTORS.title)?.textContent ?? '', MAX_TITLE);
+  return info && showsChannel(info, login) ? info : null;
+}
+/** The title a stream information shows; empty without one. */
+const titleIn = (info: Element | null): string =>
+  clip(info?.querySelector(SELECTORS.title)?.textContent ?? '', MAX_TITLE);
+/** The title the stream information shows for `login`; empty while it shows another channel. */
+const titleOf = (doc: Document, login: string): string => titleIn(infoOf(doc, login));
+const CATEGORY = /^\/directory\/category\/([^/?#]+)/u;
+const TAG = /^\/directory\/all\/tags\/([^/?#]+)/u;
+/** A path segment percent-decoded and cut; empty when malformed. */
+function segment(href: string | null, pattern: RegExp, max: number): string {
+  const raw = pattern.exec(href ?? '')?.[1];
+  if (raw === undefined) return '';
+  const decoded = captureSync(() => decodeURIComponent(raw), 'input_invalid');
+  return decoded.ok ? clip(decoded.value, max) : '';
+}
+/** The category's slug and the tags the stream information shows (R63). */
+function genreInfoOf(info: Element): Pick<StreamInfo, 'game' | 'tags'> {
+  const game = segment(
+    info.querySelector(SELECTORS.game)?.getAttribute('href') ?? null,
+    CATEGORY,
+    MAX_GAME,
+  );
+  const tags = [...info.querySelectorAll(SELECTORS.tag)]
+    .map((link) => segment(link.getAttribute('href'), TAG, MAX_TAG))
+    .filter((tag) => tag !== '')
+    .slice(0, MAX_TAGS);
+  return { ...(game === '' ? {} : { game }), ...(tags.length === 0 ? {} : { tags }) };
 }
 
 /**
@@ -180,14 +213,21 @@ export function createTwitchChat(session: string): SiteAdapter {
     },
     textElement: (message) => message.querySelector<HTMLElement>(SELECTORS.text),
     keep: SELECTORS.keep,
-    // The channel login is the streamer; the title only once the page shows that channel's.
+    // The channel login is the streamer; the title, category and tags only once the page shows
+    // that channel's.
     streamInfo(doc, channel) {
-      const title = titleOf(doc, channel);
-      return title === '' ? { streamer: channel } : { streamer: channel, title };
+      const info = infoOf(doc, channel);
+      const title = titleIn(info);
+      return {
+        streamer: channel,
+        ...(title === '' ? {} : { title }),
+        ...(info ? genreInfoOf(info) : {}),
+      };
     },
     watchStreamInfo(doc, channel, ready) {
       const info = doc.querySelector(SELECTORS.info);
-      if (!info) return () => undefined;
+      // Nothing to wait for: no section, or it shows the channel's title already.
+      if (!info || titleOf(doc, channel) !== '') return () => undefined;
       const Observer = doc.defaultView?.MutationObserver ?? MutationObserver;
       let left = MAX_WAIT_MUTATIONS;
       const observer = new Observer(() => {

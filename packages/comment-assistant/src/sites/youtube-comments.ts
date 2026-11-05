@@ -1,11 +1,13 @@
 import { captureSync } from '@chrome-toolbox/contracts';
 import {
   COMMENTS_SUFFIX,
+  MAX_GAME,
   MAX_STREAMER,
   MAX_TITLE,
   streamOf,
   type StreamInfo,
 } from '../stream-context.ts';
+import { rulesOf } from './rules.ts';
 import { byAttribute, clip, ID_ATTRIBUTE, rawComment, type SiteAdapter } from './types.ts';
 
 // Verified on a watch page on 2026-10-28: thread renderers are the children of
@@ -24,6 +26,14 @@ import { byAttribute, clip, ID_ATTRIBUTE, rawComment, type SiteAdapter } from '.
 // ytd-author-comment-badge-renderer with a `creator` attribute in #author-comment-badge (its
 // a#author-text stays, hidden). Verified channels get the same renderer without the attribute
 // and no role here.
+// Verified on live streams on 2026-11-05 (R63): the game card is a
+// yt-video-attributes-section-view-model under ytd-watch-metadata whose footer links to /gaming
+// (other attribute sections do not), its yt-video-attribute-view-model links to the game's
+// channel with the name as aria-label, in the page language (エーペックスレジェンズ, Apex
+// Legends). The collapsed description shows its first lines only; the whole of it (links as
+// chips) is the snippet of the hidden structured description engagement panel
+// (target-id="engagement-panel-structured-description"). On a navigation the title and the
+// card change with video-id; the description was seen empty there and filled about 20 ms later.
 const SELECTORS = {
   container: 'ytd-comments#comments #sections > #contents',
   scope: 'ytd-comments#comments',
@@ -39,9 +49,20 @@ const SELECTORS = {
   watch: 'ytd-watch-flexy',
   title: 'ytd-watch-metadata #title h1',
   owner: 'ytd-watch-metadata ytd-video-owner-renderer a[href]',
+  attributes: 'ytd-watch-metadata yt-video-attributes-section-view-model',
+  gaming: 'a[href="/gaming"]',
+  game: 'yt-video-attribute-view-model a[aria-label]',
+  descriptionPanel:
+    'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-structured-description"]',
+  description: 'ytd-expandable-video-description-body-renderer [id="snippet-text"]',
 } as const;
 /** The attribute of ytd-watch-flexy that names the video its metadata shows. */
 const WATCH_VIDEO = 'video-id';
+/**
+ * Mutations of the description panel seen while waiting for the description; the wait ends
+ * there (a video without one).
+ */
+const MAX_WAIT_MUTATIONS = 100;
 const VIDEO_ID = /^[\w-]{1,64}$/u;
 /** Comment ids (`lc`): top-level `Ugx…`, replies `Ugx….Ugy…`. */
 const COMMENT_ID = /^[\w.-]{1,256}$/u;
@@ -65,6 +86,23 @@ function streamerOf(href: string, doc: Document): string | undefined {
   const streamer = clip(decoded.ok ? decoded.value : raw, MAX_STREAMER);
   return streamer.length > 1 ? streamer : undefined;
 }
+
+/** The game YouTube's games card names (R63), in the page language. */
+function gameOf(doc: Document): string | undefined {
+  for (const section of doc.querySelectorAll(SELECTORS.attributes)) {
+    if (!section.querySelector(SELECTORS.gaming)) continue;
+    const name = clip(
+      section.querySelector(SELECTORS.game)?.getAttribute('aria-label') ?? '',
+      MAX_GAME,
+    );
+    return name === '' ? undefined : name;
+  }
+  return undefined;
+}
+/** The whole description, from the hidden description panel; empty until YouTube fills it in. */
+const descriptionOf = (doc: Document): string =>
+  doc.querySelector(SELECTORS.descriptionPanel)?.querySelector(SELECTORS.description)
+    ?.textContent ?? '';
 
 /** Comments under a YouTube video (top-level only). */
 export const youtubeComments: SiteAdapter = {
@@ -103,9 +141,13 @@ export const youtubeComments: SiteAdapter = {
     const href = doc.querySelector(SELECTORS.owner)?.getAttribute('href');
     const streamer = href ? streamerOf(href, doc) : undefined;
     const title = clip(doc.querySelector(SELECTORS.title)?.textContent ?? '', MAX_TITLE);
+    const game = gameOf(doc);
+    const rules = rulesOf(descriptionOf(doc));
     const info: StreamInfo = {
       ...(streamer === undefined ? {} : { streamer }),
       ...(title === '' ? {} : { title }),
+      ...(game === undefined ? {} : { game }),
+      ...(rules === '' ? {} : { rules }),
     };
     return info;
   },
@@ -114,13 +156,32 @@ export const youtubeComments: SiteAdapter = {
     if (!watch) return () => undefined;
     const v = streamOf(channel);
     const Observer = doc.defaultView?.MutationObserver ?? MutationObserver;
-    // One element, one attribute: the metadata of the session's video arrives with it.
-    const observer = new Observer(() => {
-      if (watch.getAttribute(WATCH_VIDEO) !== v) return;
-      observer.disconnect();
-      ready();
-    });
-    observer.observe(watch, { attributes: true, attributeFilter: [WATCH_VIDEO] });
-    return () => observer.disconnect();
+    let observer: MutationObserver | undefined;
+    /** Only the description panel, until it shows the description (or a bounded wait ends). */
+    function awaitDescription(): void {
+      const panel = doc.querySelector(SELECTORS.descriptionPanel);
+      if (!panel || descriptionOf(doc).trim() !== '') return;
+      let left = MAX_WAIT_MUTATIONS;
+      observer = new Observer(() => {
+        left -= 1;
+        const shown = descriptionOf(doc).trim() !== '';
+        if (!shown && left > 0) return;
+        observer?.disconnect();
+        if (shown) ready();
+      });
+      observer.observe(panel, { subtree: true, childList: true, characterData: true });
+    }
+    if (watch.getAttribute(WATCH_VIDEO) === v) awaitDescription();
+    else {
+      // One element, one attribute: the metadata of the session's video arrives with it.
+      observer = new Observer(() => {
+        if (watch.getAttribute(WATCH_VIDEO) !== v) return;
+        observer?.disconnect();
+        ready();
+        awaitDescription();
+      });
+      observer.observe(watch, { attributes: true, attributeFilter: [WATCH_VIDEO] });
+    }
+    return () => observer?.disconnect();
   },
 };

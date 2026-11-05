@@ -594,6 +594,133 @@ describe('side panel', () => {
       ).toBeTruthy();
   });
 
+  it('shows the detected genre with its reason and only the categories on for the stream (R63)', async () => {
+    const { api } = fakeApi({
+      'comments/stream': () =>
+        Ok({
+          stream,
+          genre: {
+            genre: 'horror',
+            reason: 'title',
+            detected: 'horror',
+            detectedReason: 'title',
+            categories: ['spoiler', 'instruction', 'relay', 'privacy', 'sensitive'],
+          },
+        }),
+    });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const genre = (await within(panel).findByLabelText('この配信のジャンル')) as HTMLSelectElement;
+    expect(genre.value).toBe('');
+    expect(within(genre).getByRole('option', { name: '自動（ホラー・タイトル）' })).toBeTruthy();
+    expect(within(genre).getAllByRole('option')).toHaveLength(12);
+    expect(within(panel).getByText('判定: ホラー（理由: タイトル）')).toBeTruthy();
+    // The genre turns ghosting off; the base categories always stay (R62).
+    for (const label of [
+      'ネタバレ',
+      '指示',
+      '他配信の話題',
+      'プライバシー',
+      'センシティブ',
+      '質問',
+      '雑談',
+    ])
+      expect(within(panel).getByLabelText(label)).toBeTruthy();
+    expect(within(panel).queryByLabelText('ゴースティング')).toBeNull();
+  });
+
+  it.each([
+    { reason: 'rules', text: '判定: 雑談（理由: 概要欄）' },
+    { reason: 'tags', text: '判定: 雑談（理由: タグ）' },
+    { reason: 'game', text: '判定: 雑談（理由: ゲーム）' },
+    { reason: 'guess', text: '判定: 雑談（理由: 推定）' },
+  ])('names the reason $reason', async ({ reason, text }) => {
+    const { api } = fakeApi({
+      'comments/stream': () =>
+        Ok({
+          stream,
+          genre: {
+            genre: 'chat',
+            reason,
+            detected: 'chat',
+            detectedReason: reason,
+            categories: ['relay', 'privacy', 'sensitive'],
+          },
+        }),
+    });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    expect(await within(await openTab('フィルター')).findByText(text)).toBeTruthy();
+  });
+
+  it("saves the viewer's genre for the stream and follows the stream's new categories", async () => {
+    let chosen: string | undefined;
+    const genreOf = () => ({
+      genre: chosen ?? 'other',
+      reason: chosen === undefined ? 'none' : 'viewer',
+      detected: 'other',
+      detectedReason: 'none',
+      categories:
+        chosen === 'fps'
+          ? ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive']
+          : ['relay', 'privacy', 'sensitive'],
+    });
+    const { api, of, events } = fakeApi({
+      'comments/stream': () => Ok({ stream, genre: genreOf() }),
+      'comments/genre': ({ genre }) => {
+        chosen = typeof genre === 'string' ? genre : undefined;
+        return Ok({ persisted: true });
+      },
+    });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const genre = await within(panel).findByLabelText('この配信のジャンル');
+    expect(within(panel).getByText('判定: その他（理由: なし）')).toBeTruthy();
+    expect(within(panel).queryByLabelText('指示')).toBeNull();
+    await userEvent.selectOptions(genre, 'FPS・対戦');
+    expect(of('comments/genre')).toEqual([
+      {
+        type: 'comments/genre',
+        payload: { site: 'youtube', partition: 'fixture0001', genre: 'fps' },
+      },
+    ]);
+    expect(await within(panel).findByText('この配信用に保存しました')).toBeTruthy();
+    // The service worker announces the change; the panel asks again.
+    act(() => {
+      for (const listener of events.message.listeners)
+        (listener as (message: unknown) => void)({ type: 'comments/stream-changed' });
+    });
+    expect(await within(panel).findByLabelText('ゴースティング')).toBeTruthy();
+    expect((within(panel).getByLabelText('この配信のジャンル') as HTMLSelectElement).value).toBe(
+      'fps',
+    );
+    // 自動 removes the choice.
+    await userEvent.selectOptions(
+      within(panel).getByLabelText('この配信のジャンル'),
+      '自動（その他・なし）',
+    );
+    expect(of('comments/genre').at(-1)).toEqual({
+      type: 'comments/genre',
+      payload: { site: 'youtube', partition: 'fixture0001' },
+    });
+  });
+
+  it('says when the genre could not be saved', async () => {
+    const { api } = fakeApi({ 'comments/genre': () => Ok({ persisted: false }) });
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    await userEvent.selectOptions(
+      await within(panel).findByLabelText('この配信のジャンル'),
+      '歌枠',
+    );
+    expect(
+      await within(panel).findByText('ジャンルを保存できませんでした（一時的に使います）'),
+    ).toBeTruthy();
+  });
+
   it('marks a comment confirmed as correct and says when a verdict is saved later', async () => {
     const { api, of } = fakeApi({
       'comments/feedback': () => Ok({ persisted: false }),

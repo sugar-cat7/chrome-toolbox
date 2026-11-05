@@ -14,14 +14,43 @@ export const MAX_STREAMS = 16;
 export const MAX_STREAMER = 128;
 /** Characters of a stream title read from a page; it goes into every batch prompt. */
 export const MAX_TITLE = 200;
+/** Characters of the game a page names (YouTube's game card, Twitch's category slug). */
+export const MAX_GAME = 100;
+/** Twitch tags read from a page, and characters of each (Twitch allows 10 of 25). */
+export const MAX_TAGS = 10;
+export const MAX_TAG = 25;
+/** Characters of the rules read from a stream's description (お約束 and the like). */
+export const MAX_RULES = 1000;
 /**
  * A YouTube video's comments are their own store partition, `<videoId>#comments`, in the
  * stream `<videoId>` of its chat (and chat replay).
  */
 export const COMMENTS_SUFFIX = '#comments';
 
-/** What a page shows about its stream; either may be missing. */
-export type StreamInfo = Readonly<{ streamer?: string | undefined; title?: string | undefined }>;
+/**
+ * What a page shows about its stream; any part may be missing. The game, the tags and the
+ * description's rules decide its genre (R63), and only a page with the title shows them.
+ */
+export type StreamInfo = Readonly<{
+  streamer?: string | undefined;
+  title?: string | undefined;
+  /** YouTube's game card, or Twitch's category slug. */
+  game?: string | undefined;
+  /** Twitch's tags. */
+  tags?: readonly string[] | undefined;
+  /** The rules sections of a YouTube description (`rulesOf`). */
+  rules?: string | undefined;
+}>;
+/**
+ * Why a detected stream has its genre (R63), in the order that decides it: the description's
+ * rules, the title's 【】, Twitch's tags or the game name it, the model guessed it once, or
+ * nothing did (`other`).
+ */
+export const DETECTED_REASONS = ['rules', 'title', 'tags', 'game', 'guess', 'none'] as const;
+export type DetectedReason = (typeof DETECTED_REASONS)[number];
+/** Why a stream has its genre: the viewer chose it for the stream, or it was detected. */
+export const GENRE_REASONS = ['viewer', ...DETECTED_REASONS] as const;
+export type GenreReason = (typeof GENRE_REASONS)[number];
 /**
  * One stream: its site, its partition (`<videoId>` on YouTube, the channel login on Twitch),
  * the streamer and title a page reported, the stream's spoiler note from the side panel, and
@@ -33,7 +62,7 @@ export type StreamContext = Readonly<{
   streamer?: string | undefined;
   title?: string | undefined;
   spoilerNote?: string | undefined;
-  /** The stream's genre as given (`classify`); `other` while absent. Task G2 detects it. */
+  /** The stream's genre as given (`classify`, R63: detected or chosen); `other` while absent. */
   genre?: StreamGenre | undefined;
   /**
    * The stream categories the stream's own rules turn off, as given with the genre (`classify`);
@@ -88,8 +117,8 @@ const JA_NOT = String.raw`(?![\s　]*(?:[はも][\s　]*)?(?:じゃ|では|な�
  */
 const EN_NOT = String.raw`(?<!\b(?:no|not|never|don[’']?t|doesn[’']?t)[\s-]+(?:(?:major|minor|big|huge|any|more|story|plot|game|late|endgame|ending|unmarked)[\s-]+)?)`;
 /**
- * Words of a stream's own rules (title, or the description's rules once read, Task G2) that turn
- * a stream category off (R62), after NFKC (full-width `ＯＫ`, `２`) and in lower case:
+ * Words of a stream's own rules (its title, its description's rules and its Twitch tags, R63)
+ * that turn a stream category off (R62), after NFKC (full-width `ＯＫ`, `２`) and in lower case:
  * - instruction: 参加型, アドバイス歓迎/OK, 指示OK/歓迎, "backseat me", "backseating
  *   welcome/allowed/ok";
  * - spoiler: ネタバレあり/有り/OK/歓迎/解禁, 2周目 (or 二周目), "spoilers ok/allowed/welcome".
@@ -120,7 +149,10 @@ const RELAXATION_WORDS: Readonly<Record<RelaxableCategory, RegExp>> = {
     'u',
   ),
 };
-/** The stream categories a text of the stream's own rules turns off (R62), in order. */
+/**
+ * The stream categories a text of the stream's own rules turns off (R62), in order: the title
+ * (`streamCategoriesOf`), the description's rules and each Twitch tag (`pageRelaxations`).
+ */
 export const relaxationsIn = (text: string): RelaxableCategory[] => {
   const normalized = text.normalize('NFKC').toLowerCase();
   return RELAXABLE_CATEGORIES.filter((category) => RELAXATION_WORDS[category].test(normalized));
@@ -162,8 +194,9 @@ export type StreamContexts = {
   ): { context: StreamContext; changed: boolean };
   /**
    * Sets what kind of stream `partition` belongs to and what its own rules relax (R62); returns
-   * the stream's context and whether the genre or the relaxations changed. Task G2 detects them;
-   * until it is called a stream is `other`, relaxed only by its title (`streamCategoriesOf`).
+   * the stream's context and whether the genre or the relaxations changed. The service worker
+   * gives what it detected or the viewer chose (R63, `genre.ts`); until then a stream is `other`,
+   * relaxed only by its title (`streamCategoriesOf`).
    */
   classify(
     this: void,

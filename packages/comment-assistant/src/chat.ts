@@ -56,15 +56,27 @@ export type ChatOptions = Readonly<{
   navigation?: EventTarget;
 }>;
 
+/** What a page shows about its stream, as a message carries it. */
+type StreamPayload = {
+  streamer?: string;
+  title?: string;
+  game?: string;
+  tags?: string[];
+  rules?: string;
+};
+/** The parts of what a page shows about its stream that are known, for a message. */
+const knownInfo = ({ streamer, title, game, tags, rules }: StreamInfo): StreamPayload => ({
+  ...(streamer === undefined ? {} : { streamer }),
+  ...(title === undefined ? {} : { title }),
+  ...(game === undefined ? {} : { game }),
+  ...(tags === undefined ? {} : { tags: [...tags] }),
+  ...(rules === undefined ? {} : { rules }),
+});
+
 /** Fire-and-forget: tells the service worker which stream this frame shows, or that it left. */
 function reportStream(
   deliver: (message: unknown) => Promise<unknown>,
-  payload: Readonly<{
-    site: Site;
-    partition?: string;
-    streamer?: string | undefined;
-    title?: string | undefined;
-  }>,
+  payload: Readonly<{ site: Site; partition?: string } & StreamPayload>,
 ): void {
   launch(
     async () => {
@@ -105,13 +117,16 @@ export function startChat(
   /** The streamer of the channel's stream, once the page or the service worker named it. */
   let streamer: string | undefined;
   let filters = defaultFilterSettings;
-  /** What the page showed about the channel's stream so far; a later read only adds to it. */
+  /**
+   * What the page showed about the channel's stream so far; a later read only adds to it, but
+   * one that shows the title shows the game, tags and rules as they are now.
+   */
   let shown: StreamInfo = {};
   /** The title the service worker told (the live chat frame's page shows none). */
   let told: string | undefined;
   /** The last report sent, so an unchanged one is not sent again. */
   let reported: string | undefined;
-  /** Stops waiting for the page to show the channel's title. */
+  /** Stops waiting for the page to show the rest of the channel's stream info. */
   let stopWaiting: (() => void) | undefined;
   /** Newest last; the oldest is dropped past MAX_REMEMBERED. */
   const remembered = new Map<string, Annotation>();
@@ -205,30 +220,30 @@ export function startChat(
   function report(): void {
     if (stopped || channel === undefined || isInvalid()) return;
     const read = adapter.streamInfo?.(doc, channel);
+    const page = read?.title === undefined ? shown : read;
     shown = {
       streamer: read?.streamer ?? shown.streamer,
       title: read?.title ?? shown.title,
+      game: page.game,
+      tags: page.tags,
+      rules: page.rules,
     };
     takeStreamer(shown.streamer);
-    const payload = {
-      site: adapter.site,
-      partition: channel,
-      ...(shown.streamer === undefined ? {} : { streamer: shown.streamer }),
-      ...(shown.title === undefined ? {} : { title: shown.title }),
-    };
+    const payload = { site: adapter.site, partition: channel, ...knownInfo(shown) };
     const json = JSON.stringify(payload);
     if (json === reported) return;
     reported = json;
     reportStream(deliver, payload);
   }
   /**
-   * While the page does not show the channel's title yet (YouTube's metadata and Twitch's
-   * stream information arrive after the navigation), waits for it and reports it then.
+   * While the page does not show all of the channel's stream info yet (YouTube's metadata and
+   * description, Twitch's stream information arrive after the navigation), waits for it and
+   * reports it then; the adapter watches nothing when nothing is missing.
    */
-  function awaitTitle(): void {
+  function awaitInfo(): void {
     stopWaiting?.();
     stopWaiting = undefined;
-    if (stopped || channel === undefined || shown.title !== undefined) return;
+    if (stopped || channel === undefined) return;
     stopWaiting = adapter.watchStreamInfo?.(doc, channel, report);
   }
   /**
@@ -250,14 +265,14 @@ export function startChat(
     remembered.clear();
     filters = defaultFilterSettings;
     if (channel === undefined) {
-      awaitTitle();
+      awaitInfo();
       if (!isInvalid()) reportStream(deliver, { site: adapter.site });
       return;
     }
     // A streamer the page names loads its filters; otherwise the stream's own key does.
     report();
     if (streamer === undefined) load();
-    awaitTitle();
+    awaitInfo();
   }
   function remember(annotation: Annotation): void {
     remembered.delete(annotation.id);
@@ -371,7 +386,7 @@ export function startChat(
   navigation?.addEventListener('navigatesuccess', onNavigate);
   report();
   if (streamer === undefined) load();
-  awaitTitle();
+  awaitInfo();
   const stopObserving = observeComments(adapter, doc, onBatch, onLeave, {
     onContainer(found) {
       // The lines waiting were in the list replaced.
@@ -455,12 +470,7 @@ export function startPage(
     }
     // With what the page shows, so a restarted service worker learns the stream again.
     const info = running.streamInfo?.(doc, partition);
-    sendResponse({
-      site: running.site,
-      partition,
-      ...(info?.streamer === undefined ? {} : { streamer: info.streamer }),
-      ...(info?.title === undefined ? {} : { title: info.title }),
-    });
+    sendResponse({ site: running.site, partition, ...knownInfo(info ?? {}) });
     return undefined;
   }
   start();

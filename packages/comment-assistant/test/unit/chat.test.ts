@@ -353,11 +353,14 @@ describe('startChat', () => {
 
     doc.querySelector('ytd-watch-flexy')?.setAttribute('video-id', 'fixture0002');
     await vi.advanceTimersByTimeAsync(FLUSH);
+    // With what decides its genre (R63): the game card and the description's rules.
     expect(contexts.at(-1)).toEqual({
       site: 'youtube',
       partition: 'fixture0002#comments',
       streamer: '@FixtureStreamer',
       title: 'Fixture Quest Part 3: the frozen bridge',
+      game: 'Fixture Quest',
+      rules: '【お約束】\n・アドバイス歓迎です\n・他の配信者さんの話題は控えてね',
     });
     // The streamer's own filters apply from now on.
     await vi.waitFor(() => expect(thread?.getAttribute('data-ca-mode')).toBe('show'));
@@ -368,6 +371,31 @@ describe('startChat', () => {
     navigation.dispatchEvent(new Event('navigatesuccess'));
     await vi.advanceTimersByTimeAsync(FLUSH);
     expect(contexts).toHaveLength(2);
+    stop();
+  });
+
+  it('reports the description rules again once they fill in after the metadata (R63)', async () => {
+    vi.useFakeTimers();
+    const { contexts, send } = stubWorker();
+    const doc = load('/watch?v=fixture0002', 'youtube-comments');
+    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
+    if (!description) throw new Error('fixture changed');
+    description.textContent = '';
+    const stop = startPage(doc, [youtubeLiveChat, youtubeComments], { send });
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    doc.querySelector('ytd-watch-flexy')?.setAttribute('video-id', 'fixture0002');
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    expect(contexts.at(-1)).toEqual({
+      site: 'youtube',
+      partition: 'fixture0002#comments',
+      streamer: '@FixtureStreamer',
+      title: 'Fixture Quest Part 3: the frozen bridge',
+      game: 'Fixture Quest',
+    });
+    description.textContent = '【お約束】\n・指示OKです';
+    await vi.advanceTimersByTimeAsync(FLUSH);
+    expect(contexts.at(-1)).toMatchObject({ rules: '【お約束】\n・指示OKです' });
+    expect(contexts).toHaveLength(3);
     stop();
   });
 
@@ -446,8 +474,10 @@ describe('startChat', () => {
     const stop = startChat(twitch, doc, { send, navigation });
     await vi.advanceTimersByTimeAsync(FLUSH);
     const title = 'Fixture speedrun night: any% practice';
+    // With what decides its genre (R63): the category's slug and the tags.
+    const genre = { game: 'fixture-game', tags: ['日本語', 'Speedrun'] };
     expect(contexts).toEqual([
-      { site: 'twitch', partition: 'firstchannel', streamer: 'firstchannel', title },
+      { site: 'twitch', partition: 'firstchannel', streamer: 'firstchannel', title, ...genre },
     ]);
     // The title was there: nothing waits for it.
     expect(observe.mock.calls.map(([target]) => target)).not.toContain(
@@ -489,6 +519,7 @@ describe('startChat', () => {
       partition: 'secondchannel',
       streamer: 'secondchannel',
       title: 'Fixture marathon: second channel',
+      ...genre,
     });
     const reports = contexts.length;
     heading.textContent = 'Fixture marathon: second channel ';
@@ -553,6 +584,8 @@ describe('startChat', () => {
         partition: 'fixture0001#comments',
         streamer: '@FixtureStreamer',
         title: 'Fixture Quest Part 3: the frozen bridge',
+        game: 'Fixture Quest',
+        rules: '【お約束】\n・アドバイス歓迎です\n・他の配信者さんの話題は控えてね',
       },
     ]);
     await navigate('/');

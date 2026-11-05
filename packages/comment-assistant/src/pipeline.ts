@@ -17,11 +17,14 @@ import {
   createCommentStore,
   createLanguageMix,
   createLruCache,
+  GENRE_MAX_TOKENS,
+  genrePrompt,
   isAbusive,
   isStreamCategory,
   llmCategoryJudge,
   needsTranslation,
   parseCommentBatch,
+  parseGenre,
   scriptLanguageGuess,
   systemTimers,
   type CommentBatchItem,
@@ -158,13 +161,24 @@ export type CommentPipeline = {
    * but a slot freed by an `exclusive` goes to the waiting batches first, so two never run back
    * to back ahead of them (R36). A call with the `key` of one still waiting takes its place in
    * line, and the one replaced runs at once with an aborted signal. `signal` also aborts on
-   * dispose (calls still waiting then run at once, aborted).
+   * dispose (calls still waiting then run at once, aborted). A `spare` call (the genre guess,
+   * R63) starts only on a slot that no waiting batch takes: batches never wait for it to start.
    */
   exclusive<T>(
     this: void,
     fn: (slot: number, signal: AbortSignal) => Promise<T>,
     key?: string,
+    options?: Readonly<{ spare?: boolean }>,
   ): Promise<T>;
+  /**
+   * The stream's genre as the model guesses it from its title and game (R63 step 5): one short
+   * request on a spare comment slot (`exclusive`, never slot 0, which subtitles keep), with the
+   * translation model; an answer outside the genre ids is `other`.
+   */
+  guessGenre(
+    this: void,
+    input: Readonly<{ title?: string | undefined; game?: string | undefined }>,
+  ): Promise<Result<StreamGenre>>;
   /**
    * The channel's chat summary over the last `windowMinutes` (`summarize`), the model asked on
    * a slot of its own (`exclusive`, keyed by the channel: one summary of a channel waits at a
@@ -538,6 +552,8 @@ export function createCommentPipeline(deps: {
    */
   type Waiting = Readonly<{
     key: string | undefined;
+    /** Starts only on a slot left after the waiting batches took theirs. */
+    spare: boolean;
     begin: (slot: number, cancelled: boolean) => void;
   }>;
   let waiting: Waiting[] = [];
@@ -1181,9 +1197,20 @@ export function createCommentPipeline(deps: {
     deliver();
   }
 
-  /** Starts waiting `exclusive` calls on the free slots, oldest first. */
-  function grant(): void {
-    while (waiting.length > 0 && busy() < concurrency) waiting.shift()?.begin(freeSlot(), false);
+  /**
+   * Starts waiting `exclusive` calls on the free slots, oldest first; `spare` ones only when
+   * `spares` (the batches took their slots already).
+   */
+  function grant(spares: boolean): void {
+    for (let i = 0; i < waiting.length && busy() < concurrency;) {
+      const next = waiting[i];
+      if (next === undefined || (next.spare && !spares)) {
+        i += 1;
+        continue;
+      }
+      waiting.splice(i, 1);
+      next.begin(freeSlot(), false);
+    }
   }
   /**
    * Gives a free slot to a waiting `exclusive` (unless one just ended: then the waiting batches
@@ -1198,7 +1225,7 @@ export function createCommentPipeline(deps: {
     const summariesFirst = !batchesFirst;
     batchesFirst = false;
     // A waiting summary takes the first free slot, before the batches queued meanwhile.
-    if (summariesFirst) grant();
+    if (summariesFirst) grant(false);
     answerCached();
     expire();
     while (busy() < concurrency) {
@@ -1206,7 +1233,7 @@ export function createCommentPipeline(deps: {
       if (batch.length === 0) break;
       start(batch);
     }
-    grant();
+    grant(true);
   }
 
   function start(batch: readonly Entry[]): void {
@@ -1342,6 +1369,7 @@ export function createCommentPipeline(deps: {
   function exclusive<T>(
     fn: (slot: number, signal: AbortSignal) => Promise<T>,
     key?: string,
+    { spare = false }: Readonly<{ spare?: boolean }> = {},
   ): Promise<T> {
     const controller = new AbortController();
     return new Promise<T>((resolve) => {
@@ -1364,10 +1392,10 @@ export function createCommentPipeline(deps: {
       }
       const replaced = key === undefined ? -1 : waiting.findIndex((entry) => entry.key === key);
       const earlier = waiting[replaced];
-      if (earlier === undefined) waiting.push({ key, begin });
+      if (earlier === undefined) waiting.push({ key, spare, begin });
       else {
         // The newer call keeps the place in line; the older one ends without a slot.
-        waiting[replaced] = { key, begin };
+        waiting[replaced] = { key, spare, begin };
         earlier.begin(FIRST_COMMENT_SLOT, true);
       }
       pump();
@@ -1427,6 +1455,23 @@ export function createCommentPipeline(deps: {
 
   return {
     exclusive,
+    guessGenre: (input) =>
+      exclusive(
+        async (slot, signal): Promise<Result<StreamGenre>> => {
+          const replied = await deps.client.chat({
+            ...genrePrompt(input),
+            model: deps.model,
+            slot,
+            temperature: 0,
+            templateKwargs: { enable_thinking: false },
+            maxTokens: GENRE_MAX_TOKENS,
+            signal,
+          });
+          return replied.ok ? Ok(parseGenre(replied.value.text)) : replied;
+        },
+        undefined,
+        { spare: true },
+      ),
     summary(site, channel, windowMinutes) {
       if (disposed) return Promise.resolve(Err(failure('operation_cancelled')));
       const key = `${keyOf(site, channel)}\u0000${windowMinutes}`;

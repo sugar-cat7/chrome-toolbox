@@ -7,7 +7,10 @@
   but were not all seen live (unverified). The stream information section
   (section#live-channel-stream-information: links to the channel's own page /<login> and the
   title p[data-a-target="stream-title"], its title attribute equal to its text) was seen live on
-  2026-10-28; on an in-app channel switch the same section is re-rendered in place. Author badges
+  2026-10-28; on an in-app channel switch the same section is re-rendered in place. Its category
+  link (a[data-a-target="stream-game-link"], /directory/category/<slug>, its text in the page
+  language) and tags (a.tw-tag, /directory/all/tags/<tag>, aria-label "Tag, <tag>" translated
+  with the page) were seen live on 2026-11-05. Author badges
   (img.chat-badge in button[data-a-target="chat-badge"] in .chat-line__username-container, src
   the global badge image, alt translated with the page) were seen live on 2026-10-29 for
   moderators, bots, verified accounts and subscribers; the broadcaster badge follows the same
@@ -31,7 +34,23 @@
                 Fixture speedrun night: any% practice
               </p>
             </div>
-            <a href="/directory/category/fixture-game">Fixture Game</a>
+            <a data-a-target="stream-game-link" href="/directory/category/fixture-game"
+              ><span>Fixture Game</span></a
+            >
+            <div>
+              <a
+                aria-label="Tag, 日本語"
+                data-a-target="日本語"
+                class="tw-tag"
+                href="/directory/all/tags/%E6%97%A5%E6%9C%AC%E8%AA%9E"
+              ></a>
+              <a
+                aria-label="Tag, Speedrun"
+                data-a-target="Speedrun"
+                class="tw-tag"
+                href="/directory/all/tags/Speedrun"
+              ></a>
+            </div>
           </div>
         </section>
       </div>

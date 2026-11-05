@@ -6,13 +6,18 @@ import {
   contextHash,
   contextText,
   createStreamContexts,
+  MAX_GAME,
+  MAX_RULES,
   MAX_STREAMS,
+  MAX_TAG,
+  MAX_TAGS,
   MAX_TITLE,
   ownerOf,
   relaxationsIn,
   streamCategoriesOf,
   streamOf,
 } from '../../src/stream-context.ts';
+import { MAX_DESCRIPTION, rulesOf } from '../../src/sites/rules.ts';
 import { createTwitchChat } from '../../src/sites/twitch-chat.ts';
 import { youtubeComments } from '../../src/sites/youtube-comments.ts';
 import { youtubeLiveChat } from '../../src/sites/youtube-live-chat.ts';
@@ -43,12 +48,34 @@ afterEach(() => {
 });
 
 describe('stream info read from the page', () => {
-  it('reads the streamer handle and the title from the watch page once it shows the video', () => {
+  it('reads the streamer handle, the title, the game card and the rules from the watch page once it shows the video', () => {
     const doc = load('/watch?v=fixture0001', 'youtube-comments');
     expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')).toEqual({
       streamer: '@FixtureStreamer',
       title: 'Fixture Quest Part 3: the frozen bridge',
+      game: 'Fixture Quest',
+      rules: '【お約束】\n・アドバイス歓迎です\n・他の配信者さんの話題は控えてね',
     });
+  });
+
+  it('reads a game only from the games card, and no rules from a description without them', () => {
+    const doc = load('/watch?v=fixture0001', 'youtube-comments');
+    // Another attributes section (music, places) has no /gaming link.
+    doc.querySelector('a[href="/gaming"]')?.remove();
+    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
+    if (description) description.textContent = 'Fixture Quest の続き\n#FixtureQuest';
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')).toEqual({
+      streamer: '@FixtureStreamer',
+      title: 'Fixture Quest Part 3: the frozen bridge',
+    });
+  });
+
+  it('cuts a long game name', () => {
+    const doc = load('/watch?v=fixture0001', 'youtube-comments');
+    doc.querySelector('[aria-label="Fixture Quest"]')?.setAttribute('aria-label', 'g'.repeat(500));
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0001#comments')?.game).toBe(
+      'g'.repeat(MAX_GAME),
+    );
   });
 
   it('reads nothing while the metadata still belongs to the previous video', () => {
@@ -102,6 +129,37 @@ describe('stream info read from the page', () => {
     stop?.();
   });
 
+  it('calls back again when the description fills in just after the metadata, then stops', async () => {
+    // Seen live: the description panel is empty for about 20 ms after video-id changes.
+    const doc = load('/watch?v=fixture0002', 'youtube-comments');
+    const description = doc.querySelector('[id="snippet-text"] yt-attributed-string');
+    if (!description) throw new Error('fixture changed');
+    description.textContent = '';
+    const ready = vi.fn<() => void>();
+    const stop = youtubeComments.watchStreamInfo?.(doc, 'fixture0002#comments', ready);
+    flexy(doc).setAttribute('video-id', 'fixture0002');
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0002#comments')).not.toHaveProperty('rules');
+    description.textContent = '【お約束】\n・指示OKです';
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(2));
+    expect(youtubeComments.streamInfo?.(doc, 'fixture0002#comments')?.rules).toBe(
+      '【お約束】\n・指示OKです',
+    );
+    description.textContent = '【お約束】\n・指示NGです';
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ready).toHaveBeenCalledTimes(2);
+    stop?.();
+  });
+
+  it('waits for nothing on a watch page that shows its video and description already', () => {
+    const doc = load('/watch?v=fixture0001', 'youtube-comments');
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+    const ready = vi.fn<() => void>();
+    youtubeComments.watchStreamInfo?.(doc, 'fixture0001#comments', ready)();
+    expect(observe).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+  });
+
   it('stops watching the watch page when the session stops first', async () => {
     const doc = load('/watch?v=fixture0002', 'youtube-comments');
     const ready = vi.fn<() => void>();
@@ -112,8 +170,17 @@ describe('stream info read from the page', () => {
     expect(ready).not.toHaveBeenCalled();
   });
 
-  it('names the Twitch channel as the streamer and reads its stream title', () => {
+  it('names the Twitch channel as the streamer and reads its stream title, category and tags', () => {
     const doc = load('/fixturechannel', 'twitch-chat');
+    expect(createTwitchChat('s1').streamInfo?.(doc, 'fixturechannel')).toEqual({
+      streamer: 'fixturechannel',
+      title: 'Fixture speedrun night: any% practice',
+      // The category's slug, the same in every page language.
+      game: 'fixture-game',
+      tags: ['日本語', 'Speedrun'],
+    });
+    doc.querySelector('[data-a-target="stream-game-link"]')?.remove();
+    for (const tag of doc.querySelectorAll('a.tw-tag')) tag.remove();
     expect(createTwitchChat('s1').streamInfo?.(doc, 'fixturechannel')).toEqual({
       streamer: 'fixturechannel',
       title: 'Fixture speedrun night: any% practice',
@@ -122,6 +189,24 @@ describe('stream info read from the page', () => {
     expect(createTwitchChat('s1').streamInfo?.(doc, 'fixturechannel')).toEqual({
       streamer: 'fixturechannel',
     });
+  });
+
+  it('reads at most ten Twitch tags, each bounded, and skips a malformed one', () => {
+    const doc = load('/fixturechannel', 'twitch-chat');
+    const list = doc.querySelector('a.tw-tag')?.parentElement;
+    for (let i = 0; i < 12; i += 1) {
+      const tag = doc.createElement('a');
+      tag.className = 'tw-tag';
+      tag.setAttribute(
+        'href',
+        i === 0 ? '/directory/all/tags/%E3' : `/directory/all/tags/${'t'.repeat(40)}${i}`,
+      );
+      list?.append(tag);
+    }
+    const tags = createTwitchChat('s1').streamInfo?.(doc, 'fixturechannel')?.tags ?? [];
+    expect(tags).toHaveLength(MAX_TAGS);
+    expect(tags.slice(0, 2)).toEqual(['日本語', 'Speedrun']);
+    expect(tags.slice(2).every((tag) => tag.length === MAX_TAG)).toBe(true);
   });
 
   it("takes no Twitch title while the stream information still shows another channel's", () => {
@@ -133,6 +218,8 @@ describe('stream info read from the page', () => {
     expect(twitch.streamInfo?.(doc, 'secondchannel')).toEqual({
       streamer: 'secondchannel',
       title: 'Fixture speedrun night: any% practice',
+      game: 'fixture-game',
+      tags: ['日本語', 'Speedrun'],
     });
   });
 
@@ -166,6 +253,45 @@ describe('stream info read from the page', () => {
 
   it('leaves the live chat frame without page stream info (the service worker knows it)', () => {
     expect(youtubeLiveChat.streamInfo).toBeUndefined();
+  });
+});
+
+describe('description rules', () => {
+  it.each([
+    {
+      name: 'a bracketed heading, up to the blank line',
+      text: 'Fixture Quest の続き\n\n【お約束】\n・指示OKです\n・他の配信者の話題はNG\n\n#FixtureQuest',
+      rules: '【お約束】\n・指示OKです\n・他の配信者の話題はNG',
+    },
+    {
+      name: 'a decorated heading with separators around the rules',
+      text: '📏 配信ルール（ご協力お願いします）\n━━━━━━━━\n・ネタバレ禁止\n━━━━━━━━\nFixture Streamer',
+      rules: '📏 配信ルール（ご協力お願いします）\n・ネタバレ禁止',
+    },
+    {
+      name: 'every heading of the list, up to the next section',
+      text: '◆おやくそく◆\n・雑談配信です\n【ハッシュタグ】\n#fixture\n\n★お願い★\n・連投しないでね\n\nRules\nbe nice\n\n禁止事項\n・宣伝\n\n注意事項\n・音量注意',
+      rules:
+        '◆おやくそく◆\n・雑談配信です\n★お願い★\n・連投しないでね\nRules\nbe nice\n禁止事項\n・宣伝\n注意事項\n・音量注意',
+    },
+    {
+      name: 'nothing: a request to subscribe is no heading',
+      text: 'チャンネル登録よろしくお願いします！\n高評価もお願いします\n#fixture',
+      rules: '',
+    },
+    { name: 'nothing in an empty description', text: '', rules: '' },
+  ])('reads $name', ({ text, rules }) => {
+    expect(rulesOf(text)).toBe(rules);
+  });
+
+  it('reads a bounded part of the description and keeps the rules bounded', () => {
+    const long = '【お約束】\n・指示OKです\n'.repeat(200);
+    expect(rulesOf(long).length).toBe(MAX_RULES);
+    const late = `${'x'.repeat(MAX_DESCRIPTION)}\n【お約束】\n・指示OKです`;
+    expect(rulesOf(late)).toBe('');
+    // A section ends after 20 lines.
+    const many = `【お約束】\n${Array.from({ length: 30 }, (_, i) => `・item ${i}`).join('\n')}`;
+    expect(rulesOf(many).split('\n')).toHaveLength(21);
   });
 });
 

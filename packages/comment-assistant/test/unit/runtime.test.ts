@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
+import { genrePrompt } from '@chrome-toolbox/extension-core';
+import { STREAM_GENRES_KEY } from '../../src/genre.ts';
 import { spoilerNoteStore } from '../../src/filters.ts';
 import { sidePanelPort, type PanelApi } from '../../src/panel.ts';
 import { annotationsMessageSchema, messageType } from '../../src/protocol.ts';
@@ -15,16 +17,29 @@ afterEach(() => {
 });
 
 type Sent = { path: string; body: Record<string, unknown> };
+/** A request of the genre guess (R63): its grammar allows the genre ids only. */
+const isGenreGuess = (sent: Sent): boolean =>
+  sent.path === '/v1/chat/completions' && sent.body['grammar'] === genrePrompt({}).grammar;
+/** The user turn of a chat request; empty for none. */
+const userTurn = (sent: Sent | undefined): string => {
+  const messages = sent?.body['messages'];
+  return Array.isArray(messages) ? String((messages[1] as { content?: unknown })?.content) : '';
+};
+/** The comment batch requests among those sent (not the genre guess, not a summary). */
+const batches = (sent: readonly Sent[]): Sent[] =>
+  sent.filter(
+    (s) => s.path === '/v1/chat/completions' && String(s.body['grammar']).includes('code ::='),
+  );
 /**
  * Fake llama.cpp router: chat translates every translatable comment as `訳:<text>` and calls a
- * "menace" abusive, everything else chatter; Clef scores 0.01 (0.95 for a "menace"). Requests
- * other than `/props` wait for `door` (or the door it returns when asked); the first
- * `propsFailures` `/props` requests find the server down.
+ * "menace" abusive, everything else chatter, and answers a genre guess with `genre`; Clef scores
+ * 0.01 (0.95 for a "menace"). Requests other than `/props` wait for `door` (or the door it
+ * returns when asked); the first `propsFailures` `/props` requests find the server down.
  */
 const stubLlama = (
   door: Promise<void> | (() => Promise<void>) = Promise.resolve(),
   totalSlots = 2,
-  { propsFailures = 0 }: { propsFailures?: number } = {},
+  { propsFailures = 0, genre = 'other' }: { propsFailures?: number; genre?: string } = {},
 ): Sent[] => {
   const sent: Sent[] = [];
   let failures = propsFailures;
@@ -53,6 +68,8 @@ const stubLlama = (
           answers: Object.fromEntries(questions.map((id) => [id, { type: 'noul', noul }])),
         });
       }
+      if (isGenreGuess({ path, body }))
+        return Response.json({ choices: [{ message: { content: genre } }] });
       const messages = body['messages'] as { content: string }[];
       const comments = (messages[1]?.content ?? '')
         .split('\n')
@@ -614,8 +631,18 @@ describe('extension runtime wiring', () => {
     // open side panel hears that a stream changed.
     expect(toTab).toHaveBeenCalledWith(tab.id, { type: 'comments/stream-info', payload: known });
     expect(broadcast).toHaveBeenCalledWith({ type: 'comments/stream-changed' });
+    // Nothing on the page names a genre yet, and no chat asked for the guess: other.
     expect(await ask({ type: 'comments/stream', payload: { tabId: tab.id ?? -1 } }, panel)).toEqual(
-      Ok({ stream: known }),
+      Ok({
+        stream: known,
+        genre: {
+          genre: 'other',
+          reason: 'none',
+          detected: 'other',
+          detectedReason: 'none',
+          categories: ['relay', 'privacy', 'sensitive'],
+        },
+      }),
     );
     expect(toTab).toHaveBeenCalledWith(tab.id, { type: 'comments/ping' }, { frameId: 0 });
     expect(
@@ -676,9 +703,9 @@ describe('extension runtime wiring', () => {
     );
     const iframe = { tab, frameId: 5, url: 'https://www.youtube.com/live_chat?continuation=x' };
     const contexts = (): unknown[] =>
-      sent
-        .filter((s) => s.path === '/v1/chat/completions')
-        .map((s) => (s.body['messages'] as { content: string }[])[1]?.content.split('\n')[0]);
+      batches(sent).map(
+        (s) => (s.body['messages'] as { content: string }[])[1]?.content.split('\n')[0],
+      );
     await ask(
       {
         type: 'comments/ingest',
@@ -845,9 +872,9 @@ describe('extension runtime wiring', () => {
       iframe,
     );
     const prompts = (): unknown[] =>
-      sent
-        .filter((s) => s.path === '/v1/chat/completions')
-        .map((s) => (s.body['messages'] as { content: string }[])[1]?.content.split('\n')[0]);
+      batches(sent).map(
+        (s) => (s.body['messages'] as { content: string }[])[1]?.content.split('\n')[0],
+      );
     await vi.waitFor(() => expect(prompts()).toHaveLength(1));
     expect(prompts()[0]).toBe(
       `Stream context: ${JSON.stringify('Title: Fixture Quest Part 3\nSpoiler targets: past the frozen bridge')}`,
@@ -862,7 +889,7 @@ describe('extension runtime wiring', () => {
       await new Promise((resolve) =>
         restarted?.({ type: 'comments/stream', payload: { tabId: tab.id ?? -1 } }, panel, resolve),
       ),
-    ).toEqual(
+    ).toMatchObject(
       Ok({
         stream: {
           site: 'youtube',
@@ -870,9 +897,232 @@ describe('extension runtime wiring', () => {
           streamer: '@FixtureStreamer',
           title: 'Fixture Quest Part 3',
         },
+        // With the spoiler note read again (R64).
+        genre: { categories: ['spoiler', 'relay', 'privacy', 'sensitive'] },
       }),
     );
     again();
+  });
+
+  it('detects the genre from what the page reports and answers the side panel with it (R63)', async () => {
+    const sent = stubLlama();
+    const tab = await fakeBrowser.tabs.create({
+      url: 'https://www.youtube.com/watch?v=fixture0001',
+    });
+    const shown = {
+      site: 'youtube',
+      partition: 'fixture0001#comments',
+      streamer: '@FixtureStreamer',
+      title: '【ホラー】Fixture Haunt',
+      game: 'Fixture Haunt',
+      rules: '【お約束】\n・ネタバレOKです',
+    };
+    const toTab = vi.fn<(tabId: number, message: unknown, options?: unknown) => Promise<unknown>>(
+      async (_tabId, message) =>
+        (message as { type?: string }).type === 'comments/ping' ? shown : undefined,
+    );
+    const original = fakeBrowser.tabs.sendMessage;
+    Object.assign(fakeBrowser.tabs, { sendMessage: toTab });
+    onTestFinished(() => void Object.assign(fakeBrowser.tabs, { sendMessage: original }));
+    const broadcast = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue(undefined);
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => listener?.(message, sender, resolve));
+    const page = { tab, frameId: 0, url: 'https://www.youtube.com/watch?v=fixture0001' };
+    expect(await ask({ type: 'comments/context', payload: shown }, page)).toEqual(Ok({}));
+    expect(broadcast).toHaveBeenCalledWith({ type: 'comments/stream-changed' });
+    // The title's 【ホラー】 decides; the rules allow spoilers, so only instructions stay of the
+    // genre's own categories.
+    const horror = {
+      genre: 'horror',
+      reason: 'title',
+      detected: 'horror',
+      detectedReason: 'title',
+      categories: ['instruction', 'relay', 'privacy', 'sensitive'],
+    };
+    expect(await ask({ type: 'comments/stream', payload: { tabId: tab.id ?? -1 } }, panel)).toEqual(
+      Ok({
+        stream: {
+          site: 'youtube',
+          partition: 'fixture0001',
+          streamer: '@FixtureStreamer',
+          title: '【ホラー】Fixture Haunt',
+        },
+        genre: horror,
+      }),
+    );
+    // Pages are never told the genre.
+    const told = toTab.mock.calls.filter(
+      ([, message]) => (message as { type?: string }).type === 'comments/stream-info',
+    );
+    expect(told.length).toBeGreaterThan(0);
+    expect(JSON.stringify(told)).not.toContain('horror');
+    // The batch prompt names the genre and defines its categories.
+    const iframe = { tab, frameId: 5, url: 'https://www.youtube.com/live_chat?continuation=x' };
+    await ask(
+      {
+        type: 'comments/ingest',
+        payload: { site: 'youtube', channel: 'fixture0001', comments: [raw('1', 'hello')] },
+      },
+      iframe,
+    );
+    await vi.waitFor(() => expect(batches(sent)).toHaveLength(1));
+    const user = userTurn(batches(sent)[0]);
+    expect(user).toContain('Stream genre: horror');
+    expect(user).toContain('- n = instruction');
+    expect(user).not.toContain('- p = spoiler');
+    // The page decided: no guess.
+    expect(sent.filter(isGenreGuess)).toEqual([]);
+    // The viewer's spoiler note turns spoilers on again (R64).
+    await spoilerNoteStore(fakeBrowser.storage.local).save('youtube', 'fixture0001', 'chapter 2');
+    expect(
+      await ask({ type: 'comments/stream', payload: { tabId: tab.id ?? -1 } }, panel),
+    ).toMatchObject(
+      Ok({ genre: { categories: ['spoiler', 'instruction', 'relay', 'privacy', 'sensitive'] } }),
+    );
+    expect(await fakeBrowser.storage.local.get(STREAM_GENRES_KEY)).toEqual({
+      [STREAM_GENRES_KEY]: [
+        {
+          site: 'youtube',
+          stream: 'fixture0001',
+          genre: 'horror',
+          reason: 'title',
+          relaxations: ['spoiler'],
+          game: 'Fixture Haunt',
+        },
+      ],
+    });
+    stop();
+  });
+
+  it("guesses an undecided stream's genre once, only while its chat is in front, and keeps it (R44, R63)", async () => {
+    const sent = stubLlama(Promise.resolve(), 3, { genre: 'story' });
+    vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+    const broadcast = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue(undefined);
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => add.mock.calls.at(-1)?.[0]?.(message, sender, resolve));
+    const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/fixturechannel' });
+    const frame = { tab, frameId: 0, url: 'https://www.twitch.tv/fixturechannel' };
+    const report = {
+      type: 'comments/context',
+      payload: {
+        site: 'twitch',
+        partition: 'fixturechannel',
+        streamer: 'fixturechannel',
+        title: 'Fixture night: part 3',
+        game: 'fixture-quest',
+        tags: ['日本語'],
+      },
+    };
+    await ask(report, frame);
+    const ingest = (id: string, process = true) => ({
+      type: 'comments/ingest',
+      payload: {
+        site: 'twitch',
+        channel: 'fixturechannel',
+        streamer: 'fixturechannel',
+        title: 'Fixture night: part 3',
+        process,
+        comments: [raw(id, `hello ${id}`)],
+      },
+    });
+    // A chat not in front of the viewer is never processed, and asks for no guess (R44).
+    await ask(ingest('1', false), frame);
+    expect(sent.filter(isGenreGuess)).toEqual([]);
+    broadcast.mockClear();
+    await ask(ingest('2'), frame);
+    await vi.waitFor(() => expect(sent.filter(isGenreGuess)).toHaveLength(1));
+    const [guess] = sent.filter(isGenreGuess);
+    // On a comment slot (never 0, subtitles keep it), with the translation model.
+    expect(guess?.body['model']).toBe('gemma4-e4b');
+    expect(guess?.body['id_slot']).toBeGreaterThanOrEqual(1);
+    expect(userTurn(guess)).toBe(
+      'Title (JSON string): "Fixture night: part 3"\nGame (JSON string or null): "fixture-quest"',
+    );
+    await vi.waitFor(() =>
+      expect(broadcast).toHaveBeenCalledWith({ type: 'comments/stream-changed' }),
+    );
+    await ask(ingest('3'), frame);
+    await vi.waitFor(() => expect(batches(sent).length).toBeGreaterThanOrEqual(2));
+    // Once per stream: the next comments ask nothing more, and their prompt has the genre.
+    expect(sent.filter(isGenreGuess)).toHaveLength(1);
+    expect(userTurn(batches(sent).at(-1))).toContain('Stream genre: story');
+    stop();
+
+    // A restarted service worker keeps the guess: no second one.
+    const again = startBackground();
+    await ask(ingest('4'), frame);
+    await vi.waitFor(() => expect(batches(sent).length).toBeGreaterThanOrEqual(3));
+    expect(sent.filter(isGenreGuess)).toHaveLength(1);
+    expect(userTurn(batches(sent).at(-1))).toContain('Stream genre: story');
+    again();
+  });
+
+  it("keeps the viewer's genre for one stream, for extension pages only (R63)", async () => {
+    stubLlama();
+    const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/fixturechannel' });
+    const toTab = vi.fn<(tabId: number, message: unknown, options?: unknown) => Promise<unknown>>(
+      async (_tabId, message) =>
+        (message as { type?: string }).type === 'comments/ping'
+          ? {
+              site: 'twitch',
+              partition: 'fixturechannel',
+              streamer: 'fixturechannel',
+              title: 'Fixture night',
+              game: 'just-chatting',
+            }
+          : undefined,
+    );
+    const original = fakeBrowser.tabs.sendMessage;
+    Object.assign(fakeBrowser.tabs, { sendMessage: toTab });
+    onTestFinished(() => void Object.assign(fakeBrowser.tabs, { sendMessage: original }));
+    const broadcast = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue(undefined);
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => listener?.(message, sender, resolve));
+    const stream = { type: 'comments/stream', payload: { tabId: tab.id ?? -1 } };
+    expect(await ask(stream, panel)).toMatchObject(
+      Ok({ genre: { genre: 'chat', reason: 'game', detected: 'chat', detectedReason: 'game' } }),
+    );
+    const choose = (genre?: string) => ({
+      type: 'comments/genre',
+      payload: { site: 'twitch', partition: 'fixturechannel', ...(genre ? { genre } : {}) },
+    });
+    // A content script may not choose for the viewer.
+    expect(
+      await ask(choose('fps'), { tab, frameId: 0, url: 'https://www.twitch.tv/fixturechannel' }),
+    ).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
+    expect(await ask(choose('fps'), panel)).toEqual(Ok({ persisted: true }));
+    expect(broadcast).toHaveBeenCalledWith({ type: 'comments/stream-changed' });
+    expect(await ask(stream, panel)).toEqual(
+      Ok({
+        stream: {
+          site: 'twitch',
+          partition: 'fixturechannel',
+          streamer: 'fixturechannel',
+          title: 'Fixture night',
+        },
+        genre: {
+          genre: 'fps',
+          reason: 'viewer',
+          detected: 'chat',
+          detectedReason: 'game',
+          categories: ['instruction', 'relay', 'ghosting', 'privacy', 'sensitive'],
+        },
+      }),
+    );
+    // Cleared: detected again.
+    expect(await ask(choose(), panel)).toEqual(Ok({ persisted: true }));
+    expect(await ask(stream, panel)).toMatchObject(
+      Ok({ genre: { genre: 'chat', reason: 'game' } }),
+    );
+    stop();
   });
 
   it('uses the model names saved after a settings change', async () => {
