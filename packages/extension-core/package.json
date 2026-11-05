@@ -1,0 +1,30 @@
+{
+  "name": "@chrome-toolbox/extension-core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./testing/playwright.ts"
+  },
+  "scripts": {
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts",
+    "build": "vp pack"
+  },
+  "dependencies": {
+    "@chrome-toolbox/contracts": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "starter": {
+    "runtime": "library"
+  }
+}
