@@ -75,20 +75,47 @@ export function contextText(context: StreamContext): string {
 }
 
 /**
+ * A Japanese word that negates or bans what precedes it: `ネタバレOKじゃない`, `指示OKではありません`,
+ * `参加型なし`, `ネタバレ有無`, `ネタバレ禁止`, `アドバイス歓迎しない`.
+ */
+const JA_NOT = String.raw`(?![\s　]*(?:じゃ|では|ない|なし|無|禁止|ません|しない|しません|ng|×|✕))`;
+/**
+ * An English negation up to one word before the phrase: `no spoilers allowed`, `no major spoilers
+ * allowed`, `don't backseat me`, `do not backseat me`, `never backseat me`.
+ */
+const EN_NOT = String.raw`(?<!\b(?:no|not|never|don[’']?t|doesn[’']?t)[\s-]+(?:[\w’']+[\s-]+)?)`;
+/**
  * Words of a stream's own rules (title, or the description's rules once read, Task G2) that turn
  * a stream category off (R62), after NFKC (full-width `ＯＫ`, `２`) and in lower case:
- * - instruction: 参加型 (not `参加型じゃない`), アドバイス歓迎/OK, 指示OK/歓迎, "backseat me",
- *   "backseating welcome/allowed/ok";
- * - spoiler: ネタバレあり/有り/OK/歓迎/解禁 (not `ネタバレありません`), 2周目 (or 二周目), "spoilers
- *   ok/allowed/welcome".
- * Bans and warnings (ネタバレ禁止, ネタバレ注意, 指示NG, NoBackseating) and a game named after
- * spoilers (`ネタバレが激しすぎるRPG`) relax nothing.
+ * - instruction: 参加型, アドバイス歓迎/OK, 指示OK/歓迎, "backseat me", "backseating
+ *   welcome/allowed/ok";
+ * - spoiler: ネタバレあり/有り/OK/歓迎/解禁, 2周目 (or 二周目), "spoilers ok/allowed/welcome".
+ * A rule that forbids something never relaxes it: a Japanese negation or ban right after the
+ * word (`JA_NOT`), an English one before the phrase (`EN_NOT`; `spoilers not ok` and
+ * `backseating is not ok` do not match at all). Bans and warnings (ネタバレ禁止, ネタバレ注意,
+ * 指示NG, NoBackseating, 指示厨お断り) and a game named after spoilers (`ネタバレが激しすぎるRPG`)
+ * relax nothing.
  */
 const RELAXATION_WORDS: Readonly<Record<RelaxableCategory, RegExp>> = {
-  instruction:
-    /参加型(?!じゃ|では)|アドバイス(?:大?歓迎|ok)|指示(?:ok|大?歓迎)|backseat me|backseat(?:ing)? (?:is )?(?:welcome|allowed|ok)/u,
-  spoiler:
-    /ネタバレ(?:あり(?!ません)|有り?|ok|大?歓迎|解禁)|[2二]周目|spoilers? (?:are )?(?:ok|allowed|welcome)/u,
+  instruction: new RegExp(
+    [
+      `参加型${JA_NOT}`,
+      `アドバイス(?:大?歓迎|ok)${JA_NOT}`,
+      `指示(?:ok|大?歓迎)${JA_NOT}`,
+      String.raw`${EN_NOT}\bbackseat me\b`,
+      String.raw`${EN_NOT}\bbackseat(?:ing)? (?:is )?(?:welcome|allowed|ok)\b`,
+    ].join('|'),
+    'u',
+  ),
+  spoiler: new RegExp(
+    [
+      // `有(?!り)`: `有りません` must not match its first character alone.
+      `ネタバレ(?:あり|有り|有(?!り)|ok|大?歓迎|解禁)${JA_NOT}`,
+      `[2二]周目${JA_NOT}`,
+      String.raw`${EN_NOT}\bspoilers? (?:are |is )?(?:ok|allowed|welcome)\b`,
+    ].join('|'),
+    'u',
+  ),
 };
 /** The stream categories a text of the stream's own rules turns off (R62), in order. */
 export const relaxationsIn = (text: string): RelaxableCategory[] => {
