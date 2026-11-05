@@ -1071,6 +1071,145 @@ it('swaps only text nodes and restores the original exactly', () => {
   - チャットの本文はレポートに書かない。
 - [ ] **Step 6: Commit** — `git commit -m "fix(comment-assistant): keep kanji-only Japanese untranslated and trust model spam only with a link"`
 
+### Task G1: ジャンルごとの NG カテゴリ（判断 R62）
+
+背景（2026-11-05 の調査。プラットフォームの規約、事務所の告知、配信者の概要欄のお約束 約 40 件、実配信の標本。出典は SDD のワークスペースの調査報告）:
+
+- ジャンル特有の NG は、プラットフォームの規約ではなく、配信者や界隈の約束事。
+- 多くの配信者に共通する項目:
+  - 伝書鳩と他の配信者の話題
+  - 連投
+  - リスナー同士の会話
+  - ネタバレと匂わせ
+  - 頼まれていない指示
+  - FPS ではスナイプとゴースティング
+- 事務所を問わず一致しているのは、視聴者どうしで注意し合わない（自治しない）こと。拡張が見る人の画面から消す方針と合う。
+- 指示とネタバレは条件付きの NG。「頼んだときは OK」「参加型は OK」など。
+- ユーザーの決定（2026-11-05）:
+  - ジャンル別のフィルターを先に作る。
+  - ジャンルの NG は、既定で消す。ネタバレは伏せる。
+
+**Files:**
+
+- Modify:
+  - `packages/extension-core/src/prompts.ts`（カテゴリ、ジャンルの定義、文法）
+  - `packages/comment-assistant/src/pipeline.ts`（判定）
+  - `src/filters.ts`（既定の表示）
+  - `src/protocol.ts`
+  - `src/stream-context.ts`（ジャンルと緩和を文脈に入れる）
+  - サイドパネル（ラベル、非表示タブの理由）
+  - `README.md`、設計書 §7
+- Test: 対応する単体テスト、ジャンルごとの自作の評価セット（`packages/extension-core/test/fixtures/genre-eval/*.jsonl`、自作の文だけ）
+
+**Interfaces:**
+
+- 新しいカテゴリ:
+  - `instruction`: 指示・攻略の押し付け（頼まれていない操作、ルート、答え、何切る）
+  - `relay`: 他の配信者の話題・伝書鳩（他の枠の実況、他のライバー名の持ち込み）
+  - `ghosting`: ゴースティング・位置バラし・スナイプの予告・隠し情報の暴露（役職、手牌）
+  - `privacy`: 個人情報・前世・私生活の詮索
+  - `sensitive`: 政治・宗教・センシティブな発言の誘導
+- 常に有効なもの: `privacy`、`sensitive`、`relay`。
+- ジャンルで有効になるもの:
+  - `instruction`: fps、story、horror、puzzle_rta、board
+  - `ghosting`: fps、board、deduction
+  - `spoiler`:
+    - story、horror、puzzle_rta、watchalong、sports_viewing では、ネタバレ対象のメモがなくても有効。
+    - それ以外のジャンルでは、今までどおりメモがあるときだけ有効（R31）。
+- ジャンルの ID:
+  - `fps`: FPS、バトロワ、PvP、格闘
+  - `story`: ストーリー、RPG、アドベンチャー
+  - `horror`
+  - `puzzle_rta`
+  - `chat`: 雑談
+  - `singing`: 歌枠
+  - `watchalong`: 同時視聴
+  - `sports_viewing`: 観戦、ウォッチパーティー
+  - `board`: 麻雀、ボードゲーム、カード
+  - `deduction`: 人狼、Among Us
+  - `other`: 不明
+- 緩和:
+  - 【参加型】、「アドバイス歓迎」「指示OK」「backseat me」がタイトルか概要欄のお約束にあれば、`instruction` を無効にする。
+  - 「ネタバレあり」「ネタバレOK」、2 周目などの記載があれば、`spoiler` を無効にする。
+  - 緩和は配信ごと。
+- プロンプト:
+  - ジャンルの名前と、有効なカテゴリの定義だけを、配信ごとの文脈（ユーザー側の先頭）に入れる。
+  - システム文は固定のまま（R25）。
+  - 文法のコードは、有効なカテゴリだけにする。
+  - 出力の形式（1 行 1 件）は変えない。
+- 判定:
+  - 役割（配信者、モデレーター、認証済み）の例外は今までどおり（R38、R53）。
+  - 新しいカテゴリは、役割のコメントには付けない。
+- 表示の既定（R54 に追加）: `instruction`、`relay`、`ghosting`、`privacy`、`sensitive` は消す。`spoiler` は伏せる。
+- 非表示タブの理由とバッジに、新しいカテゴリの日本語ラベルを使う。
+- 評価:
+  - ジャンルごとに自作の評価セット（各 30 行以上）を作る。NG の例、紛らわしい例（「次どこ行く？」は指示ではない、など）、普通の雑談を含める。
+  - 実サーバーで、カテゴリごとの適合率と再現率を測る。
+  - 合格の目安: 新しいカテゴリの適合率 0.8 以上。普通の雑談を NG にした割合 3% 以下。
+
+- [ ] **Step 1: 失敗するテストを書く**
+  - ジャンルごとの有効なカテゴリと緩和。
+  - 文法のコード。
+  - 文脈の文。
+  - 既定の表示。
+  - 役割の例外。
+  - 評価セットの形式。
+- [ ] **Step 2: 失敗を確認する**
+- [ ] **Step 3: 実装する**
+- [ ] **Step 4: 通ることを確認する**（comment-assistant と extension-core の `test`、comment-assistant の `test:e2e`、`pnpm check`）
+- [ ] **Step 5: 実サーバーで評価セットを流し、カテゴリごとの適合率と再現率を記録する**（`docs/adoption.md`）
+- [ ] **Step 6: Commit** — `git commit -m "feat(comment-assistant): judge genre-specific NG with per-stream categories"`
+
+### Task G2: ジャンルの自動判定とサイドパネル（判断 R63）
+
+**Files:**
+
+- Modify:
+  - `packages/comment-assistant/src/sites/*`（タイトル、ゲームカード、カテゴリ、タグ、概要欄の読み取り）
+  - `src/stream-context.ts`（判定の順序）
+  - `src/runtime.ts`
+  - サイドパネル（フィルタータブ）
+  - `README.md`
+- Test: 単体テスト（自作の fixture）、`test:e2e`
+
+**Interfaces:**
+
+- 読み取るもの（実際の DOM で確かめてから書く）:
+  - YouTube:
+    - タイトル
+    - ゲームカード（ゲーム名）
+    - 概要欄のお約束（お約束、おやくそく、Rule、お願い、配信ルール、禁止事項、注意事項の見出しの後）
+  - Twitch:
+    - タイトル
+    - カテゴリ
+    - タグ
+- 判定の順序:
+  1. ユーザーが選んだジャンル（配信ごと）
+  2. 概要欄のお約束にあるジャンルの語
+  3. タイトルの【】の中のジャンルの語（語の一覧を持つ。罠を除く: 「Twitch同時配信」は同時視聴ではない。「雑談配信RTA」は RTA ではない。ゲーム名の中の「ネタバレ」はネタバレの許可ではない）
+  4. ゲームカードか Twitch のカテゴリを、自作の対応表（よく配信されるゲーム 60 件程度）でジャンルに変換
+  5. それでも決まらなければ、タイトルとゲーム名から LLM で 1 回だけ推定し、配信ごとに覚える
+  6. 決まらなければ `other`
+- 緩和の語は、タイトルと概要欄のお約束から読む（Task G1 の緩和）。
+- 文脈は、ナビゲーションのたびに読み直す。上限付き。
+- サイドパネル:
+  - 「フィルター」タブに、判定したジャンルと、その理由（タイトル、ゲーム、概要欄、推定）を表示する。
+  - ジャンルを選んで上書きできる（配信ごとに保存）。
+  - 有効な NG カテゴリと、その表示方法を一覧する（配信者ごとに保存、R29）。
+
+- [ ] **Step 1: 失敗するテストを書く**
+  - 判定の順序。
+  - 語の一覧と罠。
+  - 対応表。
+  - LLM の推定は 1 回だけ。
+  - 上書き。
+  - 読み取りは自作の fixture で確かめる。
+- [ ] **Step 2: 失敗を確認する**
+- [ ] **Step 3: 実装する**
+- [ ] **Step 4: 通ることを確認する**（comment-assistant の `test` と `test:e2e`、`pnpm check`）
+- [ ] **Step 5: 実配信で確かめる**（FPS、雑談、歌枠、同時視聴の配信。判定したジャンルと、新しいカテゴリの件数と例を数える。チャットの本文はレポートに書かない）
+- [ ] **Step 6: Commit** — `git commit -m "feat(comment-assistant): detect each stream's genre and let the viewer override it"`
+
 ### Task 8: 要約（判断 R32）
 
 背景（2026-10-29 の実測）: llama-server は 1 スロットあたり 4,096 トークンしか持たない（`--parallel 2`、ctx 8,192）。コメント 300 件をそのまま渡すと入りきらない。また、要約はコメントと同じスロット 1 を使うため、要約の推論中はコメントの処理が止まる。そこで、LLM に任せるのは「話題」「似た質問のまとめ」「盛り上がりの見出し」だけにし、件数・言語・山・重要コメントは保存済みのデータから数える。
