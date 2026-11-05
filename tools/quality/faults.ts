@@ -445,7 +445,7 @@ async function injectFaults(root: string): Promise<void> {
       );
     }
   }
-  const web = packages.find((pkg) => pkg.scripts['test:e2e']);
+  const web = packages.find((pkg) => pkg.runtime === 'worker' && pkg.scripts['test:e2e']);
   if (web) {
     const route = `${web.directory}/src/routes/__root.tsx`;
     const original = readFileSync(path.join(root, route), 'utf8');

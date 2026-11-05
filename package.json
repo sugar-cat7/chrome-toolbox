@@ -1,5 +1,5 @@
 {
-  "name": "super-starter",
+  "name": "chrome-toolbox",
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
@@ -14,9 +14,6 @@
     "env:setup": "node tools/dev-environment/setup.ts",
     "env:doctor": "node tools/dev-environment/doctor.ts",
     "dev": "node tools/dev-environment/dev.ts",
-    "dev:web": "node tools/dev-environment/dev.ts web",
-    "dev:api": "node tools/dev-environment/dev.ts api",
-    "dev:desktop": "node tools/dev-environment/dev.ts desktop",
     "test:tools": "node tools/quality/vitest.ts",
     "test:lighthouse": "node tools/quality/lighthouse.ts",
     "build": "node tools/quality/gate.ts build",
@@ -43,9 +40,15 @@
     "o11y:mcp": "node tools/o11y/mcp.ts",
     "o11y:verify": "node tools/o11y/verify.ts",
     "o11y:investigate": "node tools/o11y/investigate.ts",
-    "dev:sample-api": "node tools/dev-environment/dev.ts sample-api"
+    "bench:translate": "node tools/bench/translate.ts",
+    "bench:asr": "node tools/bench/asr.ts",
+    "bench:make-audio": "node tools/bench/make-audio.ts",
+    "bench:clef": "node tools/bench/clef.ts",
+    "bench:slots": "node tools/bench/slots.ts",
+    "dev:web": "node tools/dev-environment/dev.ts web"
   },
   "devDependencies": {
+    "@chrome-toolbox/extension-core": "workspace:*",
     "@types/node": "catalog:",
     "knip": "catalog:",
     "oxc-parser": "catalog:",

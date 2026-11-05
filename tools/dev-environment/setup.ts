@@ -36,6 +36,8 @@ for (const pkg of workspacePackages(root)) {
     await pnpm(['--filter', pkg.name, 'build'], { cwd: root });
     await prepareDatabase(cwd);
   }
+  // WXT writes its generated tsconfig/types under .wxt; checks never regenerate them.
+  if (pkg.runtime === 'extension') await pnpm(['--filter', pkg.name, 'typegen'], { cwd: root });
   if (pkg.runtime === 'desktop' && !javascript) {
     await pnpm(
       ['--filter', pkg.name, 'exec', 'tauri', 'icon', 'icon.svg', '--output', 'src-tauri/icons'],

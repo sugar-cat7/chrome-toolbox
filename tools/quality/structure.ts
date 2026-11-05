@@ -26,6 +26,7 @@ export function structure(root: string): string[] {
       `${pkg.directory}/.cloudflare`,
       `${pkg.directory}/.wrangler`,
       `${pkg.directory}/src/routeTree.gen.ts`,
+      ...(pkg.runtime === 'extension' ? [`${pkg.directory}/.wxt`] : []),
       ...(pkg.runtime === 'desktop'
         ? [
             `${pkg.directory}/src-tauri/target`,
@@ -97,7 +98,7 @@ export function structure(root: string): string[] {
         const native = specifier.startsWith('@tauri-apps/') || specifier.startsWith('@wdio/');
         const server = serverModule(specifier);
         if (
-          (pkg.runtime === 'library' && (native || server)) ||
+          ((pkg.runtime === 'library' || pkg.runtime === 'extension') && (native || server)) ||
           (pkg.runtime === 'worker' && native) ||
           (pkg.runtime === 'desktop' && server) ||
           (relative.startsWith('client/') && server)

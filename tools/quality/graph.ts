@@ -65,9 +65,11 @@ export function executionChanges(root: string, changed: string[], base?: string)
 export type WorkspacePackage = {
   name: string;
   directory: string;
-  runtime: 'library' | 'worker' | 'desktop';
+  runtime: 'library' | 'worker' | 'desktop' | 'extension';
   dependencies: string[];
   scripts: Record<string, string>;
+  /** `starter.soak`: the package's browser tests include a soak of SOAK_MINUTES. */
+  soak?: true;
 };
 
 export function workspacePackages(root: string): WorkspacePackage[] {
@@ -83,14 +85,14 @@ export function workspacePackages(root: string): WorkspacePackage[] {
         readFileSync(path.join(root, directory, 'package.json'), 'utf8'),
       ) as {
         name: string;
-        starter?: { runtime?: string };
+        starter?: { runtime?: string; soak?: boolean };
         dependencies?: Record<string, string>;
         devDependencies?: Record<string, string>;
         optionalDependencies?: Record<string, string>;
         scripts?: Record<string, string>;
       };
       const runtime = manifest.starter?.runtime ?? 'library';
-      if (!['library', 'worker', 'desktop'].includes(runtime))
+      if (!['library', 'worker', 'desktop', 'extension'].includes(runtime))
         throw new Error(`Unknown starter.runtime ${runtime} in ${directory}/package.json`);
       return {
         name: manifest.name,
@@ -102,6 +104,7 @@ export function workspacePackages(root: string): WorkspacePackage[] {
           ...manifest.optionalDependencies,
         }),
         scripts: manifest.scripts ?? {},
+        ...(manifest.starter?.soak === true ? { soak: true as const } : {}),
       };
     });
 }

@@ -1,4 +1,5 @@
 import type { WorkspacePackage } from './graph.ts';
+import { extensionBrowserTimeout } from './soak.ts';
 
 export type Check = {
   id: string;
@@ -92,7 +93,8 @@ export function faultCheckIds(packages: WorkspacePackage[]): string[] {
     ...(packages.some((pkg) => pkg.scripts['db:migrate'])
       ? ['dev-preflight-to-local-d1', 'migration']
       : []),
-    ...(packages.some((pkg) => pkg.scripts['test:e2e'])
+    // Browser fault rehearsals inject into the Worker Web sample's routes and styles.
+    ...(packages.some((pkg) => pkg.runtime === 'worker' && pkg.scripts['test:e2e'])
       ? [
           'browser-behavior',
           'browser-focused',
@@ -158,7 +160,11 @@ export function packageChecks(pkg: WorkspacePackage, phase: 'test' | 'build' | '
     if (pkg.scripts['test:restart'])
       entries.push(['restart', 'test:restart', ['migration', 'seed', 'persistence']]);
     if (pkg.scripts['test:e2e'])
-      entries.push(['browser', 'test:e2e', ['web', 'browser', 'accessibility', 'vrt']]);
+      entries.push(
+        pkg.runtime === 'extension'
+          ? ['browser', 'test:e2e', ['extension', 'browser', 'memory']]
+          : ['browser', 'test:e2e', ['web', 'browser', 'accessibility', 'vrt']],
+      );
     if (pkg.dependencies.includes('@tanstack/react-start') || pkg.scripts['test:e2e:production'])
       entries.push([
         'browser-production',
@@ -184,7 +190,10 @@ export function packageChecks(pkg: WorkspacePackage, phase: 'test' | 'build' | '
         ? 15 * 60_000
         : pkg.runtime === 'desktop' && id !== 'unit'
           ? 30 * 60_000
-          : 180_000,
+          : // A browser run with a soak (`starter.soak`) builds, then soaks for SOAK_MINUTES.
+            pkg.soak === true && id === 'browser'
+            ? extensionBrowserTimeout()
+            : 180_000,
     reason: `Selected ${pkg.runtime} ${pkg.name}; ${phase} phase`,
   }));
 }

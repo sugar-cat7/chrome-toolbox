@@ -1,5 +1,5 @@
 import './styles.css';
-import { launch } from '@starter/contracts';
+import { launch } from '@chrome-toolbox/contracts';
 import { StrictMode, startTransition, createElement } from 'react';
 
 // Static production pages keep their styled SSR and ordinary anchor navigation.

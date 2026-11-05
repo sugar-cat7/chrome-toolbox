@@ -21,6 +21,20 @@ export const PUBLIC_ERRORS = {
     message: 'Writes are disabled in this environment.',
     remediation: 'Use an environment that explicitly permits writes.',
   },
+  permission_denied: {
+    status: 403,
+    class: 'forbidden',
+    retry: 'never',
+    message: 'Access to the requested host was not granted.',
+    remediation: 'Grant the host permission when prompted, or choose a permitted host.',
+  },
+  sender_forbidden: {
+    status: 403,
+    class: 'forbidden',
+    retry: 'never',
+    message: "Only the extension's own pages may make this request.",
+    remediation: 'Send the request from the side panel or another extension page.',
+  },
   not_found: {
     status: 404,
     class: 'not_found',
@@ -58,12 +72,16 @@ export const INTERNAL_ERRORS = {
   storage_failed: 'internal_error',
   response_invalid: 'internal_error',
   network_failed: 'unavailable',
+  clef_unavailable: 'unavailable',
   ipc_failed: 'unavailable',
   export_failed: 'internal_error',
   state_unavailable: 'unavailable',
   clock_invalid: 'internal_error',
   unexpected_failure: 'internal_error',
   operation_cancelled: 'cancelled',
+  queue_full: 'unavailable',
+  host_permission_denied: 'permission_denied',
+  sender_forbidden: 'sender_forbidden',
 } as const;
 export type PublicErrorCode = keyof typeof PUBLIC_ERRORS;
 export type InternalErrorCode = keyof typeof INTERNAL_ERRORS;

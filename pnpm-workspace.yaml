@@ -48,6 +48,8 @@ catalog:
   typescript: 7.0.2
   vite-plus: 1.1.0
   vitest: 5.0.3
+  # Browser extension framework; its Vite peer resolves to the Vite+ core override.
+  wxt: 0.21.5
 overrides:
   # Vite+ documents a single Vite core and the bundled Vitest version.
   vite@*: npm:@voidzero-dev/vite-plus-core@1.1.0

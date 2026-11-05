@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noteSchema, notesSchema } from '@starter/contracts';
+import { noteSchema, notesSchema } from '@chrome-toolbox/contracts';
 
 const origin = process.env.STARTER_TEST_ORIGIN;
 if (!origin) throw new Error('Use pnpm test:runtime to start real workerd before HTTP tests');

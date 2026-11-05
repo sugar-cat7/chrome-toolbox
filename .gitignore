@@ -20,3 +20,11 @@ test-results/
 
 packages/*/src/routeTree.gen.ts
 generated/
+
+# WXT generated types and unpacked builds
+.wxt/
+# Brainstorming mockups (superpowers visual companion)
+.superpowers/
+
+# Local model benchmark outputs
+bench-data/

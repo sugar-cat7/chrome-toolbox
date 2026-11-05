@@ -1,4 +1,4 @@
-import { createTelemetry, observeAdapter, type TraceCarrier } from '@starter/observability';
+import { createTelemetry, observeAdapter, type TraceCarrier } from '@chrome-toolbox/observability';
 import {
   noteSchema,
   notesSchema,
@@ -14,8 +14,8 @@ import {
   type Result,
   type Note,
   type PublicError,
-} from '@starter/contracts';
-import type { NotesAdapter } from '@starter/ui';
+} from '@chrome-toolbox/contracts';
+import type { NotesAdapter } from '@chrome-toolbox/ui';
 
 async function request(
   path: string,
@@ -36,8 +36,8 @@ async function request(
 }
 
 const telemetry = createTelemetry({
-  service: 'super-starter-web-browser',
-  instance: 'super-starter',
+  service: 'chrome-toolbox-web-browser',
+  instance: 'chrome-toolbox',
   runId: import.meta.env.VITE_OTEL_RUN_ID ?? 'local',
   version: import.meta.env.VITE_OTEL_VERSION ?? 'development',
   ...(import.meta.env.VITE_OTEL_ENDPOINT ? { endpoint: import.meta.env.VITE_OTEL_ENDPOINT } : {}),

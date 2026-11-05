@@ -1,7 +1,14 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Ok, Err, failure, publicFailure, type Result, type PublicError } from '@starter/contracts';
+import {
+  Ok,
+  Err,
+  failure,
+  publicFailure,
+  type Result,
+  type PublicError,
+} from '@chrome-toolbox/contracts';
 import { NotesPanel, type NotesAdapter } from './index';
 
 afterEach(cleanup);

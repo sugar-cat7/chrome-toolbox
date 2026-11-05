@@ -6,7 +6,7 @@ import {
   collectorEndpoint,
   rejectsOtlp,
 } from './index.ts';
-import { Ok, Err, failure, publicFailure } from '@starter/contracts';
+import { Ok, Err, failure, publicFailure } from '@chrome-toolbox/contracts';
 
 it('checks W3C ingress, sampling and secure collector selection', () => {
   expect(parseTraceparent('00-1234567890abcdef1234567890abcdef-1234567890abcdef-00')).toMatchObject(
