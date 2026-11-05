@@ -322,6 +322,22 @@ The candidates were also run on a held-out set of 497 made-up lines. A separate 
 
 D ships. On the held-out set it is the only candidate under 3% on both false-positive measures with every precision at 0.80 or above. On false positives it is within two lines of A on both sets, and it keeps most of the R66 sensitive recall that A lost. A final blind set, written after this choice and never used for tuning, gives the reported number.
 
+#### Final blind test (2026-11-05)
+
+A third agent wrote 335 made-up lines across all 10 genres after D was chosen, without seeing any definition or earlier set. This set was run once, on 6241b74, and nothing was tuned on it. This is the number to quote.
+
+| spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP   | Chatter, question, important FP |
+| ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------ | ------------------------------- |
+| 0.88 / 1.00   | 1.00 / 0.92       | 0.86 / 0.95 | 0.57 / 0.57    | 1.00 / 1.00   | 0.91 / 0.87     | 4.6% (8/175) | 3.8% (9/238)                    |
+
+- **The ≤3% chatter target is not met on unseen lines.** The tuned sets overstated it. The flagged lines follow the same patterns as before:
+  - guesses about what comes next, read as spoiler or ghosting;
+  - praise of a past read and a question about how the streamer knew, read as ghosting;
+  - jokes about a fictional state's politics, read as sensitive;
+  - neutral mentions of another streamer, read as relay.
+- **Ghosting is the weakest category.** It had only 7 positives, so its numbers are coarse; 4 of 7 flags were right. It is only enabled for fps, board and deduction.
+- **The viewer can reverse mistakes.** Removed lines stay in the side panel's hidden list. Marking one as fine adds a correction to the stream's next prompts and allowlists that text (R30). Each category's display can be changed per streamer.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
