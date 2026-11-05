@@ -83,44 +83,50 @@ describe('streamCategories (R62)', () => {
 });
 
 describe('STREAM_CATEGORY_DEFINITIONS', () => {
-  it('states each category by what it needs, briefly (R62, fix round 2)', () => {
-    const { spoiler, instruction, relay, ghosting, privacy } = STREAM_CATEGORY_DEFINITIONS;
+  it('states spoiler, instruction and ghosting briefly by what they need (fix rounds 2 and 3)', () => {
+    const { spoiler, instruction, ghosting } = STREAM_CATEGORY_DEFINITIONS;
     // A spoiler states the future as fact; a guess or a hope does not.
     expect(spoiler).toMatch(/^states as fact what happens later/u);
     expect(spoiler).toMatch(/A guess, a hope or a belief about what will happen is not a spoiler/u);
     // An instruction tells the streamer to do something.
     expect(instruction).toMatch(/The streamer must be told to do something/u);
     expect(instruction).toMatch(/reading the situation aloud, wishing for luck from the game/u);
-    // Relay reports another stream or pushes chat there; any other mention is not relay.
-    expect(relay).toMatch(/^reports what another streamer's stream shows, says or did/u);
-    expect(relay).toMatch(/pushes the streamer or chat to go to another stream or raid it \(凸\)/u);
-    expect(relay).toMatch(/Any other mention of another streamer is not relay/u);
     // Ghosting needs hidden information from a source the streamer cannot see, as fact.
     expect(ghosting).toMatch(/as fact, hidden information from a source they cannot see/u);
     expect(ghosting).toMatch(/A guess or a worry about what opponents hold/u);
-    // Privacy is identifying real-world facts about real people.
-    expect(privacy).toMatch(
-      /identifying real-world facts about the streamer or another real person/u,
-    );
-    expect(privacy).toMatch(/anything about characters, is not privacy/u);
     // Short: the 4B model was primed by long lists of exceptions.
-    for (const definition of Object.values(STREAM_CATEGORY_DEFINITIONS))
-      expect(definition.length).toBeLessThanOrEqual(600);
+    for (const definition of [spoiler, instruction, ghosting])
+      expect(definition.length).toBeLessThanOrEqual(450);
   });
 
-  it('widens sensitive to comparisons, sexual remarks and 不謹慎 baiting (R66)', () => {
+  it('keeps relay, privacy and sensitive as in fix round 1 (fix round 3)', () => {
+    const { relay, privacy } = STREAM_CATEGORY_DEFINITIONS;
+    expect(relay).toMatch(/^brings another streamer's stream into this chat/u);
+    expect(relay).toMatch(
+      /a neutral mention that another streamer exists or has played the same game/u,
+    );
+    expect(privacy).toMatch(
+      /^pries into or reveals private information the streamer has not made public/u,
+    );
+    expect(privacy).toMatch(
+      /Only real people count: fictional and game characters are never privacy/u,
+    );
+  });
+
+  it('widens sensitive to comparisons, sexual remarks and 不謹慎 baiting, and moves comparisons out of relay (R66)', () => {
     const { sensitive, relay } = STREAM_CATEGORY_DEFINITIONS;
     expect(sensitive).toMatch(/politics, religion/u);
-    expect(sensitive).toMatch(
-      /compares the streamer with another identifiable streamer, kindly or not/u,
-    );
+    expect(sensitive).toMatch(/compares the streamer with another named or identifiable streamer/u);
+    expect(sensitive).toMatch(/whether the comparison is kind or not/u);
     expect(sensitive).toMatch(
       /sexual remarks, requests or advances to the streamer or another real person/u,
     );
-    expect(sensitive).toMatch(/a real disaster, accident or death \(不謹慎\)/u);
-    expect(sensitive).toMatch(/Games or shows about war, politics or disasters/u);
+    expect(sensitive).toMatch(/a real disaster, accident, death or tragedy \(不謹慎\)/u);
+    expect(sensitive).toMatch(
+      /Not sensitive: games, films, songs or shows about war, politics or disasters/u,
+    );
     expect(sensitive).toMatch(/compliments that are not sexual/u);
-    expect(relay).toMatch(/A comparison with another streamer is sensitive/u);
+    expect(relay).toMatch(/a comparison of this streamer with another \(that is sensitive\)/u);
   });
 });
 
