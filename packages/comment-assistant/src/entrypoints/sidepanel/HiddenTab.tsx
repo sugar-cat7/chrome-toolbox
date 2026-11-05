@@ -223,7 +223,7 @@ export function HiddenTab({
         {confirming && (
           <div role="alertdialog" aria-label="フィードバックの消去" className="flex flex-col gap-2">
             <p>
-              保存したフィードバック（許可リスト、訂正例、引き上げた判定基準）をすべて消去します。よろしいですか？
+              保存したフィードバック（許可リスト、訂正例、引き上げた判定基準）と、配信ごとに覚えたジャンル（選んだジャンルを含む）をすべて消去します。よろしいですか？
             </p>
             <div className="flex gap-2">
               <button

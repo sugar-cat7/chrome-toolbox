@@ -520,6 +520,13 @@ export function startBackground(): () => void {
     'comments/feedback/clear': async (): Promise<Result<Record<string, never>>> => {
       const cleared = await feedback.clear();
       if (!cleared.ok) return cleared;
+      // The streams' kept genres and the viewer's choices go too (the README's privacy note);
+      // the pages shown now are detected again as they report.
+      const loaded = await book.load();
+      if (!loaded.ok) return loaded;
+      const forgotten = await book.clear();
+      if (!forgotten.ok) return forgotten;
+      announceStreamChange();
       // The hidden lists forget their confirmations too: those comments can be judged again.
       const pipeline = await pipelines.current();
       if (pipeline.ok) pipeline.value.clearVerdicts();

@@ -870,6 +870,8 @@ describe('side panel', () => {
     expect(within(panel).getByText(/「問題なし」でチャットに戻します/u)).toBeTruthy();
     await userEvent.click(within(panel).getByRole('button', { name: 'フィードバックを消去' }));
     expect(within(panel).getByText(/すべて消去します/u)).toBeTruthy();
+    // The streams' kept genres and the genres chosen for them go too.
+    expect(within(panel).getByText(/配信ごとに覚えたジャンル/u)).toBeTruthy();
     await userEvent.click(within(panel).getByRole('button', { name: 'やめる' }));
     expect(of('comments/feedback/clear')).toEqual([]);
     await userEvent.click(within(panel).getByRole('button', { name: 'フィードバックを消去' }));

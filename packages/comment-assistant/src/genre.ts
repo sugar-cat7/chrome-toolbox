@@ -280,6 +280,8 @@ export type GenreBook = {
     partition: string,
     genre: StreamGenre | undefined,
   ): Promise<Result<{ persisted: boolean }>>;
+  /** Forgets every stream's genre, guess and choice, in memory and in storage (privacy). */
+  clear(this: void): Promise<Result<void>>;
 };
 
 /**
@@ -440,6 +442,21 @@ export function createGenreBook(area: StorageArea): GenreBook {
       remember(after);
       const written = await persist(after);
       return Ok({ persisted: written.ok });
+    },
+    clear() {
+      records.clear();
+      asked.clear();
+      titles.clear();
+      // After the writes before it, so none of them brings a stream back.
+      const write = async (): Promise<Result<void>> => {
+        const written = await capture(
+          () => area.set({ [STREAM_GENRES_KEY]: [] }),
+          'storage_failed',
+        );
+        return written.ok ? Ok(undefined) : written;
+      };
+      writing = writing.then(write);
+      return writing;
     },
   };
 }

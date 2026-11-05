@@ -394,6 +394,47 @@ describe('extension runtime wiring', () => {
     stop();
   });
 
+  it("forgets every stream's kept genre and choice with the feedback (privacy)", async () => {
+    stubLlama();
+    vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+    const broadcast = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue(undefined);
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => listener?.(message, sender, resolve));
+    const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/fixturechannel' });
+    await ask(
+      {
+        type: 'comments/context',
+        payload: {
+          site: 'twitch',
+          partition: 'fixturechannel',
+          title: 'Fixture night',
+          game: 'just-chatting',
+        },
+      },
+      { tab, frameId: 0, url: 'https://www.twitch.tv/fixturechannel' },
+    );
+    await ask(
+      {
+        type: 'comments/genre',
+        payload: { site: 'twitch', partition: 'fixturechannel', genre: 'fps' },
+      },
+      panel,
+    );
+    expect(await fakeBrowser.storage.local.get(STREAM_GENRES_KEY)).toMatchObject({
+      [STREAM_GENRES_KEY]: [{ stream: 'fixturechannel', override: 'fps' }],
+    });
+    broadcast.mockClear();
+    expect(await ask({ type: 'comments/feedback/clear', payload: {} }, panel)).toEqual(Ok({}));
+    expect(await fakeBrowser.storage.local.get(STREAM_GENRES_KEY)).toEqual({
+      [STREAM_GENRES_KEY]: [],
+    });
+    expect(broadcast).toHaveBeenCalledWith({ type: 'comments/stream-changed' });
+    stop();
+  });
+
   it("badges each tab with its stream's removed comments still waiting for a verdict (R54)", async () => {
     stubLlama();
     vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);

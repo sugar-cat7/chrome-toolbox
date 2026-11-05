@@ -502,6 +502,17 @@ describe('createGenreBook', () => {
     expect(genreOf(book.get('youtube', 'fixture0002'))).toMatchObject({ genre: 'chat' });
   });
 
+  it('forgets every stream when cleared, in memory and in storage', async () => {
+    const book = createGenreBook(fakeBrowser.storage.local);
+    await book.load();
+    book.observe('youtube', 'fixture0001', { title: '【雑談】Fixture Talk' });
+    await book.choose('twitch', 'fixturechannel', 'fps');
+    expect((await book.clear()).ok).toBe(true);
+    expect(book.get('youtube', 'fixture0001')).toBeUndefined();
+    expect(book.get('twitch', 'fixturechannel')).toBeUndefined();
+    expect(await read()).toEqual([]);
+  });
+
   it('gives no classification for a stream it does not know', () => {
     expect(genreOf(undefined)).toBeUndefined();
   });
