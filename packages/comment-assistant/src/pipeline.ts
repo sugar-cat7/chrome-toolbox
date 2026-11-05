@@ -162,7 +162,8 @@ export type CommentPipeline = {
    * to back ahead of them (R36). A call with the `key` of one still waiting takes its place in
    * line, and the one replaced runs at once with an aborted signal. `signal` also aborts on
    * dispose (calls still waiting then run at once, aborted). A `spare` call (the genre guess,
-   * R63) starts only on a slot that no waiting batch takes: batches never wait for it to start.
+   * R63) starts only on a slot that no waiting batch takes, the highest free one: batches never
+   * wait for it to start, and slot 1 keeps the batch prompt's prefix where there are two.
    */
   exclusive<T>(
     this: void,
@@ -1053,6 +1054,17 @@ export function createCommentPipeline(deps: {
     return slot;
   }
   /**
+   * The highest comment slot nothing holds, for a `spare` call (the genre guess): with
+   * llama-server's `--cache-ram 0` a slot keeps only its own last prefix, so slot 1 keeps the
+   * batch prompt's while a second slot takes the guess.
+   */
+  function highestFreeSlot(): number {
+    const taken = new Set([...running.values(), ...held.values()]);
+    for (let slot = FIRST_COMMENT_SLOT + concurrency - 1; slot > FIRST_COMMENT_SLOT; slot -= 1)
+      if (!taken.has(slot)) return slot;
+    return freeSlot();
+  }
+  /**
    * Whether Clef may judge the comment (R53): Clef judges abuse, the author has no role and the
    * streamer's allowlist does not hold the text.
    */
@@ -1209,7 +1221,7 @@ export function createCommentPipeline(deps: {
         continue;
       }
       waiting.splice(i, 1);
-      next.begin(freeSlot(), false);
+      next.begin(next.spare ? highestFreeSlot() : freeSlot(), false);
     }
   }
   /**

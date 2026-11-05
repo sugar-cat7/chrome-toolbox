@@ -3069,6 +3069,19 @@ describe('comment slots shared with the chat summary', () => {
     expect(await now).toEqual(Ok(1));
   });
 
+  it('gives a spare exclusive the highest free comment slot, so slot 1 keeps the batch prefix', async () => {
+    const { pipeline } = setup({ fetch: fakeLlama(echo()).fetch, commentConcurrency: 2 });
+    const spare = (): Promise<Result<number>> =>
+      pipeline.exclusive(async (slot): Promise<Result<number>> => Ok(slot), 'guess', {
+        spare: true,
+      });
+    expect(await spare()).toEqual(Ok(2));
+    // A summary still takes the lowest.
+    expect(await pipeline.exclusive(async (slot): Promise<Result<number>> => Ok(slot))).toEqual(
+      Ok(1),
+    );
+  });
+
   /** Answers summary requests with `answer()` (503 when undefined) and the rest as `fetch` does. */
   const withSummaries = (fetch: Fetch, answer: () => string | undefined) => {
     const state = { summaries: 0 };
