@@ -1,4 +1,4 @@
-import { systemTimers, type PageToken, type Timers } from '@chrome-toolbox/extension-core';
+import { systemTimers, type Timers } from '@chrome-toolbox/extension-core';
 import type { DisplayMode } from '../protocol.ts';
 import type { Segment } from './segment.ts';
 
@@ -20,15 +20,28 @@ const TEXT_NODE = 3;
 const DOCUMENT_FRAGMENT_NODE = 11;
 const DOCUMENT_POSITION_FOLLOWING = 4;
 
-/** A side-by-side translation: a smaller block with a line on its left (mock B's `.tr`). */
+/**
+ * The style of a side-by-side translation, in its shadow root. The host only holds its place,
+ * `!important` against the page rules that reach it (a reset, `p > *`); the look, mock B's `.tr`
+ * (a line on the left, smaller text), is on the element inside, which page CSS cannot reach.
+ */
 const PAIR_STYLE = `:host {
-  display: block;
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+div {
   margin: 2px 0 10px;
   padding-left: 8px;
   border-left: 3px solid #3a7afe;
   font-size: 0.9em;
-  color: inherit;
 }`;
+/**
+ * Elements a box inside would break (P26): a paragraph whose block is one of them or sits inside
+ * one shows no box, and its translation only in the tooltip.
+ */
+const NO_BOX_TAGS: ReadonlySet<string> = new Set(['a', 'button', 'summary']);
 
 /**
  * Where an offset in a text node goes when its text changes length: the start and the end stay
@@ -52,10 +65,20 @@ export type Writer = {
    *   never empties.
    * - `pair`: the text stays; a `<pt-ja>` box with the translation goes right after the
    *   paragraph's `last` node (never inside a link), after the boxes of the segments before it
-   *   that share that node.
+   *   that share that node. A paragraph in or under a button, a summary or a link gets no box
+   *   (P26).
+   * Earlier paragraphs this one takes nodes from, and the block's paragraphs whose nodes all left
+   * the page, are given back (see `release`), so no node is left with a stale write.
    * A selection whose end is in a rewritten node keeps its relative place there (`mapOffset`).
    */
   write(segment: Segment, pieces: readonly string[], mode: DisplayMode): boolean;
+  /**
+   * Gives the paragraphs of `block` back to the page at once: each of their nodes that still
+   * holds what this writer wrote gets its original data back, their boxes go and their records
+   * are dropped. A shadow root's paragraphs (whose block is its host) and the host's own are
+   * released apart. Call it before scanning a translated block again.
+   */
+  release(block: Element | ShadowRoot): void;
   /** Shows every written paragraph the other way, in slices. */
   setMode(mode: DisplayMode): void;
   /**
@@ -90,6 +113,10 @@ type Paragraph = {
   /** What its `<pt-ja>` box shows. */
   readonly translation: string;
   mode: DisplayMode;
+  /** Whether it is in a shadow root (its block is the host) rather than in the block itself. */
+  readonly inShadow: boolean;
+  /** Whether `pair` gives it a box (P26). */
+  readonly boxed: boolean;
   box: HTMLElement | undefined;
   /** Its nodes whose record points here; at 0 the paragraph is retired. */
   held: number;
@@ -129,6 +156,7 @@ const isText = (node: Node): node is Text => node.nodeType === TEXT_NODE;
 const isShadowRoot = (node: Node): node is ShadowRoot =>
   node.nodeType === DOCUMENT_FRAGMENT_NODE && 'host' in node;
 
+const squash = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const leadOf = (text: string): string => text.slice(0, text.length - text.trimStart().length);
 const trailOf = (text: string): string => text.slice(text.trimEnd().length);
 
@@ -150,6 +178,13 @@ function upOf(node: Node): Node | null {
   return parent !== null && isShadowRoot(parent) ? parent.host : parent;
 }
 
+/** Whether a paragraph of `block` may show a box: not in or under a button, summary or link. */
+function takesBox(block: Element): boolean {
+  for (let at: Node | null = block; at !== null; at = upOf(at))
+    if (isElement(at) && NO_BOX_TAGS.has(at.localName)) return false;
+  return true;
+}
+
 /**
  * Whether `child`, a child of the parent of the paragraph's `last`, lies in the paragraph: from
  * the child holding its first text node to `last`.
@@ -163,16 +198,6 @@ function spans(segment: Segment, child: Node): boolean {
   while (first !== null && first.parentNode !== parent) first = first.parentNode;
   if (first === null) return false;
   return child === first || (precedes(first, child) && precedes(child, last));
-}
-
-/** The words of tokens as the page shows them: texts, kept elements and spaces. */
-function plainText(tokens: readonly PageToken[]): string {
-  let text = '';
-  for (const token of tokens) {
-    if (token.t === 'text' || token.t === 'keep') text += token.text;
-    else if (token.t === 'space') text += ' ';
-  }
-  return text;
 }
 
 /** `text`, at most `limit` code points long: a longer one is cut and ends with `…`. */
@@ -320,6 +345,7 @@ export function createWriter(
 
   /** Puts the `<pt-ja>` box of `paragraph` after its `last`, behind the boxes of the segments before it there. */
   function show(paragraph: Paragraph): void {
+    if (!paragraph.boxed) return;
     const box = doc.createElement(PAIR_TAG);
     const style = doc.createElement('style');
     style.textContent = PAIR_STYLE;
@@ -350,12 +376,58 @@ export function createWriter(
     else records.byBlock.delete(block);
   }
 
-  /** Forgets `node`'s record: the page's value stays. */
-  function drop(node: Text, entry: Entry): void {
+  /** Drops `node`'s record, leaving its data as it is. */
+  function forget(node: Text, entry: Entry): void {
     records.texts.delete(node);
     records.refs.delete(entry.ref);
     entry.paragraph.held -= 1;
+  }
+
+  /** Forgets `node`'s record (the page's value stays); a paragraph left with none is retired. */
+  function drop(node: Text, entry: Entry): void {
+    forget(node, entry);
     if (entry.paragraph.held <= 0) retire(entry.paragraph);
+  }
+
+  /**
+   * Gives `paragraph` back to the page: each of its nodes that still holds what this writer wrote
+   * gets its original, its records are dropped and its box goes.
+   */
+  function giveBack(paragraph: Paragraph, set: Setter): void {
+    for (const node of paragraph.segment.nodes) {
+      const entry = records.texts.get(node);
+      if (entry?.paragraph !== paragraph) continue;
+      if (node.data === entry.written) set(node, entry.original);
+      forget(node, entry);
+    }
+    retire(paragraph);
+  }
+
+  /**
+   * The original text of `paragraph`: its tokens' kept elements and spaces, and for each text
+   * token the scanned text, or the recorded originals of its nodes when the scan read something
+   * else (this writer's own text, scanned again).
+   */
+  function originalOf(paragraph: Paragraph): string {
+    const { segment } = paragraph;
+    const runs = new Map<number, string>();
+    const rescanned = new Set<number>();
+    for (const [i, node] of segment.nodes.entries()) {
+      const index = segment.pieceOf[i] ?? 0;
+      const original = records.texts.get(node)?.original ?? node.data;
+      if (original !== segment.originals[i]) rescanned.add(index);
+      runs.set(index, (runs.get(index) ?? '') + original);
+    }
+    let text = '';
+    let index = 0;
+    for (const token of segment.tokens) {
+      if (token.t === 'text') {
+        text += rescanned.has(index) ? squash(runs.get(index) ?? '') : token.text;
+        index += 1;
+      } else if (token.t === 'keep') text += token.text;
+      else if (token.t === 'space') text += ' ';
+    }
+    return text;
   }
 
   /** Shows `paragraph` as `mode` says, in the nodes that still hold what this writer wrote. */
@@ -431,47 +503,62 @@ export function createWriter(
       if (pieces.length !== texts || pieceOf.length !== nodes.length) return false;
       const originals = originalsOf(segment);
       if (originals === undefined) return false;
+      const { block, last } = segment;
+      const parent = last.parentNode;
       const paragraph: Paragraph = {
         segment,
         replaced: replacedOf(segment, pieces, originals),
         translation: pieces.join(''),
         mode,
+        inShadow: parent !== null && isShadowRoot(parent),
+        boxed: takesBox(block),
         box: undefined,
         held: 0,
         retired: false,
       };
       keepSelection(doc, (set) => {
-        for (const [i, node] of nodes.entries())
+        const earlier = new Set<Paragraph>();
+        for (const [i, node] of nodes.entries()) {
           set(node, (mode === 'replace' ? paragraph.replaced[i] : originals[i]) ?? node.data);
-      });
-      // Earlier paragraphs this one takes nodes from are replaced by it.
-      const replaced = new Set<Paragraph>();
-      for (const [i, node] of nodes.entries()) {
-        const entry = records.texts.get(node);
-        if (entry !== undefined) {
-          entry.paragraph.held -= 1;
-          replaced.add(entry.paragraph);
+          const entry = records.texts.get(node);
+          if (entry !== undefined) {
+            entry.paragraph.held -= 1;
+            earlier.add(entry.paragraph);
+          }
+          const ref = entry?.ref ?? new WeakRef(node);
+          records.refs.add(ref);
+          records.texts.set(node, {
+            original: originals[i] ?? node.data,
+            written: node.data,
+            paragraph,
+            ref,
+          });
+          paragraph.held += 1;
         }
-        const ref = entry?.ref ?? new WeakRef(node);
-        records.refs.add(ref);
-        records.texts.set(node, {
-          original: originals[i] ?? node.data,
-          written: node.data,
-          paragraph,
-          ref,
-        });
-        paragraph.held += 1;
-      }
-      for (const earlier of replaced) retire(earlier);
-      // So are the block's paragraphs the page took away (it re-rendered them).
-      const { block } = segment;
-      for (const earlier of records.byBlock.get(block) ?? [])
-        if (earlier.segment.nodes.every((node) => !node.isConnected)) retire(earlier);
+        // The paragraphs this one takes nodes from are replaced by it: the rest of their nodes go
+        // back to the page, so none keeps a write no paragraph shows any more.
+        for (const other of earlier) giveBack(other, set);
+        // So are the block's paragraphs the page took away (it re-rendered them).
+        for (const other of records.byBlock.get(block) ?? [])
+          if (other.segment.nodes.every((node) => !node.isConnected)) giveBack(other, set);
+      });
       records.byBlock.set(block, [...(records.byBlock.get(block) ?? []), paragraph]);
       records.paragraphs.add(new WeakRef(paragraph));
       if (mode === 'pair') show(paragraph);
       sweep();
       return true;
+    },
+
+    release(block) {
+      const inShadow = isShadowRoot(block);
+      const host = isShadowRoot(block) ? block.host : block;
+      const paragraphs = (records.byBlock.get(host) ?? []).filter(
+        (paragraph) => paragraph.inShadow === inShadow,
+      );
+      if (paragraphs.length === 0) return;
+      keepSelection(doc, (set) => {
+        for (const paragraph of paragraphs) giveBack(paragraph, set);
+      });
     },
 
     setMode(mode) {
@@ -523,11 +610,11 @@ export function createWriter(
       if (paragraphs.length === 0) return undefined;
       let text = '';
       let last: ChildNode | undefined;
-      for (const { segment } of paragraphs) {
+      for (const paragraph of paragraphs) {
         // The segments one paragraph fell back to share its last node: one line.
-        if (last !== undefined) text += segment.last === last ? ' ' : '\n';
-        text += plainText(segment.tokens);
-        last = segment.last;
+        if (last !== undefined) text += paragraph.segment.last === last ? ' ' : '\n';
+        text += originalOf(paragraph);
+        last = paragraph.segment.last;
       }
       return cut(text, ORIGINAL_CHARS);
     },
