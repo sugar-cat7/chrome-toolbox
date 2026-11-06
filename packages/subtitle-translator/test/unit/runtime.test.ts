@@ -117,19 +117,20 @@ describe('sender routing', () => {
   );
 
   it.each([
-    { sender: 'offscreen', given: { url: fakeBrowser.runtime.getURL('/offscreen.html') } },
-    { sender: 'youtube top frame', given: { url: youtube, tab: { id: 3 }, frameId: 0 } },
-    { sender: 'a web page', given: { url: 'https://example.com/', tab: { id: 3 }, frameId: 0 } },
-  ] satisfies { sender: string; given: Sender }[])(
+    { sender: 'offscreen', url: fakeBrowser.runtime.getURL('/offscreen.html'), frameId: 0 },
+    { sender: 'youtube top frame', url: youtube, frameId: 0 },
+    { sender: 'a web page', url: 'https://example.com/', frameId: 0 },
+  ])(
     'answers sender_forbidden to $sender for a message not in its table',
-    async ({ given }) => {
+    async ({ url, frameId }) => {
+      const tab = await fakeBrowser.tabs.create({ url });
       const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
       const stop = startBackground();
       const listener = add.mock.calls[0]?.[0];
       const reply = await new Promise((resolve) => {
         listener?.(
           { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
-          given,
+          { url, frameId, tab },
           resolve,
         );
       });
