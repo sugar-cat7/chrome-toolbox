@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   commentBatchPrompt,
   createLlamaClient,
+  subtitleMaxTokens,
   subtitlePrompt,
 } from '@chrome-toolbox/extension-core';
 import { runSlotBench, type Stats } from './slots.ts';
 
-const SUBTITLE_SYSTEM = subtitlePrompt({
+const SUBTITLE_INPUT = {
   source: 'x',
   sourceLang: 'en',
   previous: [],
   glossary: [],
   context: '',
-}).messages[0]?.content;
+};
+const SUBTITLE_SYSTEM = subtitlePrompt(SUBTITLE_INPUT).messages[0]?.content;
 const COMMENT_SYSTEM = commentBatchPrompt({
   comments: [{ text: 'x', lang: 'en', translate: true }],
   context: '',
@@ -35,6 +37,8 @@ type Seen = {
   templateKwargs: unknown;
   /** A comment batch's grammar code class and whether its user turn names a genre. */
   codes?: string | undefined;
+  grammar?: string | undefined;
+  user?: string | undefined;
   genre?: string | undefined;
 };
 
@@ -91,6 +95,8 @@ function fakeServer(
         maxTokens: body.max_tokens,
         templateKwargs: body.chat_template_kwargs,
         codes: body.grammar?.split('\n')[1],
+        grammar: body.grammar,
+        user: body.messages[1]?.content,
         genre: body.messages[1]?.content
           .split('\n')
           .find((line) => line.startsWith('Stream genre: ')),
@@ -186,6 +192,19 @@ describe('runSlotBench', () => {
     expect(server.seen.filter((s) => s.kind === 'subtitle').every((s) => s.slot === 0)).toBe(true);
     expect(report.loaded).toMatchObject({ expected: 4, sent: 4, count: 4, pass: true });
     expect(report.loaded.commentOk).toBe(comment.length);
+  });
+
+  it('sends each subtitle under its own grammar and token budget', async () => {
+    const server = fakeServer(2);
+    await runSlotBench(options(server, true));
+    const subtitle = server.seen.filter((s) => s.kind === 'subtitle');
+    expect(subtitle.length).toBeGreaterThan(0);
+    for (const seen of subtitle) {
+      const line = /^Line to translate \(JSON string\): (.*)$/mu.exec(seen.user ?? '')?.[1] ?? '';
+      const source = JSON.parse(line) as string;
+      expect(seen.grammar).toBe(subtitlePrompt({ ...SUBTITLE_INPUT, source }).grammar);
+      expect(seen.maxTokens).toBe(subtitleMaxTokens(source));
+    }
   });
 
   it('pins generation settings on subtitle and comment requests', async () => {

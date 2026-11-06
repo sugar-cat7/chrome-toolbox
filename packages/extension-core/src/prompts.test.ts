@@ -186,6 +186,20 @@ describe('parseSubtitleLine', () => {
       expected: 'あ'.repeat(33),
     },
     { name: '空', text: '\n', finish: 'stop', expected: 'response_invalid' },
+    { name: '空白だけ', text: ' \u3000\t\n', finish: 'stop', expected: 'response_invalid' },
+    { name: '途中に改行', text: 'よし\nチャット\n', finish: 'stop', expected: 'response_invalid' },
+    {
+      name: 'length で切れた（改行つき）',
+      text: 'よし\n',
+      finish: 'length',
+      expected: 'response_invalid',
+    },
+    {
+      name: '終了理由なしでタイミングもない',
+      text: 'よし\n',
+      finish: undefined,
+      expected: 'response_invalid',
+    },
   ])('$name', ({ text, finish, expected }) => {
     const result = parseSubtitleLine(
       { text, finishReason: finish, timing: undefined },

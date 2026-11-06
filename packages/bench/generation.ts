@@ -1,4 +1,8 @@
-import { commentReplyBudget, streamCategories } from '@chrome-toolbox/extension-core';
+import {
+  commentReplyBudget,
+  streamCategories,
+  subtitleReplyBudget,
+} from '@chrome-toolbox/extension-core';
 
 /**
  * Fixed generation settings for every translation request a bench sends. They are written to
@@ -20,7 +24,7 @@ export const GENERATION = {
    * 3 tokens per character (R46).
    */
   maxTokens: {
-    subtitle: { base: 8, perTranslationCharacter: 3 },
+    subtitle: subtitleReplyBudget,
     comment: commentReplyBudget,
     judge: 16,
   },

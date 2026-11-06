@@ -47,6 +47,7 @@ export {
   parseSubtitleLine,
   subtitleLimit,
   subtitleMaxTokens,
+  subtitleReplyBudget,
   subtitlePrompt,
   subtitleStreamPart,
   summaryLimits,

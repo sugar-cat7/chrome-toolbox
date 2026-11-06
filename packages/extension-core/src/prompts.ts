@@ -356,8 +356,10 @@ export const subtitleStreamPart = (
 /** Characters a subtitle translation may take: the same bound as a comment's. */
 export const subtitleLimit = (source: string): number => translationLimit(source);
 
-/** Reply budget of one subtitle: 8 tokens and 3 per character the grammar allows (R46). */
-export const subtitleMaxTokens = (source: string): number => 8 + 3 * subtitleLimit(source);
+/** Reply budget of one subtitle: one line, so the comment batch's per-line budget (R46). */
+export const subtitleReplyBudget = commentReplyBudget;
+export const subtitleMaxTokens = (source: string): number =>
+  subtitleReplyBudget.line + subtitleReplyBudget.perTranslationCharacter * subtitleLimit(source);
 
 /**
  * A subtitle translation: one line of at most `subtitleLimit(source)` characters without `<` or
@@ -401,7 +403,7 @@ export function parseSubtitleLine(
   if (cutByMaxTokens(reply, maxTokens) || !reply.text.endsWith('\n'))
     return Err(failure('response_invalid'));
   const line = reply.text.slice(0, -1);
-  if (line === '' || line.includes('\n') || codePoints(line) >= subtitleLimit(source))
+  if (line.trim() === '' || line.includes('\n') || codePoints(line) >= subtitleLimit(source))
     return Err(failure('response_invalid'));
   return Ok(line);
 }
