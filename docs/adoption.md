@@ -338,6 +338,92 @@ A third agent wrote 335 made-up lines across all 10 genres after D was chosen, w
 - **Ghosting is the weakest category.** It had only 7 positives, so its numbers are coarse; 4 of 7 flags were right. It is only enabled for fps, board and deduction.
 - **The viewer can reverse mistakes.** Removed lines stay in the side panel's hidden list. Marking one as fine adds a correction to the stream's next prompts and allowlists that text (R30). Each category's display can be changed per streamer.
 
+### Speech recognition and slot 0 (2026-11-06)
+
+Subtitle plan Task 4: which Gemma projector to recommend for speech recognition, and whether slot 0 meets the subtitle targets with speech recognition, comment load and MTP.
+
+Setup:
+
+- A separate router on `127.0.0.1:18090`; the service on 18083 was not touched. llama.cpp `620d222`, the options of [llama-server.md](llama-server.md) §4 with `--models-max 1`, and the preset's `[gemma4-e4b]` section (Q4_0 QAT model, MTP drafter with `spec-draft-n-max = 3`) with a projector line added.
+- Input: the 18 synthetic clips of `bench:make-audio` (3 self-written sentences each in en, id, ko, es, zh and ja, spoken by macOS `say`). No real stream data was used, and the JSONL results stayed local.
+- Rounds in the order A-B-B-A, with the server restarted for each round and warmed up with one pass over the clips.
+- The host was not quiet: other applications kept the 5-minute load average at 3.5-4.8 (the plan asked for less than 4). Compare rows within this section, not with other sections.
+
+#### Projector: BF16 or Q8_0
+
+A is Google's BF16 projector (`gemma-4-E4B-it-mmproj.gguf`, 0.99 GB); B is ggml-org's Q8_0 projector (`mmproj-gemma-4-E4B-it-Q8_0.gguf`, 0.56 GB, converted from the non-QAT model). Each round ran `bench:asr --repeat 3`, once on whole clips and once with `--chunk-ms 1500`. Latency is the median (p50) per language, rounds A1, A2 against B1, B2; the ratio compares the means of the two rounds.
+
+| lang | whole: BF16 p50 ms | whole: Q8_0 p50 ms | whole: Q8_0 / BF16 | 1,500 ms: BF16 p50 ms | 1,500 ms: Q8_0 p50 ms | 1,500 ms: Q8_0 / BF16 |
+| ---- | ------------------ | ------------------ | ------------------ | --------------------- | --------------------- | --------------------- |
+| en   | 377, 446           | 428, 490           | 1.12               | 328, 349              | 387, 370              | 1.12                  |
+| id   | 438, 452           | 482, 559           | 1.17               | 297, 332              | 370, 358              | 1.16                  |
+| ko   | 413, 473           | 455, 524           | 1.10               | 393, 356              | 406, 373              | 1.04                  |
+| es   | 395, 451           | 442, 495           | 1.11               | 310, 340              | 385, 357              | 1.14                  |
+| zh   | 393, 447           | 435, 493           | 1.10               | 296, 327              | 375, 346              | 1.16                  |
+| ja   | 384, 451           | 436, 488           | 1.11               | 334, 369              | 403, 386              | 1.12                  |
+
+Memory of Gemma's process (the router's child) after the warm-up and after the measured runs: footprint from macOS `footprint`, resident memory from `ps -o rss=`. The server log at its default verbosity did not print the projector's buffer sizes.
+
+| Round     | Footprint, warm / after | Resident, warm / after |
+| --------- | ----------------------- | ---------------------- |
+| A1 (BF16) | 1.78 / 1.78 GB          | 5.01 / 5.57 GB         |
+| B1 (Q8_0) | 1.25 / 1.39 GB          | 5.15 / 5.44 GB         |
+| B2 (Q8_0) | 1.24 / 1.24 GB          | 5.16 / 5.75 GB         |
+| A2 (BF16) | 1.65 / 1.78 GB          | 5.47 / 6.21 GB         |
+
+Reading:
+
+- Every language had the same language accuracy, error rate and failures with both projectors, for whole clips and for 1,500 ms pieces.
+- Q8_0 was slower in every language: 1.10-1.17 times BF16's p50 on whole clips and 1.04-1.16 times on pieces.
+- Q8_0 saved about 0.4-0.5 GB of footprint. Resident memory overlapped (`lazy-mode` reads embedding rows on demand, so it varies).
+- Decision: **BF16**. The plan recommended Q8_0 only if accuracy was the same, the error rate within +0.02 and the p50 within 1.05 times BF16's in every language. Q8_0 failed the p50 rule.
+- Against 0.43 GB without a projector (2026-11-02, [llama-server.md](llama-server.md)), the BF16 projector with speech recognition in use adds about 1.2-1.4 GB of footprint.
+
+#### Recognition per language (BF16)
+
+The two BF16 rounds, A1 and A2 (p50 and p95 per round). Each language has 3 clips × 3 repeats = 9 samples per run. The error rate is WER for en, id, ko and es and CER for zh and ja, averaged over the samples that did not fail. Language accuracy counts a failed sample as a miss. With pieces, a clip is sent as consecutive requests of at most 1,500 ms, the transcripts are joined, and p50 and p95 count every request.
+
+| lang | whole: error rate | whole: lang accuracy | whole: p50 ms | whole: p95 ms | 1,500 ms: failed | 1,500 ms: error rate | 1,500 ms: lang accuracy | 1,500 ms: p50 ms | 1,500 ms: p95 ms |
+| ---- | ----------------- | -------------------- | ------------- | ------------- | ---------------- | -------------------- | ----------------------- | ---------------- | ---------------- |
+| en   | 0.000             | 1.00                 | 377, 446      | 490, 554      | 0/9              | 0.265                | 1.00                    | 328, 349         | 535, 559         |
+| id   | 0.000             | 1.00                 | 438, 452      | 466, 559      | 0/9              | 0.330                | 1.00                    | 297, 332         | 406, 449         |
+| ko   | 0.056             | 1.00                 | 413, 473      | 425, 500      | 3/9              | 0.429                | 0.67                    | 393, 356         | 461, 467         |
+| es   | 0.000             | 1.00                 | 395, 451      | 409, 467      | 0/9              | 0.000                | 1.00                    | 310, 340         | 337, 374         |
+| zh   | 0.000             | 1.00                 | 393, 447      | 428, 501      | 6/9              | 0.267                | 0.33                    | 296, 327         | 344, 372         |
+| ja   | 0.062             | 1.00                 | 384, 451      | 418, 503      | 0/9              | 0.168                | 1.00                    | 334, 369         | 426, 463         |
+
+Reading:
+
+- Whole clips: language accuracy 1.00 and an error rate of at most 0.062 in every language, p50 377-452 ms. No sample failed.
+- Pieces cut at fixed 1,500 ms boundaries failed every time for ko-3, zh-1 and zh-3, with both projectors. The error was `response_invalid`: the transcript reached `asrTextLimit` (76 characters for 1,500 ms) because the model repeated itself on audio cut inside a syllable. The samples that did not fail had error rates of 0.17-0.43, except es (0).
+- So live segments must end in silence. When long speech has to be cut, the cut belongs at the quietest frame, not at a fixed length: the subtitle plan's VAD (Task 11) cuts at the lowest-energy 20 ms frame of the last 500 ms before 1,500 ms.
+
+#### Slot 0 under comment load, with and without MTP (BF16)
+
+`bench:slots --audio --seconds 60`: every 1.5 s, slot 0 gets the next clip for speech recognition (`asrPrompt`), then its translation (`subtitlePrompt`) unless the clip is Japanese. Both latencies run from the scheduled tick: `source` to the transcript, `ja` to the translation (translated ticks only). The target is source p50 ≤ 1,000 ms, ja p50 ≤ 2,000 ms and ja p95 ≤ 3,000 ms, with every tick sent and none failed. The comment streams send 20-comment batches back to back on slots 1 and 2. The prompt columns are the p50 of llama-server's `timings.prompt_ms`. MTP n3 is the preset; "off" drops `spec-type`, `model-draft` and `spec-draft-n-max`. Every run sent 40 of 40 ticks, translated 34 and failed none.
+
+| Comment streams | MTP | Round | Late ticks | source p50 / p95 ms | ja p50 / p95 ms | Target | ASR prompt p50 ms | Translation prompt p50 ms | Comment batches ok | Batch p50 / p95 ms |
+| --------------- | --- | ----- | ---------- | ------------------- | --------------- | ------ | ----------------- | ------------------------- | ------------------ | ------------------ |
+| 2               | n3  | A1    | 8          | 607 / 2,856         | 1,178 / 3,783   | FAIL   | 300               | 165                       | 28                 | 4,127 / 7,624      |
+| 2               | off | B1    | 9          | 743 / 2,472         | 1,304 / 3,384   | FAIL   | 345               | 181                       | 14                 | 8,712 / 10,404     |
+| 2               | off | B2    | 13         | 758 / 2,655         | 1,385 / 3,459   | FAIL   | 341               | 180                       | 14                 | 8,530 / 11,964     |
+| 2               | n3  | A2    | 16         | 759 / 3,843         | 1,482 / 4,700   | FAIL   | 337               | 184                       | 24                 | 4,873 / 8,831      |
+| 1               | n3  | A1    | 2          | 519 / 847           | 946 / 1,857     | PASS   | 289               | 157                       | 19                 | 3,078 / 5,178      |
+| 1               | off | B1    | 4          | 639 / 1,724         | 1,101 / 2,612   | PASS   | 287               | 152                       | 10                 | 6,212 / 9,381      |
+| 1               | off | B2    | 4          | 635 / 1,721         | 1,100 / 2,593   | PASS   | 283               | 149                       | 10                 | 6,186 / 9,402      |
+| 1               | n3  | A2    | 3          | 560 / 1,309         | 1,006 / 2,297   | PASS   | 315               | 166                       | 18                 | 3,258 / 5,766      |
+
+Without comment load (the idle phase of the same 8 runs), every round passed: source p50 411-468 ms and p95 466-556 ms, ja p50 724-798 ms and p95 889-973 ms, ASR prompt p50 205-225 ms and translation prompt p50 98-100 ms.
+
+Reading:
+
+- Two comment streams: slot 0 missed the target in every round, with MTP (ja p95 3.78 and 4.70 s, source p95 2.86 and 3.84 s) and without it (ja p95 3.38 and 3.46 s, source p95 2.47 and 2.66 s). The source p50 stayed within 1 s.
+- Turning MTP off did not reach the target and halved the comment work: 14 batches in 60 s instead of 24-28, batch p50 8.5-8.7 s instead of 4.1-4.9 s.
+- One comment stream: within the target in every round. With MTP: ja p50 0.95 and 1.01 s, ja p95 1.86 and 2.30 s, source p95 0.85 and 1.31 s, and 18-19 batches at a p50 of 3.1-3.3 s, more than two streams finished without MTP. Without MTP: ja p95 2.59-2.61 s, 10 batches at 6.2 s.
+- The shared prefix works. In every run, each slot-0 request after the first took 193-205 prompt tokens from the slot's cache (server log): translations after a recognition and recognitions after a translation alike. Idle, a translation's prompt took 98-100 ms (p50) and a recognition's, which carries the audio, 205-225 ms.
+
+Decision (the user, 2026-11-06, "字幕中はコメントが譲る"): keep MTP. While subtitles use slot 0, the comment extension sends one batch at a time instead of two. The one-stream rows above are the expected result. The comment extension is to check slot 0 through llama-server's `GET /slots` (subtitle plan Task 17); the extensions never message each other.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
@@ -366,7 +452,7 @@ Fixtures are the default input. For a real measurement, point `--set` (and `--ma
 2. `pnpm --filter @chrome-toolbox/bench bench:translate -- --server http://127.0.0.1:8080 --model <name> --set bench-data/text [--chat-batch 20] [--judge-server <url>] [--slot <n>] [--out <jsonl>]` runs once per translation candidate over 100 utterances and 100 chat lines per language. `--chat-batch N` (default 1) sends up to N consecutive chat lines in one comment-batch request, as the comment extension does (spec §7: up to 20); a speech line or the end of the set closes a batch early. `--judge-server` adds the LLM-judge score; the CLI stops before measuring if either server fails `/health`.
 3. `pnpm --filter @chrome-toolbox/bench bench:asr -- --server http://127.0.0.1:18083 --model gemma4-e4b [--repeat <n>] [--chunk-ms <ms>] [--set bench-data/audio/real --manifest bench-data/audio/real/manifest.jsonl] [--out <jsonl>]` sends each clip the way the extension does (`createAsrClient`: slot 0, `model`, the one-line `<lang>\t<text>` grammar, `input_audio`) and reports error rate, language accuracy, silent rows and latency per language. `--repeat` runs the sample list n times in order; `--chunk-ms` sends each clip in pieces of at most that length and scores the joined transcripts (the extension's forced cut is 1,500 ms). The server needs the audio projector (`mmproj`, [llama-server.md](llama-server.md)). Without `--set`/`--manifest` it reads the synthesized `bench-data/audio` and `packages/bench/fixtures/audio.jsonl`.
 4. `pnpm --filter @chrome-toolbox/bench bench:clef -- --server <clef-server-url> [--model <name>] [--set bench-data/clef.jsonl]` probes `/v1/systemone`, falls back to logprobs, and prints `CLEF_MODE=<systemone|logprobs|unavailable>` as the last line.
-5. `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <translation-server-url> [--seconds 60] [--comment-streams 2]` measures subtitle latency under comment load, with and without slot pinning. Each comment stream sends its next batch as soon as the last one answered, pinned to slot 1, 2 and so on (default 1 stream). It prints its settings and a table to stdout and writes no results file.
+5. `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <translation-server-url> [--seconds 60] [--comment-streams 2] [--model <name> --audio [--set <dir> --manifest <jsonl>]]` measures subtitle latency under comment load, with and without slot pinning. Each comment stream sends its next batch as soon as the last one answered, pinned to slot 1, 2 and so on (default 1 stream). `--audio` (needs `--model` and the projector) sends each tick's clip for speech recognition on slot 0 before its translation, runs the pinned cases only, and adds the source latency and the prompt times (see "Speech recognition and slot 0"). It prints its settings and a table to stdout and writes no results file.
 
 `bench:translate`, `bench:asr` and `bench:clef` write JSONL to `bench-data/results/` (or `--out`). The first line is a meta record, `{"type": "meta", …}`, with the timestamp, git SHA, server URL, model, the server's `GET /props` `build_info`/`model_path`/`total_slots` (null when the server has no `/props`) and the generation settings. Each following line is one row.
 
@@ -405,17 +491,17 @@ whisper.cpp at [`21ba6d2`](https://github.com/ggml-org/whisper.cpp/commit/21ba6d
 
 ### Results (PENDING)
 
-| Item                                               | Value                                                                                                                  |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Translation model, subtitles                       | PENDING                                                                                                                |
-| Translation model, comments                        | PENDING                                                                                                                |
-| ASR engine and model                               | PENDING                                                                                                                |
-| Clef mode                                          | PENDING                                                                                                                |
-| `--parallel`                                       | 3 (R39, 2026-10-29): subtitles on slot 0, two comment batches on slots 1 and 2; see "Fast English chat on three slots" |
-| p50 / p95 per language                             | PENDING                                                                                                                |
-| Total memory                                       | PENDING                                                                                                                |
-| Judge vs human spot check (20 sentences, spec §10) | PENDING, needs the user                                                                                                |
-| Source URLs, file hashes, measurement date         | PENDING                                                                                                                |
+| Item                                               | Value                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Translation model, subtitles                       | PENDING                                                                                                                                                                                                                                                                                     |
+| Translation model, comments                        | PENDING                                                                                                                                                                                                                                                                                     |
+| ASR engine and model                               | gemma4-e4b through llama.cpp `input_audio` with Google's BF16 projector (2026-11-06, 18 synthetic clips: language accuracy 1.00 and error rate ≤ 0.062 in en/id/ko/es/zh/ja, whole-clip p50 377-452 ms; see "Speech recognition and slot 0"). Real streams: PENDING (subtitle plan Task 16) |
+| Clef mode                                          | PENDING                                                                                                                                                                                                                                                                                     |
+| `--parallel`                                       | 3 (R39, 2026-10-29): subtitles on slot 0, two comment batches on slots 1 and 2; see "Fast English chat on three slots"                                                                                                                                                                      |
+| p50 / p95 per language                             | PENDING                                                                                                                                                                                                                                                                                     |
+| Total memory                                       | PENDING                                                                                                                                                                                                                                                                                     |
+| Judge vs human spot check (20 sentences, spec §10) | PENDING, needs the user                                                                                                                                                                                                                                                                     |
+| Source URLs, file hashes, measurement date         | PENDING                                                                                                                                                                                                                                                                                     |
 
 If a language misses the 2 second target, follow the order in spec §6 ("遅延が 2 秒を超えるとき").
 
