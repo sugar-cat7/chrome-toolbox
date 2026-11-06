@@ -2,19 +2,47 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**積み方（2026-11-06、① subtitle-translator との調整）:**
+
+- この計画は `feat/subtitle-translator` の上に積む。① の計画（`docs/superpowers/plans/2026-10-28-subtitle-translator.md`）の **subtitle Task 0**（extension-core の PLaMo の要求、止める文字列、`model_refused`、スタブの `withPlamo`）が入ったら、`feat/page-translator` をその上に rebase してから、この計画の Task 1 を始める。PR は ① の PR の上に積む（base は `feat/subtitle-translator`）。
+- 旧 Task 2（同じものを別の名前で足していた。`stop`、`model_unavailable`、`plamoRequest`、`withoutModel`）はなくした。使い方は Task 7 に入れ、旧 Task 3〜13 を Task 2〜12 に繰り上げた。全 12 タスク。判断は ledger の Ruling P1〜。
+- rebase の前に動かせるタスクはない（判断 P15）。Task 1 と Task 2 は subtitle Task 0 が変えるファイルを変え、Task 3〜12 は触れないが、どれも Task 1 か Task 2 の上に作る。各タスクのファイルの全体は、それぞれの **Files** にある。
+
+  | Task | subtitle Task 0 も変えるファイル                                                                                                                                                       | 依るもの                      |
+  | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+  | 1    | `tools/errors/catalog.json` と生成物（`packages/contracts/src/errors.generated.ts`、`docs/errors.generated.md`、`.template.json`）。A か B なら `extension-core/testing/playwright.ts` | なし                          |
+  | 2    | extension-core の `src/index.ts`、`src/prompts.ts`、`README.md`、`testing/llama-stub.ts`、`testing/llama-stub.test.ts`、`testing/playwright.ts`                                        | subtitle Task 0               |
+  | 3    | なし                                                                                                                                                                                   | Task 2、subtitle Task 0       |
+  | 4    | なし                                                                                                                                                                                   | Task 2（`PageToken`）         |
+  | 5    | なし                                                                                                                                                                                   | Task 1（`protocol.ts`）、4    |
+  | 6    | なし                                                                                                                                                                                   | Task 1、2、4、5               |
+  | 7    | なし                                                                                                                                                                                   | Task 1、2、6、subtitle Task 0 |
+  | 8    | `tools/errors/catalog.json` と生成物                                                                                                                                                   | Task 1、7                     |
+  | 9    | なし                                                                                                                                                                                   | Task 1、5、6、7、8            |
+  | 10   | なし                                                                                                                                                                                   | Task 1、6、7、8               |
+  | 11   | なし（comment-assistant の `soak-marker.test.ts` は subtitle Task 15 と共有）                                                                                                          | Task 1〜10                    |
+  | 12   | なし（`docs/llama-server.md`、spec などは ① の後のタスクと共有）                                                                                                                       | Task 1〜11                    |
+
+- rebase の後も、① の後のタスク（subtitle Task 1〜16）と同じファイルを変える。① のブランチが進んで、もう一度 rebase して衝突したときは、次のように解く。
+  - `tools/errors/catalog.json`: 両方の行を残す（① の行が先）。続けて `pnpm errors:generate` で `errors.generated.ts`、`docs/errors.generated.md`、`.template.json` を作り直す。生成物は手で合わせない。
+  - extension-core の `src/index.ts`、`src/prompts.ts`、`testing/llama-stub.ts`、`testing/playwright.ts`、`README.md`: 両方の変更を残す。README の表は `vp fmt` で整え直す。
+  - `packages/comment-assistant/test/unit/soak-marker.test.ts`: 一覧に両方を名前の順に残す（Task 11）。
+  - `pnpm-lock.yaml`（Task 1 と subtitle Task 5 が依存を足す）: 両方の `package.json` を残し、`pnpm install` で作り直す。
+  - `docs/llama-server.md`、`docs/adoption.md`、`README.md`、spec: 両方の節と行を残す。
+
 **Goal:** 一般の Web ページを、レイアウト、リンク、フォームを壊さずに、ローカルの llama.cpp で日本語に置き換えて読めるようにする。見えている段落から順に訳し、原文にはいつでも翻訳前とまったく同じ DOM に戻せる。選択した範囲は、その近くの吹き出しで訳す。
 
 **Architecture:**
 
 - **content script**（`content-scripts/page.js`。manifest には書かず、`scripting` で必要なときだけ入れる。トップフレームだけ）:
-  - ページを段落に切り出す（Task 5）。
-  - IntersectionObserver で画面の近くに来た段落だけを、1 つずつのバッチで background に頼む（Task 7）。
-  - 訳をテキストノードの `data` に書き、原文をメモリに持つ。原文に戻す（Task 6）。
-  - ツールチップと吹き出しを Shadow DOM に描く（Task 10）。
+  - ページを段落に切り出す（Task 4）。
+  - IntersectionObserver で画面の近くに来た段落だけを、1 つずつのバッチで background に頼む（Task 6）。
+  - 訳をテキストノードの `data` に書き、原文をメモリに持つ。原文に戻す（Task 5）。
+  - ツールチップと吹き出しを Shadow DOM に描く（Task 9）。
   - 推論はしない。ページごとのキャッシュはここに持つ。
 - **background**（service worker）:
-  - 翻訳の窓口。Gemma の行形式のバッチと、任意の PLaMo を振り分け、llama-server の枠を決める（Task 8）。状態はほぼ持たない。
-  - content script を入れる、右クリックメニューとショートカット、「常に翻訳」のサイトへの登録（Task 9）。
+  - 翻訳の窓口。Gemma の行形式のバッチと、任意の PLaMo を振り分け、llama-server の枠を決める（Task 7）。状態はほぼ持たない。
+  - content script を入れる、右クリックメニューとショートカット、「常に翻訳」のサイトへの登録（Task 8）。
 - **ポップアップ**: 翻訳する／原文に戻す、表示方法、サイトごとの設定、進み具合（モック A）。
 - **設定ページ**: llama.cpp の接続先、モデル、サイトの一覧。
 - **llama.cpp**: ルーターモードの 1 台（`http://127.0.0.1:18083`、R21）。すべての要求に `model` を付ける（R11）。
@@ -24,7 +52,7 @@
 **Spec:** `docs/superpowers/specs/2026-10-28-chrome-ai-extensions-design.md`（§3, §4, §5, §8, §9, §11, §15。§8 はこの計画で追記した）、`docs/llama-server.md`（PLaMo 3 Translate の節）、`docs/adoption.md`。前提:
 
 - comment-assistant 計画は Task H まで完了している。次のものを使う。
-  - extension-core: `createLlamaClient`、`cutByMaxTokens`、`createQueue`、`createLruCache`、`Timers`、`systemTimers`、`defineProtocol`、`llmProtocolSpec`、`llmHandlers`、`settingsStore`（`models.translate`）、`connectionPort`。`scriptLanguageGuess` は使わない（理由は Task 5）。
+  - extension-core: `createLlamaClient`、`cutByMaxTokens`、`createQueue`、`createLruCache`、`Timers`、`systemTimers`、`defineProtocol`、`llmProtocolSpec`、`llmHandlers`、`settingsStore`（`models.translate`）、`connectionPort`。`scriptLanguageGuess` は使わない（理由は Task 4）。
   - packages/ui: `ConnectionPanel`
   - extension-core の testing: llama のスタブ、`realVisibility`、`usedHeap`、`heapSnapshotParts`、`longTasks`
 - 写して使う、comment-assistant の作り方（アプリどうしは import しない）:
@@ -32,11 +60,17 @@
   - `sites/observe.ts` の前面の判定（`visibilityState`、`pagehide`、IntersectionObserver を見直す「look」）
   - `test/unit/intersection.ts`（jsdom 用の偽の IntersectionObserver と visibility）
   - 遅れて読み込んだ設定で入力を上書きしない作り（`SettingsTab.tsx` の `edited`）
-- subtitle-translator の計画と同時に進む場合の調整: 次のものは両方の計画が触る。先に入った方を使い、後の方は足さずに合わせる。
-  - `ChatRequest.stop` と PLaMo の要求の組み立て（Task 2）
-  - `llm.ts` の 2xx 以外の応答の読み方（subtitle の `audio_unsupported`、この計画の `model_unavailable`）
-  - llama のスタブの `defaultResponder` と `tools/errors/catalog.json`
-  - comment-assistant の `soak-marker.test.ts`（`starter.soak` を持つパッケージの一覧）
+- subtitle-translator の計画の **subtitle Task 0** が extension-core に入れたものを使う（上の「積み方」）。この計画は、同じものを別の名前で足さない。
+  - `llm.ts`: `ChatRequest.stop`、`ChatRequest.tellRefusal`（HTTP 4xx/5xx → `model_refused`、公開コード `unavailable`。省くと今までどおり `network_failed`）
+  - `plamo.ts`: `plamoTranslateRequest`（`PlamoInput` の `slot`、`maxTokensCap`）、`parsePlamoLine`、`PLAMO_TRANSLATE_MODEL`、`PLAMO_LICENSE_URL`、`PLAMO_STOP`
+  - `prompts.ts`: `translationLimit`（min(2000, 2 × コードポイント数 + 16)。extension-core の中だけで使う）
+  - llama のスタブ: `withPlamo`、`STUB_PLAMO_PREFIX`。既定のスタブは PLaMo を載せず、PLaMo へのチャットに 404 を返す。
+- 次のものは、① の後のタスクも触る。衝突したときの解き方は「積み方」に書いた。
+  - extension-core の `src/index.ts`、`src/prompts.ts`、`README.md`、`testing/llama-stub.ts`、`testing/playwright.ts`
+  - `tools/errors/catalog.json` と生成物
+  - comment-assistant の `soak-marker.test.ts`（`starter.soak` を持つパッケージの一覧。subtitle Task 15 と Task 11）
+  - `tools/quality/extension-browser.ts` の e2e 用のビルド（subtitle Task 15 Step 0 と Task 1 Step 0 の C）と、`testing/playwright.ts` の `triggerAction`（同じ名前と形。先に入った方を使う）
+  - `docs/llama-server.md`（subtitle の Task 4・8・16 と、この計画の Task 12）、`docs/adoption.md`、`README.md`
 
 ## Global Constraints
 
@@ -61,7 +95,7 @@
     - ツールチップと吹き出しを入れる `<pt-overlay>`（`document.documentElement` の最後の子）
   - テキストノードの前後の空白は、元のまま残す。
 - 原文に戻したページは、翻訳前と同じ DOM になる。比べるのは、ノードの種類、名前、属性、テキスト、開いた Shadow DOM の中、ノードの同一性。ページが翻訳のあとで書き換えたテキストノードは、ページの値を残す。
-- 翻訳しないもの（Task 5 の表で決める）:
+- 翻訳しないもの（Task 4 の表で決める）:
   - 要素: `input`、`textarea`、`select`、`option`、`optgroup`、`datalist`、`code`、`pre`、`kbd`、`samp`、`var`、`tt`、`script`、`style`、`noscript`、`template`、`svg`、`math`、`iframe`、`object`、`embed`、`canvas`、`video`、`audio`、`pt-ja`、`pt-overlay`
   - 編集できる要素（`isContentEditable`）
   - いちばん近い `translate` 属性が `no` の要素（その中の `translate="yes"` は訳す）
@@ -86,12 +120,14 @@
   - 拡張の更新（`ctx.onInvalidated`）でも、原文に戻してから解放する。
 - 推論:
   - Gemma: 設定の `models.translate`（既定 `gemma4-e4b`）。ページ用の行形式（`<n>\t<訳>\n`）を GBNF で縛る。`temperature: 0`、`chat_template_kwargs: { enable_thinking: false }`。
-  - PLaMo（任意）: ページの設定の `plamoModel`（既定 `plamo-3-translate-2b`）。1 単位ずつ送る。
-    - 送るもの: user の 1 通だけ（訳す文）、`chat_template_kwargs: { target_lang: 'ja', context? }`、`stop: ['<|plamo:tag|>', '<|plamo:bos|>']`、`temperature: 0`
-    - 送らないもの: `response_format`、JSON Schema、`grammar`、system、`source_lang`
-    - 空の文と `<|plamo:` を含む文は、PLaMo に送らず Gemma で訳す。
-    - 失敗した単位は、同じ要求の中で Gemma で訳し直す。モデルがない（`model_unavailable`）なら、設定が変わるまで Gemma だけを使い、ポップアップで知らせる。
-  - 既定の翻訳モデルは Gemma。Task 4 の計測で決めた規則を満たせば PLaMo にする。
+  - PLaMo（任意）: `PLAMO_TRANSLATE_MODEL`（`plamo-3-translate-2b`。字幕と同じく、設定では変えない）。1 単位ずつ、subtitle Task 0 の `plamoTranslateRequest` で組み立てて送る。
+    - 送るもの: user の 1 通だけ（訳す文）、`chat_template_kwargs: { target_lang: 'ja', context? }`、`stop: ['<|plamo:tag|>', '<|plamo:bos|>']`、`temperature: 0`、`max_tokens`（`PAGE_PLAMO_MAX_TOKENS` = 816 まで）、`id_slot`（枠 1 か 2）
+    - 送らないもの: `response_format`、JSON Schema、`grammar`、system、`source_lang`（`sourceLang: 'auto'` を渡す）、`glossary`（`glossary: []` を渡す）
+    - 文脈は `Page: <タイトル>` の行と、同じ要求の中の前の 2 単位の原文（`previous` に古い順に渡す。各行 200 コードポイントまで）。
+    - `plamoTranslateRequest` が `input_invalid` を返す単位（空の文、`<|plamo:` を含む文）は、PLaMo に送らず Gemma で訳す。
+    - PLaMo で失敗した単位（`model_refused` = HTTP 4xx/5xx、`response_invalid`、時間切れ、接続できない）は、同じ要求の中で Gemma で訳し直す。中断（`operation_cancelled`）は訳し直さない。
+    - ルーターの `/v1/models` に PLaMo がないなら、設定が変わるまで Gemma だけを使い、ポップアップで知らせる（`notice: 'plamo_missing'`）。
+  - 既定の翻訳モデルは Gemma。Task 3 の計測で決めた規則を満たせば PLaMo にする。
   - 枠（`id_slot`）:
     - Gemma は `totalSlots - 1`（2 以上のとき）。1 枠のサーバーなら 0。同時に 1 件。
     - PLaMo は 1 から `totalSlots - 1` まで（2 以上のとき）。同時に `totalSlots - 1` 件まで。
@@ -125,11 +161,11 @@
 
 ## Review Focus
 
-- アイコンフォントの文字（`<span class="material-icons">search</span>`）→ 訳さない。訳すとアイコンが文字に化ける（Task 5・Task 12 でテスト）。
-- ページが訳したテキストノードを後から書き換える（React のカウンター、「3 分前」の時刻など）→ ページの値を正とし、その段落を訳し直す。原文に戻すときも、古い原文で上書きしない（Task 6・Task 7・Task 12 でテスト）。
-- `value` のない `<option>`、`<textarea>` の初期値、フォームのボタン → 送信される値が翻訳前と同じ（Task 5・Task 12 でテスト）。
-- SPA が本文を丸ごと入れ替える → 外れたブロックの監視をやめ（IntersectionObserver が切り離された要素を持ち続けない）、新しい本文は近くの段落だけを訳す（Task 7 でテスト）。
-- llama.cpp が途中で落ちる、PLaMo がサーバーにない → 原文のまま残し、送り直しは 3 回まで。ポップアップに理由を出す。PLaMo がなければ Gemma で訳す（Task 7・Task 8・Task 11 でテスト）。
+- アイコンフォントの文字（`<span class="material-icons">search</span>`）→ 訳さない。訳すとアイコンが文字に化ける（Task 4・Task 11 でテスト）。
+- ページが訳したテキストノードを後から書き換える（React のカウンター、「3 分前」の時刻など）→ ページの値を正とし、その段落を訳し直す。原文に戻すときも、古い原文で上書きしない（Task 5・Task 6・Task 11 でテスト）。
+- `value` のない `<option>`、`<textarea>` の初期値、フォームのボタン → 送信される値が翻訳前と同じ（Task 4・Task 11 でテスト）。
+- SPA が本文を丸ごと入れ替える → 外れたブロックの監視をやめ（IntersectionObserver が切り離された要素を持ち続けない）、新しい本文は近くの段落だけを訳す（Task 6 でテスト）。
+- llama.cpp が途中で落ちる、PLaMo がサーバーにない → 原文のまま残し、送り直しは 3 回まで。ポップアップに理由を出す。PLaMo がなければ Gemma で訳す（Task 6・Task 7・Task 10 でテスト）。
 
 ## 要確認
 
@@ -139,15 +175,16 @@
 2. **権限**: `activeTab` + `scripting` + `contextMenus`、「常に翻訳」のサイトだけ任意のホスト権限。`<all_urls>` は求めない。その代わり、選択しただけで出る小さなボタンは作らない。推奨: このとおり。
 3. **選択範囲の翻訳の始め方**: 右クリックメニューとショートカット `Alt+Shift+L`（`chrome://extensions/shortcuts` で変えられる）。推奨: このとおり（Windows の Chrome は Alt+Shift+T、A、B、I を使う）。
 4. **除外の範囲**: 「翻訳しない」サイトでは、ページの翻訳（手動と常に翻訳）を始めない。選択範囲の翻訳は動かす。既定の除外リストは空。推奨: このとおり（何もしなくても、押さない限り拡張はページに入らない）。
-5. **既定の翻訳モデル**: 計測（Task 4）までは Gemma。Task 4 の規則を満たせば PLaMo を既定にし、サーバーになければ自動で Gemma にする。推奨: このとおり。
+5. **既定の翻訳モデル**: 計測（Task 3）までは Gemma。Task 3 の規則を満たせば PLaMo を既定にし、サーバーになければ自動で Gemma にする。推奨: このとおり。
 6. **枠**: Gemma は最後の枠（`--parallel 3` なら 2）だけで同時に 1 件。PLaMo は枠 1 と 2。推奨: このとおり（字幕の枠 0 を守る。コメントの 1 つ目のバッチの枠 1 のプロンプトキャッシュを崩さない）。
 7. **範囲**: トップフレームだけ。開いた Shadow DOM は訳し、iframe と閉じた Shadow DOM は訳さない。属性は訳さない。推奨: このとおり。
 8. **併記の作り**: 段落の終わり（ブロック直下の最後の子の直後）に `<pt-ja>`（Shadow DOM に訳）を足す。ページは縦に長くなる。推奨: このとおり。
-9. **用語集**: ページ翻訳には用語集を持たない（PLaMo の要求の組み立ては `glossary` を受け付ける）。推奨: 持たない。必要になれば設定ページにサイトごとの用語集を足す。
+9. **用語集**: ページ翻訳には用語集を持たない（subtitle Task 0 の `plamoTranslateRequest` には `glossary: []` を渡す）。推奨: 持たない。必要になれば設定ページにサイトごとの用語集を足す。
 10. **吹き出しの「原文を読み上げ」**: 置かない（音声合成の声によっては外部に送られる）。推奨: 置かない。
 11. **段落の上限**: 原文を持つ段落が 10,000 個に達したら、それ以上は訳さない（原文を捨てない）。推奨: このとおり。
 12. **bfcache**: `pagehide` でキャッシュを捨てる（spec）ので、戻ったときは訳し直す。推奨: このとおり。
-13. **subtitle 計画との重なり**: `stop`、PLaMo の要求、スタブ、エラーコード、`soak-marker.test.ts` は、先に入った方を使う。推奨: このとおり。
+13. **subtitle 計画との重なり**: extension-core の `stop`、`model_refused`、PLaMo の要求、スタブの `withPlamo` は、subtitle Task 0 のものを使い、このブランチは `feat/subtitle-translator` の上に積む（PR も ① の上）。`soak-marker.test.ts` などの共有ファイルは、rebase で両方を残す。推奨: このとおり（2026-11-06 の調整で決定済み）。
+14. **PLaMo のモデル名**: 字幕と同じく `plamo-3-translate-2b` に固定し、設定ページで変えない（もとの計画の `plamoModel` はなくした）。推奨: このとおり（プリセットの節の名前をそのまま使う。`docs/llama-server.md` §6）。
 
 ---
 
@@ -160,12 +197,13 @@
 - Create: `src/entrypoints/popup/index.html`、`popup/main.tsx`、`popup/style.css`（この Task では「このページを翻訳」のボタンだけ）
 - Create: `src/entrypoints/options/index.html`（`<meta name="manifest.open_in_tab" content="true" />`）、`options/main.tsx`、`options/style.css`（この Task では `ConnectionPanel` だけ）
 - Create: `src/entrypoints/page.content.ts`（`registration: 'runtime'`、`matches` なし。この Task では `ping` に答えるだけ）、`src/content/claim.ts`
-- Create: `src/protocol.ts`、`src/control.ts`（この Task では `injectPage` と `start` だけ）
-- Modify: `packages/page-translator/README.md`（サイドパネルの記述を、ポップアップと設定ページに直す。詳しい使い方は Task 13）
+- Create: `src/protocol.ts`、`src/control.ts`（この Task では `PAGE_SCRIPT`、`ScriptingApi`、`injectPage` だけ。`page/start` の経路は `runtime.ts` に置く）
+- Modify: `packages/page-translator/README.md`（サイドパネルの記述を、ポップアップと設定ページに直す。詳しい使い方は Task 12）
 - Modify: `src/runtime.ts`（`sidePanelPort` を `optionsPort` に。`page/start` の経路と送り手の確認）、`src/entrypoints/background.ts`（`setPanelBehavior` を消す）
 - Modify: `tools/errors/catalog.json`（`page_restricted` → 公開コード `permission_denied`）。続けて `pnpm errors:generate`
 - Modify: `packages/page-translator/package.json`（`zod`、`jsdom`、`@testing-library/react`、`@testing-library/user-event` を catalog から）
-- Modify: `packages/extension-core/testing/playwright.ts`（Step 0 で A か B になったとき `triggerAction`）
+- Modify（Step 0 で A か B になったときだけ）: `packages/extension-core/testing/playwright.ts`（`triggerAction(context: BrowserContext, page: Page): Promise<void>`。subtitle Task 15 Step 0 が同じ名前と形で足していれば、それを使い、足さない）
+- Modify（Step 0 で C になったときだけ）: `tools/quality/extension-browser.ts`（`starter.e2eBuild`。subtitle Task 15 Step 0 (b) が足していれば、それを使い、足さない）
 - Create: `packages/page-translator/test/browser/page.ts`（E2E の補助）、`test/browser/manifest.spec.ts`
 - Modify: `test/browser/connection.spec.ts`（サイドパネルの代わりに設定ページを開く）、`test/unit/runtime.test.ts`
 - Modify: `docs/adoption.md`（Step 0 の結果）
@@ -175,9 +213,9 @@
 - Produces:
   - `src/protocol.ts`:
     - `pageCommandSchema`: `{ action: 'ping' | 'translate' | 'restore' }` または `{ action: 'selection'; text?: string }`（`text` は 2,000 文字まで）。background から content script へ、`{ type: 'page/command', payload }` で送る。
-    - `pageProtocolSpec`: `llmProtocolSpec` に、`'page/start': { request: z.strictObject({ tabId: z.int(), url: z.optional(z.string()) }), response: z.strictObject({}) }` を足したもの。`url` はポップアップが読んだタブの URL（Task 9 が除外の確認に使う）。後の Task が経路を足す。
-  - `src/content/claim.ts`: `claimPage(scope: object): boolean`。`scope` の `Symbol.for('chrome-toolbox.page-translator')` が空なら印を付けて true、あれば false。`page.content.ts` は false のとき何もしない（二重に入れられても 1 つだけ動く）。
+    - `pageProtocolSpec`: `llmProtocolSpec` に、`'page/start': { request: z.strictObject({ tabId: z.int(), url: z.optional(z.string()) }), response: z.strictObject({}) }` を足したもの。`url` はポップアップが読んだタブの URL（Task 8 が除外の確認に使う）。後の Task が経路を足す。
     - `pageProtocol = defineProtocol(pageProtocolSpec)`
+  - `src/content/claim.ts`: `claimPage(scope: object): boolean`。`scope` の `Symbol.for('chrome-toolbox.page-translator')` が空なら印を付けて true、あれば false。`page.content.ts` は false のとき何もしない（二重に入れられても 1 つだけ動く）。
   - `src/control.ts`:
     - `PAGE_SCRIPT = 'content-scripts/page.js'`
     - `ScriptingApi = { executeScript(injection: { target: { tabId: number; frameIds: number[] }; files: string[] }): Promise<unknown> }`
@@ -186,6 +224,7 @@
     - `senderKind(sender: Sender): 'page' | 'content' | 'other'`
       - `page`: comment-assistant の `fromExtensionPage` と同じ判定
       - `content`: `sender.tab?.id` があり、`frameId === 0` で、`page` でないもの
+    - `page/start` の経路（`senderKind === 'page'` だけ）: `injectPage` の後に `tabs.sendMessage(tabId, { type: 'page/command', payload: { action: 'translate' } }, { frameId: 0 })`。Task 8 がこの中身を `createControl().start(tabId, url)`（除外の確認つき）に移す（判断 P3）。
     - `optionsPort(api?: PanelApi): ConnectionPort`（今の `sidePanelPort` の名前を変えたもの）
   - `test/browser/page.ts`:
     - `servePage(context: BrowserContext, url: string, html: string): Promise<void>`（`context.route` で答える。comment-assistant の `perf.spec.ts` の `ELSEWHERE` と同じ作り。ホストは `*.fixture.test`）
@@ -198,13 +237,13 @@
     - 出力のパスが `content-scripts/page.js` になるか。
     - `matches` を書かなければ `host_permissions` に何も足されないか（WXT の `internal/manifest.mjs` は、runtime の content script の `matches` を `host_permissions` に足す）。
   - (b) E2E で `activeTab` を得る方法。headless の Chrome for Testing 156 で、次の順に試す。
-    - A: `realVisibility: true` の起動で `context.browser()?.newBrowserCDPSession()` を作る。`Extensions.triggerAction({ id: extensionId, targetId })`（`targetId` はページの CDP セッションの `Target.getTargetInfo`）でポップアップが開き、Playwright のページとして見えるか。
+    - A: `realVisibility: true` の起動で `context.browser()?.newBrowserCDPSession()` を作る。`Extensions.triggerAction({ id: extensionId, targetId })`（`targetId` はページの CDP セッションの `Target.getTargetInfo`）でポップアップが開き、Playwright のページとして見えるか。A か B なら、この呼び出しを `triggerAction(context, page)` にまとめる（Files）。
     - B: A でポップアップは見えないが `activeTab` は付く場合。テストは service worker の `evaluate` で、background と同じ `scripting.executeScript` と `tabs.sendMessage` を呼ぶ。ポップアップは単体テストと、タブで開いた描画だけの E2E で確かめる。
     - C: `Extensions.triggerAction` が使えない場合（パイプ接続と `--enable-unsafe-extension-debugging` が要るなど）。e2e 用のビルドにする。
-      - `package.json` に `starter.e2eBuild: true`。`tools/quality/extension-browser.ts` は、これがあれば `wxt build --mode e2e` を使う（subtitle 計画の Task 14 の代わりの方式と同じ仕組み。先にあれば使う）。
+      - `package.json` に `starter.e2eBuild: true`。`tools/quality/extension-browser.ts` は、これがあれば `wxt build --mode e2e` を使う（subtitle Task 15 Step 0 (b) の代わりの方式と同じ名前と仕組み。先にあれば使い、足さない）。
       - `wxt.config.ts` は、`mode === 'e2e'` のときだけ `host_permissions` に `https://*.fixture.test/*` を足す。
       - 本番のビルドの manifest に `fixture.test` がないことを、`manifest.spec.ts` で確かめる。
-  - (c) ポップアップから `permissions.request` を呼んだとき、許可の確認でポップアップが閉じるか（headed の Chromium で手で確かめる）。どちらでも動くように、Task 9 は background の `permissions.onAdded` で登録を合わせる。
+  - (c) ポップアップから `permissions.request` を呼んだとき、許可の確認でポップアップが閉じるか（headed の Chromium で手で確かめる）。どちらでも動くように、Task 8 は background の `permissions.onAdded` で登録を合わせる。
   - (d) 実行時に許可したホストに `scripting.registerContentScripts` で登録した script が、次の読み込みで動くか（手で確かめる）。
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -265,117 +304,7 @@ test('the toolbar action injects the page script, which answers ping', async () 
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): popup, options page and on-demand page script without site access at install"`
 
-### Task 2: LLM クライアントの `stop` と、モデルがないときのエラー、PLaMo の要求（extension-core）
-
-背景（`docs/llama-server.md` の PLaMo 3 Translate の節、2026-11-06）:
-
-- PLaMo には、訳す文を user の 1 通だけで送る。system を送ると文脈として読まれ、`response_format`、JSON Schema、`grammar` を送ると応答が壊れる。
-- `stop: ["<|plamo:tag|>", "<|plamo:bos|>"]` が要る。空の文と `<|plamo:` を含む文は HTTP 400 になる。
-- ルーターは、プリセットにないモデルに 400 `model '<name>' not found` を返す（`server-models.cpp` の `router_validate_model`。adoption.md の Clef errors の節）。今の `chat` は、これを `network_failed` にしてしまい、「サーバーに届かない」と区別できない。
-
-**Files:**
-
-- Modify: `packages/extension-core/src/llm.ts`、`src/llm.test.ts`
-- Create: `packages/extension-core/src/plamo.ts`、`src/plamo.test.ts`
-- Modify: `packages/extension-core/src/index.ts`
-- Modify: `tools/errors/catalog.json`（`model_unavailable` → 公開コード `unavailable`）。続けて `pnpm errors:generate`
-- Modify: `packages/extension-core/testing/llama-stub.ts`、`testing/llama-stub.test.ts`、`testing/playwright.ts`（export）
-
-**Interfaces:**
-
-- Produces:
-  - `ChatRequest.stop?: readonly string[]`（本文の `stop`。ないときは送らない）
-  - `chat`:
-    - HTTP 404、または HTTP 400 で JSON の `error.message` が `/^model '.+' not found$/u` に合う → `Err(failure('model_unavailable'))`
-    - それ以外の 2xx 以外は、今までどおり `network_failed`
-  - `src/plamo.ts`:
-    - `PLAMO_STOP = ['<|plamo:tag|>', '<|plamo:bos|>'] as const`
-    - `PLAMO_CONTEXT_MAX = 600`
-    - `plamoAccepts(text: string): boolean`: 前後の空白を除いて空でなく、`<|plamo:` を含まない。
-    - `plamoRequest(input: Readonly<{ text: string; context?: string; glossary?: readonly GlossaryEntry[] }>): Pick<ChatRequest, 'messages' | 'templateKwargs' | 'stop' | 'temperature'>`
-      - `messages`: `[{ role: 'user', content: text }]` だけ
-      - `templateKwargs`: `{ target_lang: 'ja' }` に、あれば `context`（末尾の `PLAMO_CONTEXT_MAX` 文字）と `glossary`（`[{ source, target }]`）
-      - `stop`: `PLAMO_STOP`、`temperature`: 0
-    - `plamoMaxTokens(limit: number): number` = 8 + 3 × `limit`
-    - `parsePlamoText(reply: ChatReply, limit: number, maxTokens: number): Result<string>`
-      - 末尾の改行と前後の空白を除いた文を返す。
-      - `cutByMaxTokens`、空、途中に改行がある、コードポイント数が `limit` 以上、のどれかなら `response_invalid`。
-- スタブ:
-  - `StubChat` に `chat_template_kwargs?: Record<string, unknown>`、`stop?: readonly string[]`、`response_format?: unknown` を足す。
-  - `chat_template_kwargs.target_lang === 'ja'` のチャット（PLaMo の要求）:
-    - system がある、`grammar` か `response_format` がある、`stop` が `PLAMO_STOP` でない、のどれかなら HTTP 400（契約をテストで守る）
-    - それ以外は `` `${STUB_PLAMO_PREFIX}${user}` ``。`STUB_PLAMO_PREFIX = '訳P:'`
-  - `withoutModel(model: string, responder: Responder): Responder`: その `model` のチャットに、ルーターと同じ 400 `{ error: { code: 400, message: "model '<model>' not found", type: 'invalid_request_error' } }` を返す。
-
-- [ ] **Step 1: 失敗するテストを書く**
-
-```ts
-it('sends stop strings only when given', async () => {
-  /* body.stop は ['<|plamo:tag|>', '<|plamo:bos|>']。stop がない要求の body に stop キーはない */
-});
-it.each([
-  {
-    name: 'ルーターの model not found',
-    status: 400,
-    message: "model 'plamo-3-translate-2b' not found",
-    expected: 'model_unavailable',
-  },
-  { name: '404', status: 404, message: 'File Not Found', expected: 'model_unavailable' },
-  { name: 'ほかの 400', status: 400, message: 'Invalid slot ID', expected: 'network_failed' },
-  { name: '503', status: 503, message: 'Loading model', expected: 'network_failed' },
-])('chat errors: $name', async ({ status, message, expected }) => {
-  /* ... */
-});
-it('builds a PLaMo request with the line as the only message', () => {
-  /* messages の長さ 1、role user。templateKwargs は { target_lang: 'ja', context }。grammar と jsonSchema のキーがない */
-});
-it('keeps the end of a long context', () => {
-  /* 1,000 文字の context → 末尾 600 文字 */
-});
-it.each([
-  { name: '訳', text: '最終ボスの攻略\n', finish: 'stop', expected: '最終ボスの攻略' },
-  { name: '空', text: '\n', finish: 'stop', expected: 'response_invalid' },
-  { name: '2 行', text: 'a\nb\n', finish: 'stop', expected: 'response_invalid' },
-  {
-    name: '上限',
-    text: `${'あ'.repeat(30)}\n`,
-    finish: 'stop',
-    limit: 30,
-    expected: 'response_invalid',
-  },
-  { name: 'max_tokens で切れた', text: '最終', finish: 'length', expected: 'response_invalid' },
-])('parsePlamoText: $name', (row) => {
-  /* ... */
-});
-it.each([
-  { text: '', accepts: false },
-  { text: '  ', accepts: false },
-  { text: 'see <|plamo:tag|>', accepts: false },
-  { text: 'Boss guide', accepts: true },
-])('plamoAccepts($text)', ({ text, accepts }) => {
-  /* ... */
-});
-// llama-stub.test.ts
-it('answers a PLaMo chat and rejects one that breaks the contract with 400', async () => {
-  /* 正しい要求 → '訳P:Boss guide'。system 付き、grammar 付き、stop なし → 400 */
-});
-it('withoutModel answers the router 400 for that model only', async () => {
-  /* ... */
-});
-```
-
-- [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test`
-  - Expected: FAIL
-- [ ] **Step 3: 実装する**
-  - 400 と 404 の本文は、`model_unavailable` を判定するときだけ読む。読めなければ `network_failed`。
-- [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm errors:generate && pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test && pnpm check`
-  - Expected: PASS。comment-assistant の Clef は自分の fetch を使うので、変化はない。
-- [ ] **Step 5: Commit**
-  - `git commit -m "feat(extension-core): stop strings, model_unavailable and the PLaMo translation request"`
-
-### Task 3: ページ用の行形式のバッチ（extension-core）
+### Task 2: ページ用の行形式のバッチ（extension-core）
 
 背景:
 
@@ -386,11 +315,14 @@ it('withoutModel answers the router 400 for that model only', async () => {
 **Files:**
 
 - Create: `packages/extension-core/src/page-prompt.ts`、`src/page-prompt.test.ts`
-- Modify: `packages/extension-core/src/index.ts`
+- Modify: `packages/extension-core/src/index.ts`（`page-prompt.ts` の export を 1 つのまとまりにして、subtitle Task 0 の `plamo.ts` のまとまりのすぐ後に置く）
+- Modify: `packages/extension-core/src/prompts.ts`（`DATA_NOT_INSTRUCTIONS` に `export` を付けるだけ。文は変えない。判断 P6）
+- Modify: `packages/extension-core/README.md`（`src/page-prompt.ts` の行を足す。`testing/llama-stub.ts` の行にページのバッチを書く）
 - Modify: `packages/extension-core/testing/llama-stub.ts`、`testing/llama-stub.test.ts`、`testing/playwright.ts`（export）
 
 **Interfaces:**
 
+- Consumes: subtitle Task 0 の `translationLimit`（`prompts.ts`）。`PAGE_PLAMO_MAX_TOKENS` は subtitle Task 0 の `PlamoInput.maxTokensCap` に渡す値。
 - Produces:
   - `pageTokenSchema`（Zod mini の union）と `PageToken`:
     - `{ t: 'text'; text: string }`: 訳すテキストノード 1 つ（空白をまとめて前後を除いたもの。1〜400 文字）
@@ -398,11 +330,12 @@ it('withoutModel answers the router 400 for that model only', async () => {
     - `{ t: 'open'; n: number }`、`{ t: 'close'; n: number }`: インライン要素の始まりと終わり（`n` は 1 から）
     - `{ t: 'keep'; n: number; text: string }`: 訳さないインライン要素（code など。`text` は 200 文字まで）
   - `PAGE_MARKERS_MAX = 12`（`open` と `keep` の数の合計）、`PAGE_UNIT_CHARS = 400`
+  - `PAGE_PLAMO_MAX_TOKENS = 2 * PAGE_UNIT_CHARS + 16`（816）: PLaMo の 1 単位の `max_tokens` の上限。Task 3 のベンチと Task 7 の background が、subtitle Task 0 の `plamoTranslateRequest` に `maxTokensCap` として渡す（判断 P4）。
   - `pageTokensValid(tokens: readonly PageToken[]): boolean`: `text` が 1 つ以上、`open` と `close` が正しく入れ子、番号が 1 から順、印が 12 個まで、`text` の合計が 400 文字まで。
   - `pageUnitSource(tokens): { text: string; keep?: Record<string, string> }`: `open` → `<n>`、`close` → `</n>`、`keep` → `<kN/>`（本文は `keep` の `kN` に）、`space` → ' '
-  - `pagePieceLimit(text: string): number` = min(2 × コードポイント数 + 16, 2000)
+  - 訳の 1 つの部分の上限は、subtitle Task 0 で export した `translationLimit(text)`（min(2000, 2 × コードポイント数 + 16)）を使う。`pagePieceLimit` は作らない（同じ式を書き直さない。判断 P6）。
   - `PAGE_REPLY_BUDGET = { line: 8, perMarker: 4, perCharacter: 3 } as const`
-  - `pageBatchMaxTokens(units: readonly (readonly PageToken[])[]): number`: 単位ごとに `line` + `perMarker` × 印の数 + `perCharacter` × 各 `text` の `pagePieceLimit` の合計
+  - `pageBatchMaxTokens(units: readonly (readonly PageToken[])[]): number`: 単位ごとに `line` + `perMarker` × 印の数 + `perCharacter` × 各 `text` の `translationLimit` の合計
   - `pageBatchPrompt(input: Readonly<{ page: Readonly<{ title: string; site: string }>; units: readonly (readonly PageToken[])[] }>): { messages: ChatMessage[]; grammar: string }`
     - system（`PAGE_SYSTEM`、export しない固定の文）に書くこと:
       - Web ページの一部を、読み手のために自然で簡潔な日本語に訳す。各単位は、段落、見出し、リスト、表のセル、ラベル、ボタンのどれか。
@@ -414,13 +347,13 @@ it('withoutModel answers the router 400 for that model only', async () => {
         - `{"id":2,"text":"Roll <1>backward</1> to dodge the light attack."}` → `2\t光の攻撃は<1>後ろに</1>転がると避けられる。`
     - user: `Page (JSON): {"title":…,"site":…}`（title は 200 文字まで）→ `Segments (one JSON object per line):` → 1 単位 1 行の `{"id":n,"text":…}`（`keep` があれば `"keep":{…}`）
     - 文法: `root ::= line1 line2 …`、`lineN ::= "N\t" <印と訳の並び> "\n"`
-      - 訳の部分は `text` ごとに 1 つ。元に文字（`\p{L}`）があれば `[^ \t\n<>] [^\t\n<>]{0,L-1}`、なければ `[^\t\n<>]{0,L}`。`L = pagePieceLimit(text)`
+      - 訳の部分は `text` ごとに 1 つ。元に文字（`\p{L}`）があれば `[^ \t\n<>] [^\t\n<>]{0,L-1}`、なければ `[^\t\n<>]{0,L}`。`L = translationLimit(text)`
       - 印は文字列そのもの。`space` は何も出さない。
-  - `readPagePieces(line: string, tokens: readonly PageToken[]): string[] | undefined`
-    - 番号とタブを除いた 1 行を、印の並びどおりに読み、`text` ごとの訳を返す（前後の空白を除く）。
-    - 印が足りない、多い、順が違う、文字のあるはずの訳が空、訳が上限に達した、のどれかなら `undefined`。PLaMo の応答（文法なし）にも使う。
+  - `readPagePieces(text: string, tokens: readonly PageToken[]): string[] | undefined`
+    - 受け取るのは、番号とタブを除いた後の訳の 1 行（バッチの行から `parsePageBatch` が `<n>\t` を除いたもの、または PLaMo の応答を subtitle Task 0 の `parsePlamoLine` で読んだもの）。これを印の並びどおりに読み、`text` ごとの訳を返す（前後の空白を除く。判断 P7）。
+    - 印が足りない、多い、順が違う、文字のあるはずの訳が空、訳が上限（`translationLimit`）に達した、のどれかなら `undefined`。
   - `parsePageBatch(text: string, units: readonly (readonly PageToken[])[], options: Readonly<{ cut: boolean }>): (string[] | undefined)[]`
-    - 入力の順に返す。行がない、番号が違う、読めない単位は `undefined`。`cut` のとき、改行のない最後の行は途中とみなす。
+    - 行を前から順に単位に当てる（i 行目が i 番目の単位）。i 行目の番号が i でない、行がない、`readPagePieces` が読めない単位は `undefined`。`cut` のとき、改行のない最後の行は途中とみなす。
 - スタブ: system が `PAGE_SYSTEM` のチャットに `pageBatchReply(user)` を返す。
   - 各単位の `text` を `/(<\/?\d+>|<k\d+\/>)/u` で分け、印はそのまま、空白だけの部分は捨て、ほかの部分は `` `${STUB_PAGE_PREFIX}${部分}` ``。`STUB_PAGE_PREFIX = '訳:'`
 
@@ -447,18 +380,19 @@ it('fixes markers in order and forbids an empty link text in the grammar', () =>
   /* grammar に "<1>" "</1>" "<k1/>" がこの順で現れ、here の訳の規則は 1 文字以上、'.' の規則は 0 文字から */
 });
 it.each([
-  { name: '語順の違う訳', line: '1\tここ<1>を</1>クリックして<k1/>を実行する。', ok: true },
-  { name: '印が足りない', line: '1\tここをクリック<k1/>', ok: false },
-  { name: '印の順が違う', line: '1\t<k1/>を<1>ここ</1>で', ok: false },
-  { name: 'リンクの訳が空', line: '1\tクリック<1></1>して<k1/>。', ok: false },
-])('readPagePieces: $name', ({ line, ok }) => {
-  /* ok のとき、返り値の長さは text トークンの数（4） */
+  { name: '語順の違う訳', text: 'ここ<1>を</1>クリックして<k1/>を実行する。', ok: true },
+  { name: '印が足りない', text: 'ここをクリック<k1/>', ok: false },
+  { name: '印の順が違う', text: '<k1/>を<1>ここ</1>で', ok: false },
+  { name: 'リンクの訳が空', text: 'クリック<1></1>して<k1/>。', ok: false },
+])('readPagePieces(rich): $name', ({ text, ok }) => {
+  /* ok のとき、返り値は ['ここ', 'を', 'クリックして', 'を実行する。']（text トークンの数 4） */
 });
-it('reads a batch in input order and fails only the broken unit', () => {
-  /* 3 単位、2 行目の番号が 3 → [pieces, undefined, undefined]。cut のとき改行のない最後の行は undefined */
+it('reads a batch line by line in input order', () => {
+  /* 3 単位 [[t('A')], [t('B')], [t('C')]]、応答 '1\t訳A\n3\t訳C\n' → [['訳A'], undefined, undefined]（2 行目の番号が 3、3 行目がない）。
+     cut のとき改行のない最後の行は undefined */
 });
 it('budgets markers and characters per unit', () => {
-  /* pageBatchMaxTokens([[t('Okay')]]) = 8 + 3 × 24 = 80。rich は印 2 つで +8 */
+  /* pageBatchMaxTokens([[t('Okay')]]) = 8 + 3 × 24 = 80（translationLimit('Okay') = 24）。rich は印 2 つで +8 */
 });
 it.each([
   { name: '入れ子が壊れている', tokens: [{ t: 'open', n: 1 }, t('a')], valid: false },
@@ -485,9 +419,9 @@ it('answers a page batch keeping every marker', async () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(extension-core): page batch line format with grammar-fixed inline markers"`
 
-### Task 4: 計測: ページの文での Gemma と PLaMo（bench:page）
+### Task 3: 計測: ページの文での Gemma と PLaMo（bench:page）
 
-ページの文での PLaMo の質は、まだ測っていない（llama-server.md の比較は、話し言葉の字幕と、チャットだけ）。ここで、既定の翻訳モデルと、印のある段落を PLaMo に送るかを決める。計測はコントローラーが、静かなホスト（5 分平均の負荷が 4 未満）で、`docs/llama-server.md` のサーバー（`--parallel 3`、PLaMo 2B を含む）に対して行う。Task 5 から Task 8 と並べて進めてよい。
+ページの文での PLaMo の質は、まだ測っていない（llama-server.md の比較は、話し言葉の字幕と、チャットだけ）。ここで、既定の翻訳モデルと、印のある段落を PLaMo に送るかを決める。計測はコントローラーが、静かなホスト（5 分平均の負荷が 4 未満）で、`docs/llama-server.md` のサーバー（`--parallel 3`、PLaMo 2B を含む）に対して行う。Task 4 から Task 7 と並べて進めてよい。
 
 **Files:**
 
@@ -497,7 +431,7 @@ it('answers a page batch keeping every marker', async () => {
   - 韓国語、スペイン語、中国語、インドネシア語を 4 つずつ（うち各 1 つは印のある段落）
   - 1 行は `{"id":"p-1","lang":"en","kind":"label"|"paragraph"|"rich","tokens":[…]}`
 - Modify: `packages/bench/package.json`（`bench:page`）、`packages/bench/README.md`
-- Modify: `docs/adoption.md`（新しい節「Page translation (Task 4)」）
+- Modify: `docs/adoption.md`（新しい節「Page translation (Task 3)」）
 
 **Interfaces:**
 
@@ -505,10 +439,10 @@ it('answers a page batch keeping every marker', async () => {
   - `pnpm --filter @chrome-toolbox/bench bench:page -- --server <url> --gemma <model> [--plamo <model>] [--set <file>] [--rounds 3] [--out <file>]`
   - 測るもの:
     - Gemma: 拡張と同じ形のバッチ（最大 6 単位、800 文字）を、`totalSlots - 1` の枠で順に送る。単位ごとの時間（そのバッチの時間）、失敗、出力トークン。
-    - PLaMo: 1 単位ずつ、枠 1 と 2 で同時に 2 件まで。`text` だけの単位はそのまま、印のある単位は `pageUnitSource` の文で送る。時間、失敗、印を正しく写した数（`readPagePieces` が読めた数）。
+    - PLaMo: 1 単位ずつ、枠 1 と 2 で同時に 2 件まで。要求は拡張と同じく subtitle Task 0 の `plamoTranslateRequest` で作る（`line` は `pageUnitSource(tokens).text`、`sourceLang: 'auto'`、`glossary: []`、`previous` は `Page: <タイトル>` と前の 2 単位、`slot` は 1 か 2、`maxTokensCap: PAGE_PLAMO_MAX_TOKENS`）。`--plamo` の名前が `PLAMO_TRANSLATE_MODEL` と違うときは、`model` だけを置き換える。応答は `parsePlamoLine` と `readPagePieces` で読む。時間、失敗、印を正しく写した数（`readPagePieces` が読めた数）。
     - 最初の画面: fixture の最初の 12 単位を、文書の順に、拡張と同じ送り方で訳し終えるまでの時間。`--rounds` 回の p50。
   - 結果: `bench-data/results/page-<時刻>.jsonl`（先頭は `{"type":"meta"}`。ほかのベンチと同じ）。訳を含むので gitignore の下にだけ置く。表を標準出力に出す。
-  - `page.test.ts`: 偽のサーバーで、バッチの形、PLaMo の要求の契約（system、grammar、response_format がない。`stop` がある）、最初の画面の時間の計算、印を写した数の数え方を確かめる。
+  - `page.test.ts`: 偽のサーバーで、バッチの形、PLaMo の要求の契約（system、grammar、response_format、`source_lang`、`glossary` がない。`stop` がある。`id_slot` は 1 か 2）、最初の画面の時間の計算、印を写した数の数え方を確かめる。
 
 - [ ] **Step 1: 失敗するテストを書く**（上の `page.test.ts`）
 - [ ] **Step 2: 失敗を確認する**
@@ -530,14 +464,14 @@ it('answers a page batch keeping every marker', async () => {
     - 印を正しく写した単位が 95% 以上
     - 印のある単位で、Gemma より悪いものが 25% 以下
   - 満たさなければ、既定は Gemma のままで、PLaMo は設定で選べる任意のモデルにする。印のある単位は Gemma に送る。
-  - 決めた値は、Task 8 の `PLAMO_TAKES_RICH` と `defaultPageSettings.translator` に入れる（Task 8 がまだなら、その実装者に渡す）。
+  - 決めた値は、Task 7 の `PLAMO_TAKES_RICH` と `defaultPageSettings.translator` に入れる（Task 7 がまだなら、その実装者に渡す）。
 - [ ] **Step 7: 記録する**
   - `docs/adoption.md` に、サーバー（llama.cpp のコミット、プリセット、`--parallel`）、モデルとリビジョン、日付、上の数字、規則と決定を書く。訳の本文は書かない。
 - [ ] **Step 8: Commit**
   - `git commit -m "feat(bench): page translation bench comparing Gemma batches with PLaMo per segment"`
-  - 決定を Task 8・Task 9 の後に入れる場合は、別に `git commit -m "docs(adoption): page translation model decision"`
+  - 決定を Task 7・Task 8 の後に入れる場合は、別に `git commit -m "docs(adoption): page translation model decision"`
 
-### Task 5: 段落の切り出し（content script）
+### Task 4: 段落の切り出し（content script）
 
 背景:
 
@@ -548,7 +482,7 @@ it('answers a page batch keeping every marker', async () => {
 
 - Create: `packages/page-translator/src/language.ts`、`test/unit/language.test.ts`
 - Create: `packages/page-translator/src/content/segment.ts`、`test/unit/segment.test.ts`
-- Create: `packages/page-translator/test/unit/fixtures/article.html`（自作の攻略 Wiki 風のページ。Task 12 の E2E も使う）
+- Create: `packages/page-translator/test/unit/fixtures/article.html`（自作の攻略 Wiki 風のページ。Task 11 の E2E も使う）
 
 **Interfaces:**
 
@@ -589,7 +523,7 @@ it.each([
   { text: '東京', hint: undefined, needs: true },
   { text: 'Q', hint: undefined, needs: false },
   { text: '42 / 100', hint: undefined, needs: false },
-  { text: 'https://wiki.example.gg/bosses', hint: undefined, needs: false },
+  { text: 'https://wiki.fixture.test/bosses', hint: undefined, needs: false },
   { text: '안녕하세요 여러분', hint: 'ja', needs: true },
 ])('needsPageTranslation($text, $hint)', ({ text, hint, needs }) => {
   /* ... */
@@ -649,7 +583,7 @@ it('scans 2,000 paragraphs in slices of at most sliceMs', async () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): split pages into paragraphs with inline markers, skipping code, forms and Japanese"`
 
-### Task 6: 書き込みと原文への復元、表示方法
+### Task 5: 書き込みと原文への復元、表示方法
 
 **Files:**
 
@@ -659,7 +593,7 @@ it('scans 2,000 paragraphs in slices of at most sliceMs', async () => {
 
 **Interfaces:**
 
-- Consumes: `Segment`（Task 5）
+- Consumes: `Segment`（Task 4）
 - Produces:
   - `DISPLAY_MODES = ['replace', 'pair'] as const`、`DisplayMode`（`src/protocol.ts` に置く）
   - `PAIR_TAG = 'pt-ja'`
@@ -736,22 +670,22 @@ it('restores detached nodes too, in slices of sliceNodes', () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): write translations into text nodes and restore the exact page"`
 
-### Task 7: 見えている段落から順に訳す（スケジューラー）
+### Task 6: 見えている段落から順に訳す（スケジューラー）
 
 **Files:**
 
 - Create: `packages/page-translator/src/content/scheduler.ts`、`test/unit/scheduler.test.ts`
-- Modify: `packages/page-translator/src/protocol.ts`（`TranslateRequest`、`TranslateReply`、`progressSchema`、`PROGRESS_PORT`。Task 8 が `page/translate` の経路にこの型を使う）
+- Modify: `packages/page-translator/src/protocol.ts`（`TranslateRequest`、`TranslateReply`、`progressSchema`、`PROGRESS_PORT`。Task 7 が `page/translate` の経路にこの型を使う）
 - Create: `packages/page-translator/test/unit/intersection.ts`（comment-assistant の `test/unit/intersection.ts` を写す）
 
 **Interfaces:**
 
-- Consumes: `createScanner`、`Segment`（Task 5）、`Writer`（Task 6）
+- Consumes: `createScanner`、`Segment`（Task 4）、`Writer`（Task 5）
 - Produces:
-  - `PROGRESS_PORT = 'page-progress'`（`src/protocol.ts`。Task 10 と Task 11 が使う）
+  - `PROGRESS_PORT = 'page-progress'`（`src/protocol.ts`。Task 9 と Task 10 が使う）
   - `PAGE_TIMING = { nearMargin: '50% 0px', mutationFlushMs: 300, retryMs: [5_000, 30_000], attempts: 3 } as const`
   - `PAGE_LIMITS = { batchUnits: 6, batchChars: 800, waiting: 400, observedBlocks: 5_000, tracked: 10_000, mutationRoots: 500, shadowRoots: 200, cache: 2_000 } as const`
-  - `TranslateRequest = { purpose: 'page' | 'selection'; units: { id: number; tokens: PageToken[] }[]; page: { title: string; site: string } }`（スケジューラーは常に `'page'`。`'selection'` は Task 10 の吹き出し）
+  - `TranslateRequest = { purpose: 'page' | 'selection'; units: { id: number; tokens: PageToken[] }[]; page: { title: string; site: string } }`（スケジューラーは常に `'page'`。`'selection'` は Task 9 の吹き出し）
   - `TranslateReply = { results: { id: number; pieces?: string[] }[]; translator: 'gemma' | 'plamo'; notice?: 'plamo_missing' }`
   - `Progress`（`src/protocol.ts` の `progressSchema`）: `{ state: 'idle' | 'on' | 'restoring' | 'restored'; mode: DisplayMode; found: number; done: number; waiting: number; failed: number; tracked: number; cached: number; limit: boolean; notice?: 'unreachable' | 'plamo_missing'; translator?: 'gemma' | 'plamo' }`
   - `createScheduler(options: { doc: Document; writer: Writer; translate: (request: TranslateRequest, signal: AbortSignal) => Promise<Result<TranslateReply>>; mode: () => DisplayMode; timers?: Timers; now?: () => number; onProgress: (progress: Progress) => void }): Scheduler`
@@ -833,21 +767,24 @@ it('ignores its own writes and pair hosts in the mutation records', async () => 
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): translate paragraphs as they come near the viewport, in the foreground only"`
 
-### Task 8: background の翻訳（Gemma のバッチ、PLaMo、枠、中断）
+### Task 7: background の翻訳（Gemma のバッチ、PLaMo、枠、中断）
 
 **Files:**
 
 - Create: `packages/page-translator/src/translator.ts`、`test/unit/translator.test.ts`
-- Create: `packages/page-translator/src/settings.ts`（この Task では `pageSettingsSchema` と `pageSettingsStore` だけ。サイトの関数は Task 9）、`test/unit/settings.test.ts`
-- Modify: `src/protocol.ts`（`page/translate`、`page/cancel` の経路。型は Task 7 のものに合わせる）、`src/runtime.ts`（経路と送り手の確認、`tabs.onRemoved`、設定の変更）
+- Create: `packages/page-translator/src/settings.ts`（この Task では `pageSettingsSchema` と `pageSettingsStore` だけ。サイトの関数は Task 8）、`test/unit/settings.test.ts`
+- Modify: `src/protocol.ts`（`page/translate`、`page/cancel` の経路。型は Task 6 のものに合わせる）、`src/runtime.ts`（経路と送り手の確認、`tabs.onRemoved`、設定の変更）
 
 **Interfaces:**
 
-- Consumes: `pageBatchPrompt`、`pageBatchMaxTokens`、`parsePageBatch`、`pageTokensValid`、`pageUnitSource`、`readPagePieces`、`pagePieceLimit`（Task 3）、`plamoRequest`、`plamoAccepts`、`plamoMaxTokens`、`parsePlamoText`（Task 2）
+- Consumes:
+  - Task 2 の `pageBatchPrompt`、`pageBatchMaxTokens`、`parsePageBatch`、`pageTokensValid`、`pageUnitSource`、`readPagePieces`、`PAGE_PLAMO_MAX_TOKENS`
+  - subtitle Task 0 の `plamoTranslateRequest`、`parsePlamoLine`、`PLAMO_TRANSLATE_MODEL`、`model_refused`（`tellRefusal` は `plamoTranslateRequest` が付ける）
 - Produces:
   - `src/settings.ts`:
-    - `pageSettingsSchema = z.strictObject({ v: z.literal(1), mode: z.enum(DISPLAY_MODES), translator: z.enum(['gemma', 'plamo']), plamoModel: z.string().check(z.minLength(1), z.maxLength(128)), always: z.array(…).check(z.maxLength(200)), never: z.array(…).check(z.maxLength(500)) })`
-    - `defaultPageSettings = { v: 1, mode: 'replace', translator: 'gemma', plamoModel: 'plamo-3-translate-2b', always: [], never: [] }`（`translator` は Task 4 の決定に従う）
+    - `pageSettingsSchema = z.strictObject({ v: z.literal(1), mode: z.enum(DISPLAY_MODES), translator: z.enum(['gemma', 'plamo']), always: z.array(…).check(z.maxLength(200)), never: z.array(…).check(z.maxLength(500)) })`
+      - PLaMo のモデル名は持たない。`PLAMO_TRANSLATE_MODEL` に送る（字幕と同じ。判断 P5）。
+    - `defaultPageSettings = { v: 1, mode: 'replace', translator: 'gemma', always: [], never: [] }`（`translator` は Task 3 の決定に従う）
     - `pageSettingsStore(area: StorageArea, key = 'page'): { load(): Promise<Result<PageSettings>>; save(settings: PageSettings): Promise<Result<PageSettings>> }`
     - 接続先と `models.translate` は、今までどおり extension-core の `settingsStore`（キー `settings`）に置く。共有のスキーマは変えない。
   - `src/protocol.ts`:
@@ -856,18 +793,26 @@ it('ignores its own writes and pair hosts in the mutation records', async () => 
   - `slotPlan(totalSlots: number | undefined): { gemma: number | undefined; plamo: readonly number[] }`
     - `undefined` → `{ gemma: undefined, plamo: [] }`（`id_slot` を付けない）
     - 1 → `{ gemma: 0, plamo: [0] }`、3 → `{ gemma: 2, plamo: [1, 2] }`、2 → `{ gemma: 1, plamo: [1] }`
-  - `PLAMO_TAKES_RICH: boolean`（Task 4 の決定。決まるまでは false）
+  - `PLAMO_TAKES_RICH: boolean`（Task 3 の決定。決まるまでは false）
   - `createPageTranslator(options: { fetch: Fetch; settings: SettingsStore; pageSettings: PageSettingsStore; timeoutMs?: number }): PageTranslator`
   - `PageTranslator`:
     - `translate(tabId: number, request: TranslateRequest): Promise<Result<TranslateReply>>`
       - `pageTokensValid` でない単位があれば `input_invalid`。
       - 同じタブ、同じ `purpose` の前の要求が進行中なら、それを中断する（タブと `purpose` ごとに `AbortController` は 1 つ。吹き出しの要求が、ページのバッチを止めることはない）。
-      - 翻訳モデルが `plamo` で、PLaMo が使えるとき: `plamoAccepts` で、`text` だけの単位（`PLAMO_TAKES_RICH` なら印のある単位も）を PLaMo に送る。`context` は `Page: <title>` と、同じ要求の中の前の 2 単位の原文。枠は `plan.plamo` の空いているもの、同時に `plan.plamo.length` 件まで。
-      - 残りと、PLaMo で失敗した単位を、1 つの Gemma のバッチにする（`plan.gemma`、`models.translate`）。
-      - PLaMo が `model_unavailable` → 設定が変わるまで PLaMo を使わず、`notice: 'plamo_missing'`。
-      - Gemma のバッチ自体の失敗（接続できない、時間切れ、待ちがいっぱい）は、要求全体の `Err` にする（content script が送り直す）。
+      - 翻訳モデルが `plamo` のとき（判断 P2、P4）:
+        1. PLaMo が載っているかを `models()` で確かめる。聞くのは、作ってから、または `reload()` の後の最初の要求の前に 1 回だけ。答えは `reload()` まで持つ。一覧に `PLAMO_TRANSLATE_MODEL` がなければ、PLaMo に送らず、すべての単位を Gemma のバッチにし、`notice: 'plamo_missing'` を付ける。`models()` が失敗したら答えを持たず、PLaMo に送る（次の要求の前にまた聞く）。
+        2. `text` だけの単位（`PLAMO_TAKES_RICH` なら印のある単位も）について、`plamoTranslateRequest({ line: pageUnitSource(tokens).text, sourceLang: 'auto', previous, glossary: [], slot, maxTokensCap: PAGE_PLAMO_MAX_TOKENS })` を作る。
+           - `previous`: `Page: <page.title>`（タイトルが空なら入れない）と、同じ要求の中で前にある 2 単位の `pageUnitSource(tokens).text` を、古い順に。
+           - `slot`: `plan.plamo` の空いている枠。同時に `plan.plamo.length` 件まで。`plan.plamo` が空（枠の数が分からない）なら `undefined` で、同時に 1 件。
+           - `input_invalid`（空の文、`<|plamo:` を含む文）なら、その単位は PLaMo に送らず Gemma のバッチに入れる。
+        3. `chat({ ...request, signal })` の結果:
+           - 成功 → `parsePlamoLine(reply, request.maxTokens, line)` で読み、`readPagePieces(text, tokens)` で単位の訳にする。どちらかが読めなければ、その単位を Gemma のバッチに入れる。
+           - `operation_cancelled` → 要求全体を `Err(operation_cancelled)` にする（Gemma にも送らない）。
+           - それ以外（`model_refused`、`network_failed`、`response_invalid`、`queue_full`）→ その単位を Gemma のバッチに入れる。`model_refused` でも、次の要求はまた PLaMo に送る。
+      - 残りと、PLaMo で訳せなかった単位を、1 つの Gemma のバッチにする（`plan.gemma`、`models.translate`）。
+      - Gemma のバッチ自体の失敗（接続できない、時間切れ、待ちがいっぱい）は、要求全体の `Err` にする（content script が送り直す）。Gemma の要求には `tellRefusal` を付けない（HTTP のエラーも `network_failed` で、送り直しの対象）。
     - `cancel(tabId: number, purpose?: 'page' | 'selection'): void`（`purpose` がなければ両方。`page/cancel` は `'page'`、タブを閉じたときは両方）
-    - `reload(): void`（設定が変わった。次の要求で読み直し、`/props` も聞き直す）
+    - `reload(): void`（設定が変わった。次の要求で読み直し、`/props` と `/v1/models` も聞き直す）
     - `dispose(): void`
   - 枠の数は、モデルごとに `props({ model })` で 1 回聞く。失敗したら、次にそのモデルのチャットが成功した後に、もう 1 回聞く（comment-assistant の `askSlots` と同じ）。
   - キューは Gemma（同時に 1、待ち 16）と PLaMo（同時に 2、待ち 16）の 2 つ。どちらもタイムアウトは 30 秒。
@@ -891,16 +836,28 @@ it('sends no id_slot until the server tells its slots', async () => {
   /* /props が 503 → id_slot なし。チャットの成功後にもう 1 回 /props */
 });
 it('sends plain units to PLaMo one by one on slots 1 and 2', async () => {
-  /* translator 'plamo'、3 単位 → PLaMo の要求 3 件、id_slot は 1 か 2、同時に 2 件まで、stop あり、system と grammar なし */
+  /* translator 'plamo'、/v1/models に 'plamo-3-translate-2b'、/props?model=plamo-3-translate-2b が total_slots 3、3 単位
+     → PLaMo の要求 3 件、model 'plamo-3-translate-2b'、id_slot は 1 か 2、同時に 2 件まで、stop あり、
+       system と grammar なし、chat_template_kwargs に 'source_lang' と 'glossary' のキーがない、max_tokens ≤ 816 */
+});
+it('sends PLaMo units one at a time without id_slot until the server tells its slots', async () => {
+  /* PLaMo の /props が 503 → id_slot なし、同時に 1 件 */
+});
+it('gives PLaMo the page title and the two units before it as context', async () => {
+  /* page.title 'Fixture Wiki'、単位 'Final Boss Guide'、'Phase two starts at half health.'、'Roll backward to dodge.'
+     → 1 件目の context は 'Page: Fixture Wiki'、3 件目は 'Page: Fixture Wiki\nFinal Boss Guide\nPhase two starts at half health.' */
 });
 it('sends rich units to Gemma while PLAMO_TAKES_RICH is false', async () => {
   /* ... */
 });
-it('falls back to one Gemma batch for the units PLaMo failed', async () => {
-  /* PLaMo が 2 行の応答 → その単位だけが Gemma のバッチに入る。結果の translator は 'plamo' */
+it('falls back to one Gemma batch for the units PLaMo could not translate', async () => {
+  /* 4 単位: 1 件目は 200、2 件目は HTTP 503（model_refused）、3 件目は finish_reason 'length'（response_invalid）、
+     4 件目は '<|plamo:' を含む（input_invalid。PLaMo には送らない）
+     → 2〜4 件目だけが 1 つの Gemma のバッチに入る。結果の translator は 'plamo'。次の要求は、また PLaMo に送る */
 });
 it('uses Gemma alone and reports plamo_missing when the router has no PLaMo', async () => {
-  /* Review Focus。withoutModel 相当の 400 → notice 'plamo_missing'、2 回目の要求は PLaMo に行かない */
+  /* Review Focus。/v1/models に PLaMo がない → notice 'plamo_missing'、PLaMo へのチャット 0 回。
+     2 回目の要求では /v1/models を聞かず、PLaMo にも送らない。reload() の後は聞き直す */
 });
 it('aborts the running page request of a tab on cancel and both on tab removal', async () => {
   /* page/cancel は selection の要求を止めない */
@@ -917,7 +874,7 @@ it.each([
   /* ... */
 });
 it('loads page settings with defaults and rejects an unknown translator', async () => {
-  /* ... */
+  /* 既定は { v: 1, mode: 'replace', translator: 'gemma', always: [], never: [] }。translator 'other' は input_invalid */
 });
 ```
 
@@ -931,7 +888,7 @@ it('loads page settings with defaults and rejects an unknown translator', async 
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): background translator with Gemma batches, optional PLaMo and fixed slots"`
 
-### Task 9: 制御（注入、右クリックメニュー、ショートカット、常に翻訳、翻訳しない）
+### Task 8: 制御（注入、右クリックメニュー、ショートカット、常に翻訳、翻訳しない）
 
 **Files:**
 
@@ -970,8 +927,8 @@ it('loads page settings with defaults and rejects an unknown translator', async 
 ```ts
 it.each([
   {
-    url: 'https://wiki.example.gg/a?b#c',
-    site: { host: 'wiki.example.gg', pattern: 'https://wiki.example.gg/*' },
+    url: 'https://wiki.fixture.test/a?b#c',
+    site: { host: 'wiki.fixture.test', pattern: 'https://wiki.fixture.test/*' },
   },
   {
     url: 'http://192.168.1.10:8080/',
@@ -1019,7 +976,7 @@ it('creates the context menu once on install', async () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): injection on demand, selection menu and shortcut, always and never sites"`
 
-### Task 10: content script の組み立て（セッション、ツールチップ、吹き出し、進み具合）
+### Task 9: content script の組み立て（セッション、ツールチップ、吹き出し、進み具合）
 
 **Files:**
 
@@ -1029,7 +986,7 @@ it('creates the context menu once on install', async () => {
 
 **Interfaces:**
 
-- Consumes: `createScheduler`（Task 7）、`createWriter`（Task 6）、`pageCommandSchema`、`claimPage`（Task 1）、`progressSchema`、`PROGRESS_PORT`（Task 7）、`pageSettingsStore`、`isAlways`、`isNever`（Task 8・Task 9）
+- Consumes: `createScheduler`（Task 6）、`createWriter`（Task 5）、`pageCommandSchema`、`claimPage`（Task 1）、`progressSchema`、`PROGRESS_PORT`（Task 6）、`pageSettingsStore`、`isAlways`、`isNever`（Task 7・Task 8）
 - Produces:
   - `OVERLAY_TAG = 'pt-overlay'`
   - `OVERLAY_TIMING = { hoverDelayMs: 300, tooltipChars: 300 } as const`
@@ -1112,7 +1069,7 @@ it('sends progress only while the popup port is connected', async () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): page session with hover originals, selection bubble and progress"`
 
-### Task 11: ポップアップと設定ページ
+### Task 10: ポップアップと設定ページ
 
 **Files:**
 
@@ -1156,7 +1113,9 @@ it('sends progress only while the popup port is connected', async () => {
   - 設定ページ:
     - `ConnectionPanel`（今までと同じ）
     - 「翻訳モデル」: `Gemma`／`PLaMo 3 Translate 2B（任意。Built with PLaMo）`
-    - 「Gemma のモデル名」（`settings.models.translate`）、「PLaMo のモデル名」（`plamoModel`）
+      - PLaMo を選んでいる間だけ、「Built with PLaMo」（英語のまま）とリンク「PLaMo Community License」（subtitle Task 0 の `PLAMO_LICENSE_URL`。`target="_blank"`、`rel="noreferrer"`）を出す。① のサイドパネルと同じ（判断 P14）。
+      - 案内: 「PLaMo は llama.cpp のサーバーに別に入れます（docs/llama-server.md）。モデル名は plamo-3-translate-2b です」
+    - 「Gemma のモデル名」（`settings.models.translate`）。PLaMo のモデル名の欄は置かない（判断 P5）。
     - 「翻訳しないサイト」: 1 行に 1 つのホスト名。保存で `normalizeHost`、だめな行は「ホスト名の形式が正しくありません: <行>」
     - 「常に翻訳するサイト」: 一覧と「外す」ボタン（`setAlways(site, false)`）
     - 遅れて読み込んだ設定は、触った欄を上書きしない（`edited`）。
@@ -1214,18 +1173,21 @@ it('rejects a malformed host with its line', async () => {
 - [ ] **Step 5: Commit**
   - `git commit -m "feat(page-translator): popup controls and options page for models and site lists"`
 
-### Task 12: E2E と負荷試験（soak）
+### Task 11: E2E と負荷試験（soak）
 
 **Files:**
 
-- Create: `packages/page-translator/test/browser/fixtures/article.ts`（Task 5 の `article.html` に、ページ自身のスクリプトを足して配る）
+- Create: `packages/page-translator/test/browser/fixtures/article.ts`（Task 4 の `article.html` に、ページ自身のスクリプトを足して配る）
   - ページのスクリプトは、テキストノードとリンクの参照を `window.fixtureRefs` に持つ。ボタンのクリックで `window.fixtureClicks` を増やす。
   - フォーム（`input`、`value` のない `option`、`textarea`、送信ボタン）は `https://wiki.fixture.test/submit` に POST する。
 - Create: `test/browser/fixtures/long.ts`（高さ 100px 固定の段落を 300 個。番号付きの自作の文）
 - Create: `test/browser/fixtures/feed.ts`（1 秒に 5 段落を下に足し、上の 200 個を超えた分を消す）
 - Create: `test/browser/layout.spec.ts`、`restore.spec.ts`、`scroll.spec.ts`、`front.spec.ts`、`overlay.spec.ts`、`popup.spec.ts`、`perf.spec.ts`、`soak.spec.ts`
 - Modify: `packages/page-translator/package.json`（`starter.soak: true`）
-- Modify: `packages/comment-assistant/test/unit/soak-marker.test.ts`（印のあるパッケージの一覧に page-translator を足す）
+- Modify: `packages/comment-assistant/test/unit/soak-marker.test.ts`（判断 P10）
+  - テストの名前は `'lists the packages that mark a browser soak in their manifest'`（subtitle Task 15 と同じ）。
+  - 期待する一覧に `'@chrome-toolbox/page-translator'` を名前の順に足す。subtitle Task 15 が入っていれば `['@chrome-toolbox/comment-assistant', '@chrome-toolbox/page-translator', '@chrome-toolbox/subtitle-translator']`、まだなら `['@chrome-toolbox/comment-assistant', '@chrome-toolbox/page-translator']`。後で rebase して衝突したら、両方を名前の順に残す。
+- Playwright Test には `test.each` がない。行ごとのテストは、行の配列を `for` で回して `test(...)` を呼ぶ（判断 P9。subtitle の判断 S23 と同じ）。
 
 **Interfaces:**
 
@@ -1247,9 +1209,11 @@ test('translation keeps layout, links and forms working', async () => {
   // - llama の要求は、すべて model 'gemma4-e4b'、id_slot はスタブの total_slots 2 なら 1
 });
 // restore.spec.ts
-test.each(['replace', 'pair'])('restoring gives back the identical DOM after %s', async (mode) => {
-  /* fingerprint(翻訳前) === fingerprint(原文に戻した後)。fixtureRefs は同じノードで、data は原文 */
-});
+for (const mode of ['replace', 'pair'] as const) {
+  test(`restoring gives back the identical DOM after ${mode}`, async () => {
+    /* fingerprint(翻訳前) === fingerprint(原文に戻した後)。fixtureRefs は同じノードで、data は原文 */
+  });
+}
 test('switching modes back and forth still restores the identical DOM', async () => {
   /* ... */
 });
@@ -1268,7 +1232,7 @@ test('a background tab asks nothing and resumes in front', async () => {
   /* 翻訳を始めてすぐ別のタブを前に → 5 秒間 llama.requests のチャットが増えない。戻すと続きを頼む */
 });
 // 「常に翻訳」のサイトを裏のタブで開いたときは、E2E でホスト権限を与えられない（Step 0 の C を除く）ので、
-// Task 7 の 'waits until visible before scanning a page opened in a background tab' で確かめる。
+// Task 6 の 'waits until visible before scanning a page opened in a background tab' で確かめる。
 // overlay.spec.ts
 test('hovering a translated paragraph shows its original', async () => {
   /* page.hover → pt-overlay の Shadow DOM に '原文：…'。外すと消える */
@@ -1305,7 +1269,7 @@ test('SOAK_MINUTES on a growing feed keeps heap and long tasks within budget', a
 - [ ] **Step 5: Commit**
   - `git commit -m "test(page-translator): layout, exact restore, viewport-only requests, front-only and soak budgets"`
 
-### Task 13: 文書、実機での確認、品質ゲート
+### Task 12: 文書、実機での確認、品質ゲート
 
 ここでの計測は、静かなホスト（5 分平均の負荷が 4 未満）で、コントローラーが行う。
 
@@ -1313,7 +1277,13 @@ test('SOAK_MINUTES on a growing feed keeps heap and long tasks within budget', a
 
 - Modify: `packages/page-translator/README.md`（状態、使い方、権限の説明、範囲外のもの、テスト）
 - Modify: `README.md`（拡張の一覧の状態）
-- Modify: `docs/llama-server.md`（§6 の表に、ページ翻訳の `models.translate` と `plamoModel`、設定ページの場所。PLaMo の節の「The extensions do not send requests to PLaMo yet」を直す）
+- Modify: `docs/llama-server.md`（判断 P12。subtitle Task 4・Task 8・Task 16 が変える行には触れない）
+  - §6: 表の行は変えない。「The side panel edits the URL. …」の段落のすぐ後に、1 段落を足す: ページ翻訳は設定ページで接続先と `models.translate` を変え、ポップアップから始める。翻訳モデル（`gemma` か `plamo`）はキー `page` の設定に持ち、`plamo` はプリセットの節の名前 `plamo-3-translate-2b` に送る（名前は変えられない）。Gemma は最後の枠（`--parallel 3` なら 2）、PLaMo は枠 1 と 2。
+  - 「PLaMo 3 Translate」の節: 最初の段落（"The extensions do not send requests to PLaMo yet. …"）は subtitle Task 8 が直すので触れない。箇条書き（"- With Gemma, Clef and the 2B resident …"）の後、"A client must:" の前に、ページ翻訳の段落を 1 つ足す: 設定ページで選べる（既定は Task 3 の決定）、1 段落ずつ枠 1 と 2 に送る、ルーターにないときと訳せなかった段落は Gemma で訳す、Task 3 の数字（`docs/adoption.md` へのリンク）。
+- Modify: `docs/superpowers/specs/2026-10-28-chrome-ai-extensions-design.md`（判断 P13。① の改訂で入った行を、③ にも広げる）
+  - §4 の図の `plamo-3-translate-2b` の行: 「任意。①の字幕と③のページの翻訳」
+  - §4 の枠の段落: 「③ のページ翻訳で PLaMo を選んだときは、PLaMo の枠 1 と 2 に送る」を足す。
+  - §5 の LLM クライアント: `model_refused` と PLaMo の要求の組み立てを ③ も使うと書く。
 - Modify: `.agents/skills/extension/SKILL.md`（`bench:page` と、ページ翻訳の枠）
 - Modify: `docs/adoption.md`（Step 2 の数字）
 
@@ -1325,13 +1295,13 @@ test('SOAK_MINUTES on a growing feed keeps heap and long tasks within budget', a
   - 字幕との同時: `bench:slots -- --model gemma4-e4b --comment-streams 1` を流しながら、長いページを訳して最後までスクロールする。字幕の p50 と p95 を、ページ翻訳なしのときと比べる。
   - レイアウト: 公開の英語のページを 5 種類（Wiki、ブログ、技術文書、ニュース、掲示板）訳し、崩れ、リンク、フォーム、原文に戻した後を目で確かめる。記録は種類ごとの可否と気づいた点だけ。URL、本文、訳は書かない。
 - [ ] **Step 3: 文書を直す**
-  - `docs/adoption.md`: Step 2 の数字と、Task 4 の決定が実際の使い方で保てたか。
+  - `docs/adoption.md`: Step 2 の数字と、Task 3 の決定が実際の使い方で保てたか。
   - README: 状態を「使える」にする。権限（インストール時はサイトへのアクセスなし、常に翻訳のサイトだけ）、範囲外（iframe、閉じた Shadow DOM、属性）、PLaMo のライセンスの注意（`docs/llama-server.md` へのリンク）を書く。
 - [ ] **Step 4: 長時間版の負荷試験（コントローラー）**
   - Run: `SOAK_MINUTES=120 pnpm --filter @chrome-toolbox/page-translator test:e2e -- soak`
   - Expected: PASS。結果を `docs/adoption.md` に記録する。
 - [ ] **Step 5: 品質ゲートを通す**
-  - Run: `pnpm gate:pre-pr -- --base <分岐元 SHA>`
+  - Run: `pnpm gate:pre-pr -- --base $(git merge-base HEAD feat/subtitle-translator)`（この PR の base は ① のブランチ）
   - Expected: page-translator、extension-core、comment-assistant、bench、tools の項目がすべて pass する。
 - [ ] **Step 6: Commit**
   - `git commit -m "docs(page-translator): usage, permissions and live measurements"`
