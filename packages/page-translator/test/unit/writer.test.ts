@@ -666,6 +666,49 @@ describe('createWriter', () => {
     expect(paragraphs.map((p) => p.textContent)).toEqual(paragraphs.map((_, i) => line(i)));
     expect(clock.runNext()).toBe(false);
   });
+
+  it('gives the translation of a paragraph in a button, whose text pair mode leaves alone', () => {
+    const button = must(
+      mount('<button type="button"><span>Post</span> the comment</button>').firstElementChild,
+    );
+    const writer = createWriter(document);
+    expect(writer.write(only(button), ['投稿', 'コメントを'], 'pair')).toBe(true);
+    expect(button.textContent).toBe('Post the comment');
+    expect(boxesIn(button)).toEqual([]);
+    // Joined in token order, from the block or from an element inside the paragraph.
+    expect(writer.translationText(button)).toBe('投稿コメントを');
+    expect(writer.translationText(must(button.querySelector('span')))).toBe('投稿コメントを');
+  });
+
+  it('gives the translation of replaced paragraphs, joined as the original text is', () => {
+    const root = mount(
+      '<p id="roll">Roll <a href="#roll">backward</a> to dodge</p>' +
+        '<div id="note">Patch notes:<br>Version 1.3 lowered her health.</div>',
+    );
+    const roll = must(root.querySelector('#roll'));
+    const note = must(root.querySelector('#note'));
+    const writer = createWriter(document);
+    expect(writer.write(only(roll), ['後ろに', '転がって', '避ける'], 'replace')).toBe(true);
+    const [notes, version] = segmentsOf(note, undefined, ids());
+    expect(writer.write(must(notes), ['パッチノート：'], 'replace')).toBe(true);
+    expect(writer.write(must(version), ['バージョン 1.3 で体力が下がった。'], 'replace')).toBe(
+      true,
+    );
+    expect(writer.translationText(roll)).toBe('後ろに転がって避ける');
+    expect(writer.translationText(must(roll.querySelector('a')))).toBe('後ろに転がって避ける');
+    expect(writer.translationText(note)).toBe('パッチノート：\nバージョン 1.3 で体力が下がった。');
+  });
+
+  it('gives no translation for an element outside any translated paragraph', () => {
+    const root = mount('<p id="done">Save the file</p><p id="other">Nothing was written here</p>');
+    const done = must(root.querySelector('#done'));
+    const writer = createWriter(document);
+    expect(writer.write(only(done), ['ファイルを保存'], 'replace')).toBe(true);
+    expect(writer.translationText(must(root.querySelector('#other')))).toBeUndefined();
+    expect(writer.translationText(root)).toBeUndefined();
+    writer.restore({ sliced: false });
+    expect(writer.translationText(done)).toBeUndefined();
+  });
 });
 
 describe('mapOffset', () => {

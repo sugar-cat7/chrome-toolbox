@@ -97,6 +97,13 @@ export type Writer = {
   /** The original text of the translated paragraphs of the block `element`, for a tooltip. */
   originalText(element: Element): string | undefined;
   /**
+   * The translation this writer holds for the paragraph holding `element` (see `segmentOf`), for
+   * a tooltip where no box shows it (P26): the pieces of each translated paragraph of that block
+   * in token order, joined as `originalText` joins the originals (a line between paragraphs, up
+   * to 300 characters), the segments one paragraph fell back to without a space.
+   */
+  translationText(element: Element): string | undefined;
+  /**
    * The translated paragraph holding `node`: one of its text nodes, an element inside it, or its
    * block (then the block's first translated paragraph).
    */
@@ -453,6 +460,43 @@ export function createWriter(
       return nodes.length + 1;
     };
 
+  /** The paragraph holding `node` (see `Writer.segmentOf`). */
+  function paragraphOf(node: Node): Paragraph | undefined {
+    if (isText(node)) {
+      const entry = records.texts.get(node);
+      if (entry !== undefined && !entry.paragraph.retired) return entry.paragraph;
+    }
+    let below: Node | undefined;
+    for (let at: Node | null = node; at !== null; at = upOf(at)) {
+      const found = isElement(at) ? paragraphAt(at, below) : undefined;
+      if (found !== undefined) return found;
+      below = at;
+    }
+    return undefined;
+  }
+
+  /**
+   * The text of the translated paragraphs of `block` in document order, one line each, up to
+   * `ORIGINAL_CHARS`: `textOf` of each, and `within` between the segments one paragraph fell
+   * back to (they share its last node).
+   */
+  function joined(
+    block: Element,
+    textOf: (paragraph: Paragraph) => string,
+    within: string,
+  ): string | undefined {
+    const paragraphs = inOrder(records.byBlock.get(block) ?? []);
+    if (paragraphs.length === 0) return undefined;
+    let text = '';
+    let last: ChildNode | undefined;
+    for (const paragraph of paragraphs) {
+      if (last !== undefined) text += paragraph.segment.last === last ? within : '\n';
+      text += textOf(paragraph);
+      last = paragraph.segment.last;
+    }
+    return cut(text, ORIGINAL_CHARS);
+  }
+
   /** The paragraph of `block` that holds `child` (one of its children), or its first one. */
   function paragraphAt(block: Element, child: Node | undefined): Paragraph | undefined {
     const paragraphs = inOrder(records.byBlock.get(block) ?? []);
@@ -605,33 +649,16 @@ export function createWriter(
       return 'page';
     },
 
-    originalText(element) {
-      const paragraphs = inOrder(records.byBlock.get(element) ?? []);
-      if (paragraphs.length === 0) return undefined;
-      let text = '';
-      let last: ChildNode | undefined;
-      for (const paragraph of paragraphs) {
-        // The segments one paragraph fell back to share its last node: one line.
-        if (last !== undefined) text += paragraph.segment.last === last ? ' ' : '\n';
-        text += originalOf(paragraph);
-        last = paragraph.segment.last;
-      }
-      return cut(text, ORIGINAL_CHARS);
+    originalText: (element) => joined(element, originalOf, ' '),
+
+    translationText(element) {
+      const block = paragraphOf(element)?.segment.block;
+      return block === undefined
+        ? undefined
+        : joined(block, (paragraph) => paragraph.translation, '');
     },
 
-    segmentOf(node) {
-      if (isText(node)) {
-        const entry = records.texts.get(node);
-        if (entry !== undefined && !entry.paragraph.retired) return entry.paragraph.segment;
-      }
-      let below: Node | undefined;
-      for (let at: Node | null = node; at !== null; at = upOf(at)) {
-        const found = isElement(at) ? paragraphAt(at, below) : undefined;
-        if (found !== undefined) return found.segment;
-        below = at;
-      }
-      return undefined;
-    },
+    segmentOf: (node) => paragraphOf(node)?.segment,
 
     size: () => live().length,
   };
