@@ -8,6 +8,8 @@
 
 **改訂（2026-11-06、③ page-translator との調整）:** ③ page-translator の計画（ブランチ `feat/page-translator`）も、extension-core に同じもの（止める文字列、モデルがないときのエラー、PLaMo の要求の組み立て、スタブ）を別の名前で足そうとしていた。共有する部分を 1 つの形にそろえ、Task 8 から新しい **Task 0** に分けた。Task 0 は Task 1 より前に行い、Task 1〜7 には依らない。③ のブランチは Task 0 が入った後にこのブランチの上に積み、③ の PR はこの計画の PR の上に積む。Task 1〜16 の番号は変えていない。Task 8 には字幕の側の使い方（1 行の翻訳、Gemma への切り替え、キャッシュのキー、文書）だけが残る。判断は Ruling S24〜。
 
+**改訂（2026-11-06、Task 4 の計測の後）:** Task 4 の計測で、投影器は BF16 に決まった。MTP を有効にした枠 0 は、コメント 2 本の負荷の下で字幕の目標を外れ、1 本なら収まった。ユーザーの決定（「字幕中はコメントが譲る」）に合わせて **Task 17**（comment-assistant が、字幕が枠 0 を使っている間はバッチを 1 本ずつにする）を足した。Task 4 の後なら、いつ行ってもよい。あわせて、決まった値を Global Constraints に書き、1,500 ms で機械的に切った音声で ASR が失敗した結果を Task 11（VAD の強制の区切り）と Task 12 に反映した。判断は Ruling S37〜。
+
 **Goal:** YouTube の動画と配信で、話されている言語にかかわらず、日本語の字幕を映像の上に出す。表示は「日本語のみ／原語と日本語／原語のみ／オフ」の 4 つで、プレイヤーの上のボタン、ショートカット、サイドパネルからすぐ切り替えられる。字幕トラックのあるアーカイブは、そのトラックを先読みして訳す。ないとき（ライブを含む）は、タブの音声を llama.cpp の音声入力で文字起こしし、音声の終わりから p50 2 秒以内に日本語を出す。訳すモデルは Gemma（既定）で、サイドパネルで PLaMo 3 Translate 2B も選べる。
 
 **Architecture:**
@@ -82,10 +84,10 @@
   - 言語の判別は、この出力の `<lang>` から得る。確からしさの値は使わない。
 - 投影器（mmproj。音声と画像の入力に使う）:
   - 音声認識には Gemma の投影器が要る。R61 で既定のプリセットから外してある。
-  - 字幕を使う人は、`models.ini` の `[gemma4-e4b]` で `mmproj = …` の行を有効にし、サーバーを再起動する（`docs/llama-server.md` §3）。どのファイルを勧めるかは Task 4 で決める。
+  - 字幕を使う人は、`models.ini` の `[gemma4-e4b]` で `mmproj = …` の行を有効にし、サーバーを再起動する（`docs/llama-server.md` §3）。勧めるのは BF16（Task 4 で決めた）。
   - メモリ:
-    - BF16（Google の QAT リポジトリの `gemma-4-E4B-it-mmproj.gguf`）は、945 MiB がプロセスのメモリに読み込まれる。Gemma の常駐メモリは約 1.06 GB 増えた（2026-11-02 の実測）。
-    - Q8_0（ggml-org の `mmproj-gemma-4-E4B-it-Q8_0.gguf`、559,874,816 バイト）は Task 4 で比べる。
+    - BF16（Google の QAT リポジトリの `gemma-4-E4B-it-mmproj.gguf`）は、945 MiB がプロセスのメモリに読み込まれる。音声認識を使った後の Gemma のプロセスの footprint は 1.65〜1.78 GB で、投影器なし（0.43 GB）より約 1.2〜1.4 GB 多い（2026-11-02 と 2026-11-06 の実測）。
+    - Q8_0（ggml-org の `mmproj-gemma-4-E4B-it-Q8_0.gguf`、559,874,816 バイト）は、どの言語でも精度が BF16 と同じで、footprint は 0.4〜0.5 GB 少なかった。ただし p50 が BF16 の 1.04〜1.17 倍で、Task 4 の決め方（1.05 倍以内）を満たさなかったので勧めない。
   - 投影器のないサーバーの応答（llama.cpp `620d222` のソースで確認）:
     - `GET /props?model=<name>` の `modalities.audio` が `false` になる。
     - 音声つきのリクエストには HTTP 400 を返す。本文は `"audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj"`。
@@ -101,7 +103,12 @@
     - 字幕トラックの経路の表示のずれ ≤ 200 ms
   - MTP（`spec-type = draft-mtp`）について:
     - サーバー全体の設定で、リクエストごとには切れない。`620d222` の `server-schema.cpp` では、speculative のリクエスト引数が `#if 0` で無効になっている。
-    - 字幕の翻訳だけを測った p95 は、コメントの負荷の下で 1.25 s から 1.8 s に上がった。ASR を含めた値を Task 4 で測る。
+    - 字幕の翻訳だけを測った p95 は、コメントの負荷の下で 1.25 s から 1.8 s に上がった。
+    - ASR を含めた値（Task 4、2026-11-06、合成音声）: コメント 2 本の負荷の下では、日本語の p95 が MTP ありで 3.78〜4.70 s、なしで 3.38〜3.46 s で、どちらも目標を外れた。1 本なら、MTP ありで 1.86〜2.30 s に収まった。
+    - ユーザーの決定（2026-11-06「字幕中はコメントが譲る」）: MTP は残す。字幕が枠 0 を使っている間、comment-assistant はバッチを 2 本ではなく 1 本ずつにする（Task 17）。
+      - 拡張どうしはメッセージを送り合わない。comment-assistant が llama-server の `GET /slots?model=<name>` で枠 0 の `is_processing` を見る。
+  - ASR に送る区切りは、無音で閉じる。長い発話を切るときも、決まった長さではなく、いちばん静かなところで切る（Task 11）。
+    - Task 4 で 1,500 ms ごとに機械的に切った音声では、ko-3、zh-1、zh-3 が毎回 `response_invalid` になった。音節の途中で切れた音声で、モデルが同じ語を繰り返し、文字起こしが `asrTextLimit` に達したため。丸ごとの音声では一度も失敗しなかった。
   - 追いつかない分は捨て、待ちを溜めない。
     - ASR の待ちは 2 件まで。超えたら古いものを捨てる。
     - 翻訳の待ちは 2 文まで。同じ文の待ちは、新しい版に置き換える。
@@ -191,6 +198,8 @@
 - 日本語の音声 → 翻訳を呼ばない（Task 12 でテスト）。
 - アーカイブでシークや早送りをした → 先読みを新しい位置から組み直す（Task 7 でテスト）。
 - 無音や BGM だけの長い区間 → 区切りを出さず、ASR を呼ばず、バッファも伸びない（Task 11 でテスト）。
+- 1.5 秒を超えて話し続ける → 強制の区切りは、最後の 500 ms のうちいちばん静かなフレームで切り、切った後ろの音は次の区切りに入る。音声は失われない（Task 11 でテスト）。
+- 字幕が枠 0 を使っている → comment-assistant は、コメントの枠に同時に 1 本しか送らない。枠 0 を処理中と最後に見てから 15 秒たてば、2 本に戻る。`/slots` が答えないサーバーでは、今までどおり 2 本（Task 17 でテスト）。
 - 取得中にタブを閉じた、サイトを離れた、別のタブで始めた → MediaStream の track、AudioContext、offscreen をすべて解放する（Task 13・Task 15 でテスト）。
 - 取得中に service worker が止まって再び起動した → 取得とライブの処理は続き、止める条件も効く（Task 13 でテスト）。
 - 長時間の視聴 → ヒープのデータ部分が 1.10 倍以内（Task 15 でテスト）。
@@ -771,6 +780,8 @@ it('counts silent rows and language accuracy with the line format', async () => 
 - BF16 のファイル（0.99 GB）は、945 MiB がプロセスのメモリに読み込まれる。
 - ggml-org の Q8_0 は、QAT でない元のモデルから変換したもの。QAT のモデルと組み合わせて精度が保てるかは、測るまで分からない。
 - MTP を使うと、字幕の翻訳だけの p95 がコメントの負荷の下で 1.25 s から 1.8 s に上がった。ASR が加わると、3 s を超えるおそれがある。
+
+結果（2026-11-06、`docs/adoption.md` の「Speech recognition and slot 0」）: 投影器は BF16。枠 0 は、コメント 2 本の負荷の下で MTP の有無にかかわらず目標を外れ、1 本なら MTP ありで収まった。ユーザーの決定で MTP を残し、コメントが譲る（Task 17）。1,500 ms で機械的に切った音声の失敗は、Task 11 と Task 12 に反映した。
 
 **Files:**
 
@@ -1568,7 +1579,7 @@ it('refuses subs/display from another site with sender_forbidden', async () => {
   - 出力は使い回すバッファの `subarray`。128 フレームごとの呼び出しで新しい配列を作らない。
 - `downmix(channels: readonly Float32Array[], out: Float32Array): Float32Array`
 - `createVad(options: VadOptions): Vad`
-  - `VadOptions = { frameMs: 20; hangoverMs: 300; minSegmentMs: 300; maxSegmentMs: 1500; preRollMs: 100; floorWindowMs: 2000; floorRatio: 3; minRms: 0.003 }`
+  - `VadOptions = { frameMs: 20; hangoverMs: 300; minSegmentMs: 300; maxSegmentMs: 1500; cutSearchMs: 500; preRollMs: 100; floorWindowMs: 2000; floorRatio: 3; minRms: 0.003 }`
   - `Vad = { push(frame: Float32Array /* 320 サンプル */): Segment | undefined; flush(): Segment | undefined; reset(): void }`
   - `Segment = Readonly<{ pcm: Int16Array; durationMs: number; trailingSilenceMs: number; gapBeforeMs: number }>`
     - `trailingSilenceMs`: 無音で閉じた区切りは 300、長さで切った区切りは 0。offscreen は「受け取った時刻 − `trailingSilenceMs`」を発話の終わりとする。
@@ -1576,8 +1587,11 @@ it('refuses subs/display from another site with sender_forbidden', async () => {
   - 発話の判定: フレームの RMS が max(`minRms`, 下限 × `floorRatio`) を超えたら発話。下限は、直近 2,000 ms のフレームの RMS の最小値（100 個の固定長リング）。
   - 区切り:
     - 発話の後に `hangoverMs` の無音が続いたら閉じる。後ろの無音は含めない。
-    - 発話が `maxSegmentMs` に達したら閉じ、続きは次の区切りにする。
-    - 発話の始まりの前の `preRollMs` 分を先頭に含める。
+    - 区切りが `maxSegmentMs` に達したら、強制で閉じる。切るのは、区切りの最後の `cutSearchMs`（25 フレーム）のうち、RMS がいちばん小さいフレームの後ろ。同じ値なら、後ろのフレームにする。
+      - そのフレームより後ろの音（最大 480 ms）は捨てず、次の区切りの先頭にする。固定長のバッファの中で前に詰め、新しい配列は作らない。
+      - 強制の区切りの長さは 1,020〜1,500 ms になる。
+      - 理由（Task 4、2026-11-06、Global Constraints）: 1,500 ms ごとに機械的に切った音声では、音節の途中で切れた音でモデルが同じ語を繰り返し、ko-3、zh-1、zh-3 が毎回 `response_invalid`（文字起こしが `asrTextLimit` に達した）になった。丸ごとの音声では一度も失敗しなかった。
+    - 発話の始まりの前の `preRollMs` 分を先頭に含める。強制の区切りの続きには付けない。
     - `minSegmentMs` 未満の区切りは捨てる。
   - バッファはすべて最初に確保した固定長で、無音の間も伸びない。
     - 区切りのバッファ: (1,500 + 100) ms × 16 サンプル
@@ -1608,9 +1622,18 @@ it.each([
     segments: [700],
   },
   {
-    name: '1.5 秒で区切る',
-    pattern: ['silence:200', 'speech:3200', 'silence:400'],
-    segments: [1500, 1500, 300],
+    // 前置き 100 + 発話 1,300 + 静かな 20 で 1,420。続きも同じ。最後は 460
+    name: '1.5 秒を超える発話は、最後の 500 ms でいちばん静かなフレームの後ろで切る',
+    pattern: [
+      'silence:200',
+      'speech:1300',
+      'silence:20',
+      'speech:1400',
+      'silence:20',
+      'speech:460',
+      'silence:400',
+    ],
+    segments: [1420, 1420, 460],
   },
   {
     name: '短すぎる音は捨てる',
@@ -1621,6 +1644,9 @@ it.each([
   { name: '一定の大きさの BGM だけ', pattern: ['tone:60000'], segments: [] },
 ])('vad: $name', ({ pattern, segments }) => {
   /* 区切りの長さ（ms）の配列。speech はノイズ、silence は RMS 0.0005 のノイズ */
+});
+it('cuts a forced segment after 1,000 ms at the latest and loses no audio', () => {
+  /* ['silence:200', 'speech:1800', 'silence:400'] → 区切り 2 つ。1 つ目は 1,020〜1,500 ms、合計は 1,900 ms（前置き 100 + 発話 1,800） */
 });
 it('reports trailing silence and the gap before each segment', () => {
   /* 無音で閉じた区切り 300 / 0、長さで切った続き 0 */
@@ -1656,6 +1682,7 @@ it('flush closes the open segment when it is long enough', () => {
 
 - Consumes: Task 3 の `AsrClient`、Task 8 の `LineInput`（`translate` が受け取る形）、Task 9 の `LiveLine`、Task 11 の `Segment`
   - ライブの処理はプロンプトを組まない。訳は `translate` に任せ、Task 13 が offscreen で Task 8 の `createLineTranslator` をつなぐ（判断 S22）。
+  - Task 11 の区切りは、無音か、最後の 500 ms でいちばん静かなフレームで閉じる。Task 4 で、1,500 ms ごとに機械的に切った音声は ASR が繰り返しに陥って `response_invalid` になった（Global Constraints）。静かなところで切っても失敗は起こりうるので、ASR の失敗（`response_invalid` を含む）は `failed` に数え、その区切りの行は出さずに次の区切りへ進む。
 - Produces:
   - `LIVE_LIMITS`:
 
@@ -1749,6 +1776,9 @@ it('replaces a waiting translation of the same sentence with the newer text', as
 });
 it('away drops waiting jobs and aborts the running one; pause lets them finish', async () => {
   /* signal.aborted、dropped */
+});
+it('counts a failed recognition and goes on with the next segment', async () => {
+  /* 1 つ目の transcribe が response_invalid → failed 1、行は出ない。2 つ目の区切りの行は出る */
 });
 it('counts silent segments without emitting a line', async () => {
   /* 'en\t' */
@@ -2236,6 +2266,7 @@ test('SOAK_MINUTES of audio subtitles keeps heap and long tasks within budget', 
     - Chromium の CPU
     - 視聴ページと offscreen のヒープ（開始時と終了時）
     - (e) では、comment-assistant の p50 を、字幕なしのときと比べる
+    - (e) では、Task 17 が入っていれば、字幕を出している間の comment-assistant のリクエストが、コメントの枠に同時に 1 本だけであることも確かめる（llama-server のログの `id_slot` と時刻）
   - 精度（抜き取りで採点する。データはローカルの `bench-data/live/` だけに置く）:
     - 配信ごとに、続けて出た 20 行を記録する。
     - 文字起こし: 正しい／小さな誤り／誤り
@@ -2246,13 +2277,13 @@ test('SOAK_MINUTES of audio subtitles keeps heap and long tasks within budget', 
 - [ ] **Step 4: 目標に届かないとき**
   - 目標: 原語 p50 ≤ 1.0 s、日本語 p50 ≤ 2.0 s、日本語 p95 ≤ 3.0 s、字幕トラックのずれ ≤ 200 ms。
   - spec §6 の順で直して、測り直す。
-    1. 区切りを短くする（`maxSegmentMs` 1,500 → 1,000）
+    1. 区切りを短くする（`maxSegmentMs` 1,500 → 1,000）。強制の区切りが増える。Task 4 では 1,500 ms で機械的に切った音声が `response_invalid` になったので、誤り率と失敗の数も測る。
     2. 訳を PLaMo 3 Translate 2B にする（Task 8 の設定。ユーザーがライセンスを受け入れて、サーバーに入れている場合だけ）。`gemma4-e2b` は 2026-10-28 の実測で `gemma4-e4b` と生成の速さが変わらなかったので、小さい Gemma には替えない（判断 S9）。
     3. 原語だけを先に出す
   - 精度が強制の区切りで落ちる場合（Task 4 の 1,500 ms 区切りの誤り率と比べる）は、遅延とのかね合いになるので、数字を添えてユーザーに相談する。
 - [ ] **Step 5: 文書を直す**
   - `docs/adoption.md`: Step 3 の数字を記録する。配信者の名前、動画の ID、文字起こしの本文、訳の本文（Gemma も PLaMo も）は書かない。
-  - `docs/llama-server.md`: 記載のプリセットで、投影器の行を既定で有効にする（R61「字幕を出すまで外す」の解除）。「コメントだけを使うならこの行を外すと、メモリが ○○ 減る」（Task 4 の値）と添える。
+  - `docs/llama-server.md`: 記載のプリセットで、投影器の行を既定で有効にする（R61「字幕を出すまで外す」の解除）。「コメントだけを使うならこの行を外すと、メモリが ○○ 減る」（Task 4 の値: footprint で約 1.2〜1.4 GB）と添える。
   - README: 状態を「使える」に直し、計測の結果へのリンクを足す。
 - [ ] **Step 6: 長時間版の負荷試験（コントローラー）**
   - Run: `SOAK_MINUTES=120 pnpm --filter @chrome-toolbox/subtitle-translator test:e2e -- soak`
@@ -2262,3 +2293,241 @@ test('SOAK_MINUTES of audio subtitles keeps heap and long tasks within budget', 
   - Expected: subtitle-translator、extension-core、comment-assistant、tools の項目がすべて pass する。
 - [ ] **Step 8: Commit**
   - `git commit -m "docs(subtitle-translator): live latency, accuracy and load measurements"`
+
+### Task 17: コメントが字幕に譲る（comment-assistant と extension-core。Task 4 の後ならいつでもよい）
+
+背景:
+
+- Task 4（2026-11-06、`docs/adoption.md` の「Speech recognition and slot 0」）: 枠 0 で ASR と翻訳を流すと、コメント 2 本の負荷の下では、MTP の有無にかかわらず日本語の p95 が 3 s を超えた（MTP あり 3.78〜4.70 s、なし 3.38〜3.46 s）。1 本なら、MTP ありで 1.86〜2.30 s に収まった。コメントも、MTP なしの 2 本（60 s で 14 バッチ）より多く処理できた（18〜19 バッチ）。
+- ユーザーの決定（2026-11-06「字幕中はコメントが譲る」）: MTP は残す。字幕が枠 0 を使っている間、comment-assistant はバッチを 2 本ではなく 1 本ずつ送る。
+- 拡張どうしはメッセージを送り合わない（spec §4）。comment-assistant が llama-server に枠 0 の状態を尋ねる。ルーターは `GET /slots?model=<name>` に、枠ごとの `{ id, is_processing, … }` の配列を返す（2026-11-06 にコントローラーが確かめた）。`/slots` を出さないサーバー（`--no-slots` など）は、失敗として扱う。
+- 依存するのは、Task 1 の後の `llm.ts` とスタブだけ（どちらも済み）。subtitle-translator のコードには触らないので、Task 5〜16 と並べて進めてよい。
+
+**Files:**
+
+- Modify: `packages/extension-core/src/llm.ts`（`slots`、`SlotState`）、`src/llm.test.ts`、`src/index.ts`（`SlotState` を export）
+- Modify: `packages/extension-core/testing/llama-stub.ts`（`GET /slots`、`withSlots`）、`testing/llama-stub.test.ts`
+- Modify: `packages/extension-core/testing/playwright.ts`（`withSlots` を export の並びに足す）
+  - Task 15 も同じ並びに `offscreenTarget`、`triggerAction` を足す。名前は重ならない。後から入る方が並びに合わせる。
+- Create: `packages/comment-assistant/src/subtitle-yield.ts`
+- Modify: `packages/comment-assistant/src/pipeline.ts`、`src/runtime.ts`
+- Test: `packages/comment-assistant/test/unit/subtitle-yield.test.ts`（新規）、`test/unit/pipeline.test.ts`、`test/browser/comments.spec.ts`
+- Modify（文書）:
+  - `packages/comment-assistant/README.md`: Status の「Slots:」の項に次の 1 文を足す。Layout の表に `src/subtitle-yield.ts` を足す。
+    - "While llama-server reported slot 0 (the subtitles') processing within the last 15 s (`GET /slots?model=`, asked at most every 1.5 s and only when a second request would start), requests on the comment slots run one at a time; a server that does not answer `/slots` keeps the spare slots."
+  - `packages/extension-core/README.md`: `src/llm.ts` の行に `slots` を、`testing/llama-stub.ts` の行に `/slots`（既定は 2 枠とも空き）と `withSlots` を足す。
+  - `docs/llama-server.md`: 「Why these values」の MTP の項の "is to run one batch at a time instead of two" を "runs one batch at a time instead of two" にする。
+  - `docs/adoption.md`: 「Speech recognition and slot 0」の最後の段落の "is to check" を "checks" にする。
+  - spec の §4〜§7 と §12 は、計画の改訂（2026-11-06）で書いた。下の値を変えたときは、§7 の行も直す。
+
+**Interfaces:**
+
+- extension-core `src/llm.ts`:
+  - `type SlotState = Readonly<{ id: number; processing: boolean }>`
+  - `LlamaClient.slots(this: void, options?: { model?: string; signal?: AbortSignal }): Promise<Result<readonly SlotState[]>>`
+    - `GET /slots`。`model` があれば `/slots?model=<encodeURIComponent(model)>`（`props` と同じ）。
+    - 配列の各要素から、`id`（0 以上の整数）と `is_processing`（真偽値）だけを読む。ほかのキー（`params`、`next_token` など）は読まずに捨てる（`z.object`）。
+    - チャットの queue を通さない（`props` と同じ）。順番を決めようとしているバッチの後ろで待たないため。
+    - HTTP 4xx/5xx は `network_failed`（`tellRefusal` は付けない）。形の違う応答は `response_invalid`。
+- extension-core `testing/llama-stub.ts`:
+  - `defaultResponder` は、`GET /slots` に `[{ id: 0, is_processing: false }, { id: 1, is_processing: false }]` を返す（`/props` の 2 枠に合わせる）。
+  - `withSlots(responder: Responder, total: number, processing: () => readonly number[] = () => []): Responder`
+    - `GET /props`: `responder` の答えのうち、`total_slots` だけを `total` にする。`modalities` はそのままなので、`withSlots(withoutAudio(defaultResponder), 3)` のように重ねられる。
+    - `GET /slots`: 枠 0〜`total − 1` を返す。`processing()` にある枠だけ `is_processing: true`。
+    - ほかのリクエストは `responder` に渡す。
+- comment-assistant `src/subtitle-yield.ts`:
+
+  ```ts
+  export const SUBTITLE_YIELD = {
+    busyWindowMs: 15_000,
+    probeTtlMs: 1_500,
+    probeTimeoutMs: 1_000,
+  } as const;
+  export type SubtitleYield = {
+    /** コメントの枠に同時に送ってよい数: `concurrency`、字幕が枠 0 を使っている間は 1。 */
+    limit(this: void, concurrency: number): number;
+    dispose(this: void): void;
+  };
+  export function createSubtitleYield(deps: {
+    /** 枠 0 が処理中か。 */
+    probe: (signal: AbortSignal) => Promise<Result<boolean>>;
+    now: () => number;
+    timers: Timers;
+    /** 問い合わせの結果が出た（失敗と時間切れを含む）。待っていたものを始められるかもしれない。 */
+    changed: () => void;
+  }): SubtitleYield;
+  /** `/slots` の答えから、枠 0 が処理中か。枠 0 がなければ `response_invalid`。 */
+  export function slotZeroBusy(slots: readonly SlotState[]): Result<boolean>;
+  ```
+
+  - `limit(concurrency)` の決め方:
+    1. `concurrency` が 1 以下なら、そのまま返す。問い合わせない。
+    2. まだ結果がない、または最後の結果（失敗を含む）から `probeTtlMs` 以上たった: 問い合わせを 1 つ始め（実行中なら新たに始めない）、結果が出るまでは 1 を返す。
+    3. 最後の結果が失敗（エラー、`probeTimeoutMs` の時間切れ、`response_invalid`）: `concurrency`（今までどおり）。
+    4. 最後の結果が成功: 枠 0 を処理中と最後に見てから `busyWindowMs` 未満なら 1。そうでなければ `concurrency`。
+  - 問い合わせ:
+    - `probeTimeoutMs` で中断し、失敗とする。後から届いた答えは捨てる。
+    - 結果を記録してから `changed()` を 1 回呼ぶ。`limit` の中からは呼ばない。
+    - `dispose()` は実行中の問い合わせを中断する。以後は問い合わせず、`limit` は `concurrency` を返す。
+  - 値の理由（判断 S37）:
+    - `probeTtlMs` 1,500: 字幕の 1 刻み（1.5 s）。問い合わせは、2 本目を始めたいときだけ、1 刻みに 1 回まで（1 分に 40 回まで）。チャットが速くても、バッチの数だけ増えることはない。
+    - `busyWindowMs` 15,000（10 刻み）:
+      - 字幕は話している間、1 刻みごとに枠 0 へ ASR を送り、訳す言語なら続けて翻訳を送る。Task 4 の待機時の値で、刻みの予定から ASR の応答までは 0.41〜0.47 s、翻訳の応答までは 0.72〜0.80 s。1 刻みのうち枠 0 が処理中の割合は、日本語の音声で約 3 割、訳す音声で約 5 割。
+      - 問い合わせは、その瞬間の `is_processing` しか見ない。話している間でも、空きと答えることがある。10 回続けて空きと答える確率は、0.7^10 ≈ 3%（日本語）、0.5^10 ≈ 0.1%（訳す音声）。4 刻み（6 s）にすると 24% と 6% で、話している間に 2 本へ戻りすぎる。
+      - 字幕をやめてから 2 本に戻るまでは、最長で 15 s + 1.5 s。
+    - `probeTimeoutMs` 1,000: `/slots` は推論をしないので、ふつうは数 ms で答える。答えないサーバーのために、2 本目を待たせ続けない。
+
+- comment-assistant `src/pipeline.ts`:
+  - `createCommentPipeline` の deps に `subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>` を足す。ないときは譲らない（今までどおり。既存のテストはそのまま通る）。
+  - `subtitleSlotBusy` があるときだけ、`createSubtitleYield({ probe: deps.subtitleSlotBusy, now: deps.now, timers: deps.timers ?? systemTimers, changed })` を作る。`changed` は `setServerSlots` と同じ手順にする: `busy() < allowed()` なら `batcher.flush()`、続けて `pump()`、`deliver()`。
+  - `allowed(): number` を足す。`busy() === 0` なら `concurrency`（問い合わせず、1 本目はすぐ始める）、そうでなければ `subtitles.limit(concurrency)`。
+  - いま `concurrency` と比べている次の 4 か所を、`allowed()` と比べるようにする。
+    - `pump()` の `while (busy() < concurrency)`（バッチを始める）
+    - `grant()` の `busy() < concurrency`（要約とジャンルの推定の `exclusive`）
+    - `ingest` の `if (busy() < concurrency) batcher.flush();`
+    - `setServerSlots` の `if (busy() < concurrency) batcher.flush();`
+  - `freeSlot()` と `highestFreeSlot()` は変えない（`concurrency` のまま）。譲っている間も、バッチは空いているいちばん小さい枠に入る。
+  - 譲るのは、コメントの枠を使うものすべて（バッチ、要約、ジャンルの推定）。どれも同じ Gemma で生成するため（判断 S38）。
+  - `dispose()` で `subtitles.dispose()` を呼ぶ。
+- comment-assistant `src/runtime.ts`（`commentPipelines` の `build`）:
+  - `createCommentPipeline` に `subtitleSlotBusy` を渡す。`client.slots({ model: models.translate, signal })` が成功なら `slotZeroBusy(slots.value)`、失敗ならその失敗を返す。
+  - 尋ねるモデルは、コメントのバッチを送るモデル（`models.translate`）。① が同じモデルの枠 0 を使っているときだけ、同じ GPU の生成を取り合うため。① の設定は読まない（判断 S39）。
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+```ts
+// packages/extension-core/src/llm.test.ts
+it.each([
+  { name: 'ルーター', model: 'gemma4-e4b', search: '?model=gemma4-e4b' },
+  { name: 'モデルなし', model: undefined, search: '' },
+])('slots reads id and is_processing from GET /slots: $name', async ({ model, search }) => {
+  /* 応答 [{ id: 0, id_task: 12, n_ctx: 4096, is_processing: true, params: {} }, { id: 1, is_processing: false }]
+     → Ok([{ id: 0, processing: true }, { id: 1, processing: false }])。呼び出しは GET /slots + search の 1 回 */
+});
+it.each([
+  {
+    name: 'HTTP 501',
+    status: 501,
+    body: { error: { code: 501, message: 'not supported' } },
+    code: 'network_failed',
+  },
+  { name: '配列でない', status: 200, body: { slots: [] }, code: 'response_invalid' },
+  { name: 'is_processing がない', status: 200, body: [{ id: 0 }], code: 'response_invalid' },
+])('slots fails: $name', async ({ status, body, code }) => {
+  /* ... */
+});
+it('slots does not wait behind the chat queue', async () => {
+  /* queue の concurrency 1 で、答えない chat を 1 つ走らせたまま slots() → 答えが返る */
+});
+
+// packages/extension-core/testing/llama-stub.test.ts
+it('answers GET /slots with two idle slots by default', async () => {
+  /* 本物の client で slots({ model: 'stub-model' }) → [{ id: 0, processing: false }, { id: 1, processing: false }] */
+});
+it('withSlots sets the slot count and reports the processing slots', async () => {
+  /* withSlots(withoutAudio(defaultResponder), 3, () => [0]):
+     props → { totalSlots: 3, audio: false }、slots → [{ 0, true }, { 1, false }, { 2, false }] */
+});
+
+// packages/comment-assistant/test/unit/subtitle-yield.test.ts（pipeline.test.ts と同じ fake clock の timers と now）
+it.each([
+  { name: '枠 0 が処理中', answer: Ok(true), limit: 1 },
+  { name: '枠 0 が空き', answer: Ok(false), limit: 2 },
+  { name: '問い合わせの失敗', answer: Err(failure('network_failed')), limit: 2 },
+  { name: '枠 0 のない答え', answer: Err(failure('response_invalid')), limit: 2 },
+])('limit(2) once the probe answers: $name → $limit', async ({ answer, limit }) => {
+  /* 答える前の limit(2) は 1 で、probe は 1 回。答えた後: changed 1 回、limit(2) === limit */
+});
+it('stays at 1 until 15 s after slot 0 was last seen processing', async () => {
+  /* t=0 に処理中。以後 1,500 ms ごとに空き。t=13,500 の答えの後も 1、t=15,000 の答えの後は 2 */
+});
+it('asks at most once per 1.5 s however often it is called', async () => {
+  /* 0〜1,499 ms に limit(2) を 100 回 → probe 1 回。1,500 ms で 2 回目 */
+});
+it('treats a probe without an answer after 1 s as failed and aborts it', async () => {
+  /* probe が答えない。1,000 ms 進める → signal.aborted、changed 1 回、limit(2) === 2。後から Ok(true) が届いても 2 のまま */
+});
+it('never asks when one batch is all the server allows', () => {
+  /* limit(1) === 1 を 10 回、probe 0 回 */
+});
+it('dispose aborts the running probe and asks no more', () => {
+  /* signal.aborted。その後の limit(2) は 2 で、probe は増えない */
+});
+it.each([
+  {
+    name: '枠 0 が処理中',
+    slots: [
+      { id: 0, processing: true },
+      { id: 1, processing: false },
+    ],
+    expected: Ok(true),
+  },
+  {
+    name: '枠 0 が空き',
+    slots: [
+      { id: 1, processing: true },
+      { id: 0, processing: false },
+    ],
+    expected: Ok(false),
+  },
+  {
+    name: '枠 0 がない',
+    slots: [{ id: 1, processing: true }],
+    expected: Err(failure('response_invalid')),
+  },
+])('slotZeroBusy: $name', ({ slots, expected }) => {
+  /* ... */
+});
+
+// packages/comment-assistant/test/unit/pipeline.test.ts（slotRecorder と gate の describe。setup に subtitleSlotBusy を渡せるようにする）
+it.each([
+  { name: '枠 0 が処理中', answer: Ok(true), slots: [1, 1] },
+  { name: '枠 0 が空き', answer: Ok(false), slots: [1, 2] },
+  { name: '問い合わせの失敗', answer: Err(failure('network_failed')), slots: [1, 2] },
+])('gives way to subtitles on a 3-slot server: $name', async ({ answer, slots }) => {
+  /* subtitleSlotBusy: vi.fn(async () => answer)。setServerSlots(3) の後、コメントを 1 件ずつ 3 回 ingest。
+     probe は 1 回。処理中なら、門を開けるまでに送られたバッチは枠 1 の 1 つだけで、残りの 2 件は次のバッチで枠 1。
+     空きか失敗なら、2 件目と 3 件目が 1 つのバッチで枠 2 に送られる。最後に recorder.slots が slots と一致 */
+});
+it('does not ask about slot 0 while one batch at a time is enough', async () => {
+  /* 前のバッチが答えてから次のコメントを ingest、を 3 回 → probe 0 回 */
+});
+it('holds a summary back while a batch runs and subtitles use slot 0', async () => {
+  /* setServerSlots(3)、probe は Ok(true)。バッチを門で止めたまま pipeline.exclusive(fn) → 門を開けてバッチが終わるまで fn は呼ばれない */
+});
+
+// packages/comment-assistant/test/browser/comments.spec.ts
+for (const { name, processing, most } of [
+  { name: 'slot 0 busy', processing: [0], most: 1 },
+  { name: 'slot 0 idle', processing: [], most: 2 },
+] as const) {
+  test(`runs at most ${most} comment request(s) at once on a 3-slot server with ${name}`, async ({
+    context,
+    sidePanel,
+    platform,
+    llama,
+  }) => {
+    /* llama.respond = withSlots(responder, 3, () => processing)。responder はコメントの枠（id_slot ≥ 1）の chat を
+       400 ms 遅らせ、同時に走っている数の最大を記録してから defaultResponder で答える。
+       connect → openChat（fixtureLive04、rate 10）→ 8 s 待つ。
+       期待値:
+         - コメントの枠の chat が同時に走った数の最大が most
+         - GET /slots?model= の回数が 1 以上、かつ ceil(テストの経過 ms / 1,500) + 1 以下 */
+  });
+}
+```
+
+- [ ] **Step 2: 失敗を確認する**
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test`
+  - Expected: FAIL（`slots`、`withSlots`、`subtitle-yield.ts`、`subtitleSlotBusy` がない）
+- [ ] **Step 3: 実装する**
+  - extension-core（`slots`、`SlotState`、スタブ）を先に入れ、`pnpm --filter @chrome-toolbox/extension-core test` を通してから comment-assistant に進む。
+  - comment-assistant: `subtitle-yield.ts`、pipeline の 4 か所、runtime。
+  - Files の文書を直す。
+- [ ] **Step 4: 通ることを確かめる**
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test && pnpm --filter @chrome-toolbox/comment-assistant test:e2e && pnpm check`
+  - Expected: PASS
+- [ ] **Step 5: 実機での確認**
+  - Task 16 Step 3 の (e) で確かめる（字幕を出している間、comment-assistant のリクエストがコメントの枠に同時に 1 本だけ）。Task 16 が先に終わっていたら、コントローラーが (e) だけを測り直し、結果を `docs/adoption.md` に足す。
+- [ ] **Step 6: Commit**
+  - `git commit -m "feat(comment-assistant): one comment batch at a time while subtitles use slot 0"`
