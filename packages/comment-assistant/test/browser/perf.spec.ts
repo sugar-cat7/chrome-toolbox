@@ -50,7 +50,7 @@ async function adapterScript(): Promise<string> {
 
 test.use({ realVisibility: true });
 
-test('reads a live chat line in under 20 µs while the page adds and removes lines that repeat the same ids', async ({
+test('reads a live chat line in under twice the time the page takes to post it, while the page adds and removes lines that repeat the same ids', async ({
   context,
 }) => {
   await context.route(`${ELSEWHERE}/**`, (route) =>
@@ -114,8 +114,10 @@ test('reads a live chat line in under 20 µs while the page adds and removes lin
   expect(measured?.lines).toBe(250);
   // With a scoped `#message` and `#author-name` query right after the page changed the list a line
   // took 47 µs here (on the live page those queries were 466 of the content script's 676 µs a
-  // comment); walking the line's children, 6 µs.
-  expect(measured?.microseconds).toBeLessThan(20);
+  // comment); walking the line's children, 6 µs. Posting a line is the machine's yardstick: on an
+  // M4 Max reading costs 1.1× posting (6.9 µs against 6.3), on a GitHub Linux runner 1.1–1.2×
+  // (19.7–21.1 µs against 17–18), and the scoped queries were 7.5×.
+  expect(measured?.microseconds).toBeLessThan(2 * (measured?.posting ?? 0));
 });
 
 /** One page's counters: main thread task time (s) and layouts. */
