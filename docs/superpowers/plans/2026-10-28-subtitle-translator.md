@@ -1153,15 +1153,17 @@ it('drops bridge messages that fail validation on the isolated side', () => {
 - Consumes: Task 2 の `subtitlePrompt`・`subtitleMaxTokens`・`parseSubtitleLine`、Task 5 の設定・用語集・`createTabPages`・`contextText`、Task 6 の `Cue`
 - Produces:
   - `Sentence = Readonly<{ id: string; startMs: number; endMs: number; source: string }>`
-  - `toSentences(cues: readonly Cue[]): Sentence[]`
+  - `toSentences(cues: readonly Cue[], languageCode?: string): Sentence[]`
     - 区切る位置: 文末の記号（`.?!。？！`）、次の cue との間が 700 ms 以上、1 文が 6,000 ms または 200 文字に達した。
     - `id` は `` `${startMs}:${contextHash(source)}` ``。
+    - cue は前後の空白を除いてつなぐ。間は空白 1 つ。ただし、つなぎ目の前か後ろが漢字、かな、CJK の約物、全角の記号なら空けない（中国語と日本語）。つなぎ目のどちらかがハングルのとき、または `languageCode` が `ko` のときは空ける（判断。実装の後の修正）。
   - `TranslatedLine = Readonly<{ id: string; startMs: number; endMs: number; source: string; ja?: string; state: 'pending' | 'done' | 'failed' }>`
   - `'subs/translate'`（content から）:
     - request: `{ videoId: string; sourceLang: string; previous: string[] /* ≤ 3 */; sentences: { id: string; source: string }[] /* 1〜4 件、各 ≤ 200 文字 */ }`
     - response: `{ lines: { id: string; ja?: string; state: 'done' | 'failed' }[] }`
     - 配信の文脈と用語集は、送り手のタブの `subs/page` から background が引く。content script は送らない。
   - `'subs/page'`（content から）: `{ info: PageInfo }` → `{}`。読み込みのときと SPA の遷移のたびに送る。
+    - background は、メモリと `storage.session`（`tabPagesStore`、16 タブの LRU）に覚える。service worker が止まって起動し直しても、次の batch は同じ文脈と用語集で訳す。タブを閉じたら（`tabs.onRemoved`）忘れる。`tabs.onUpdated` は聞かない（ホストの権限がなければ URL が来ず、すべてのサイトのタブの更新で service worker を起こすだけになる。判断 S43）。
   - `createSubtitleTranslator(deps: { client: LlamaClient; settings: () => Promise<Result<Settings>>; glossary: (streamer: string) => Promise<Result<GlossaryEntry[]>>; cache?: LruCache<string, string> }): { translate(this: void, request: TranslateRequest, page: PageInfo | undefined): Promise<Result<TranslateResponse>> }`
     - 文ごとに 1 回、順番に呼ぶ（1 文の呼び出しは、Task 8 で `src/line-translator.ts` に移し、PLaMo も選べるようにする）。設定は次のとおり。
       - 枠 0、`model: settings.models.translate`、`subtitlePrompt`
@@ -1169,10 +1171,14 @@ it('drops bridge messages that fail validation on the isolated side', () => {
       - `maxTokens: subtitleMaxTokens(source)`、`temperature: 0`、`enable_thinking: false`
     - キャッシュは LRU 2,000 件。キーは `` `${sourceLang}\u0000${contextHash(context)}\u0000${contextHash(JSON.stringify(glossary))}\u0000${source}` ``。
     - `sourceLang` が `ja` なら呼ばずに `ja = source` を返す（content script はそもそも送らない）。
+    - 1 文が `network_failed` か `operation_cancelled` になったら、同じ batch の残りはサーバーに送らずに `failed` にする（キャッシュにある文は答える）。止まったサーバーに 1 文ずつ 15 s 待たないため。
     - background の `LlamaClient` は、`timeoutMs: 15_000`、キューは `concurrency: 1, maxPending: 4`。先読みは急がないので、ルーターがモデルを読み込み直す時間（実測で最大 13 s）を待てる長さにする。
-  - `createCaptionFeeder(deps: { sentences: readonly Sentence[]; sourceLang: string; display: () => DisplayMode; request: (batch: TranslateRequest) => Promise<Result<TranslateResponse>>; onLines: (lines: TranslatedLine[]) => void; timers: Timers }): { position(this: void, ms: number): void; front(this: void, on: boolean): void; dispose(this: void): void }`
+  - `createCaptionFeeder(deps: { videoId: string; sentences: readonly Sentence[]; sourceLang: string; display: () => DisplayMode; request: (batch: TranslateRequest) => Promise<Result<TranslateResponse>>; onLines: (lines: TranslatedLine[]) => void; timers: Timers }): { position(this: void, ms: number): void; front(this: void, on: boolean): void; dispose(this: void): void }`
+    - `videoId` は `subs/translate` の request に入れる動画。
     - 先読みの範囲は、再生位置の 2,000 ms 前から 60,000 ms 先まで。
-    - 範囲の中で、まだ訳していない文を、時刻の順に 4 文ずつ送る。送るのは同時に 1 つだけで、応答が来たら次を送る。
+    - 範囲の中で、まだ訳していない文を、時刻の順に 4 文ずつ送る。送るのは同時に 1 つだけで、応答が来たら次を送る。1 つの batch は続いた文だけにする（間に訳した文があれば、そこで切る）。background が文ごとの直前の 3 文を正しく組めるようにするため。
+    - `front` の既定は `true`。`front(false)` の間は送らない。実行中の batch の応答は使う。`front(true)` で続きを送る。呼ぶのは content script（Task 9、Task 10）。
+    - `onLines` は、表示のための行を出す。範囲に入った文を 1 度ずつ `pending`（原語だけ）で出し、訳が来たら `done`、2 回失敗したら `failed` で出す。日本語のトラックの文は `ja = source` の `done` で出す。表示が `off` の間は何も出さず、戻ったら範囲を丸ごと出し直す。シークの後も範囲を丸ごと出し直す。
     - 位置が予想から 2,000 ms 以上飛んだらシークとみなし、次の batch を新しい位置から始める。実行中の batch の応答は、前後 10 分の範囲にあれば使う。
     - 次のときは送らない: 前面でない（`front(false)`）、表示が `off` か `source`、字幕トラックが日本語。
     - 失敗した文は、5,000 ms 後に 1 回だけやり直す。それでも失敗したら `failed` にする（原語のまま表示する）。
@@ -1359,7 +1365,7 @@ it('keys the cache by the translator that produced the line', async () => {
 
 **Interfaces:**
 
-- Consumes: Task 6（ブリッジのメッセージ）、Task 7（`createCaptionFeeder`、`TranslatedLine`）
+- Consumes: Task 6（ブリッジのメッセージ）、Task 7（`toSentences`、`createCaptionFeeder`、`TranslatedLine`）
 - Produces:
   - `createTimeline(options: { keepMs: 600_000 }): { upsert(lines: readonly TranslatedLine[]): void; at(positionMs: number): TranslatedLine | undefined; prune(positionMs: number): void; reset(): void; size(): number }`
     - 時刻の順に並べた配列を二分探索する。
@@ -1402,6 +1408,12 @@ it('keys the cache by the translator that produced the line', async () => {
   - `youtube.content.ts`:
     - `/watch` と `/live/` で、`#movie_player video` があるときだけ動く。`yt-navigate-finish` のたびに判定し直す。
     - ブリッジのメッセージは `readBridgeMessage` で読む。受け始めたら `ready` を送り、`video` の `tracks` から `pickSourceTrack` で選んだトラックの `cues` がなければ `load-track` を送る（Task 6）。
+    - ブリッジの `cues` メッセージ（選んだトラックのもの）を受けたら、その `videoId`、`languageCode`、`cues` から feeder を作る:
+      - `sentences: toSentences(message.cues, message.languageCode)`
+      - `videoId: message.videoId`、`sourceLang: message.languageCode`
+      - `request` は `subtitleProtocol.send(…, 'subs/translate', batch)`、`onLines` は `timeline.upsert`
+    - timeline に入れるのは feeder の `onLines` だけ。feeder は、まだ訳していない文（`pending`）も日本語のトラックの文も自分で出すので、content script は文を timeline に入れない。
+    - feeder を作ったときと、同期を止めたり再開したりするたび（一時停止、終了、広告、再生）に `feeder.front(同期しているか)` を呼ぶ。Task 10 で、これを `watchFront` の状態（`state === 'active'`）に置き換える。呼ばないと、一時停止の後も 60 s 先まで batch が続く（R44）。
     - 遷移したら、timeline、live view、feeder を作り直し、`subs/page` を送る。
     - `pickSource` が `none` のときは、ピルに `NO_SOURCE_MESSAGE`（または `AUDIO_HINT_MESSAGE`）を出し、feeder を作らない。翻訳の依頼は何も送らない（`subs/page` は送る）。
     - 後片付けは、すべて `ctx.onInvalidated` に登録する。
@@ -1490,6 +1502,7 @@ it('writes the pill message as text', () => {
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - `wxt.config.ts` には何も足さない。content scripts は WXT がエントリから manifest に書く。
+  - feeder は `cues` メッセージから作り（`toSentences(cues, languageCode)`、`videoId`）、作ったときと同期を止めたり再開したりするたびに `feeder.front(…)` を呼ぶ。
 - [ ] **Step 4: 通ることを確認する**
   - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
   - Expected: PASS
@@ -1521,6 +1534,7 @@ it('writes the pill message as text', () => {
   - 優先順位は away > pause > active。
   - `onChange` は変わったときだけ呼ぶ。タイマーは使わない。
 - content script は、`subs/front` `{ state, reason? }` を始めたときと変わるたびに送る。background はタブごとに覚える。取得中のタブなら offscreen に回す（Task 13）。
+- content script は、feeder を作ったときと `FrontState` が変わるたびに `feeder.front(state === 'active')` を呼ぶ（Task 9 の、同期しているかで呼ぶ形を置き換える）。pause と away では送らず、実行中の batch の応答だけを使う。
 - 切り替えボタン:
   - Task 9 のピル（オーバーレイの右上）を `<button>` にする。
   - 表示は `字幕: 併記` など。ピルに `message` があるときは、その後ろに続けて出す。`aria-label` は「字幕の表示を切り替え（今は併記）」。
@@ -1554,6 +1568,9 @@ it.each([
 it('reports only changes and removes every listener and observer on stop', () => {
   /* ... */
 });
+it('tells the caption feeder whether the page is active, at start and on each change', () => {
+  /* play → front(true)、pause → front(false)、hidden → front(false)、visible で再生 → front(true) */
+});
 it('cycles the display from the player button', async () => {
   /* click → subs/display { mode: 'source' }（今が both） */
 });
@@ -1569,6 +1586,7 @@ it('refuses subs/display from another site with sender_forbidden', async () => {
   - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
+  - content script で、`watchFront` の `onChange` から `feeder.front(state === 'active')` を呼ぶ。feeder を作り直したとき（遷移、トラックの読み直し）も、今の状態で 1 度呼ぶ。
 - [ ] **Step 4: 通ることを確認する**
   - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
   - Expected: PASS
