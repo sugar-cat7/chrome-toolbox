@@ -10,7 +10,7 @@ import {
   type HostPermissions,
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
-import { injectPage, type ScriptingApi } from './control.ts';
+import { injectPage, PAGE_SCRIPT, type ScriptingApi } from './control.ts';
 import { pageProtocol, type PageProtocolHandlers } from './protocol.ts';
 
 /** The extension APIs the options page uses; tests pass a fake with this shape. */
@@ -50,14 +50,21 @@ export function senderKind(sender: Sender): 'page' | 'content' | 'other' {
   return sender.tab?.id !== undefined && sender.frameId === 0 ? 'content' : 'other';
 }
 
+/** The page script as WXT types the built scripts' paths: from the extension root, with a slash. */
+const PAGE_FILE: ScriptPublicPath = `/${PAGE_SCRIPT}`;
+/** Whether `file` names a script this background injects. */
+const isInjected = (file: string): file is ScriptPublicPath => file === PAGE_FILE;
 /**
- * `chrome.scripting` for `injectPage`. WXT types `files` as the built scripts' public paths
- * (`/content-scripts/page.js`); Chrome reads a path from the extension root with or without the
- * leading slash, and PAGE_SCRIPT has none.
+ * `chrome.scripting` for `injectPage`, whose paths (PAGE_SCRIPT) have no leading slash: Chrome
+ * gets each with the slash, as WXT types them. A path that names no injected script is left out,
+ * and Chrome refuses an injection without files (injectPage: `page_restricted`).
  */
 const scripting: ScriptingApi = {
   executeScript: ({ target, files }) =>
-    browser.scripting.executeScript({ target, files: files as ScriptPublicPath[] }),
+    browser.scripting.executeScript({
+      target,
+      files: files.map((file) => `/${file}`).filter(isInjected),
+    }),
 };
 
 /** Routes only this extension's pages may use: they let the extension into a tab. */

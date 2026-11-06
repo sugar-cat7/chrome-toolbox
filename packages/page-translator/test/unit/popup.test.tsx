@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, screen } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
@@ -60,6 +60,13 @@ describe('popup', () => {
     await openPopup();
     await userEvent.click(screen.getByRole('button', { name: 'このページを翻訳' }));
     expect(received).toEqual([{ type: 'page/start', payload: { tabId, ...payload } }]);
+    // The button is enabled again once the reply arrived; a success shows no message.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'このページを翻訳' })).toHaveProperty(
+        'disabled',
+        false,
+      ),
+    );
     expect(screen.getByRole('status')).toHaveProperty('textContent', '');
   });
 

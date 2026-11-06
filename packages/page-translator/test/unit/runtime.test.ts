@@ -138,8 +138,9 @@ describe('extension runtime wiring', () => {
     expect(deliver).not.toHaveBeenCalled();
 
     expect(await ask(start, options)).toEqual(Ok({}));
+    // Chrome gets the script's path from the extension root, as WXT types it (a leading slash).
     expect(execute.mock.calls).toEqual([
-      [{ target: { tabId: 3, frameIds: [0] }, files: [PAGE_SCRIPT] }],
+      [{ target: { tabId: 3, frameIds: [0] }, files: [`/${PAGE_SCRIPT}`] }],
     ]);
     expect(deliver.mock.calls).toEqual([
       [3, { type: 'page/command', payload: { action: 'translate' } }, { frameId: 0 }],

@@ -17,6 +17,10 @@ export default defineContentScript({
   // Injected on demand into a tab's top frame (`scripting.executeScript`, PAGE_SCRIPT); without
   // `matches` the manifest lists no content script and asks for no site.
   registration: 'runtime',
+  // WXT would also post `<extension id>:page:wxt:content-script-started` to the page at each
+  // injection, telling its scripts the extension and when the button was pressed. Its document
+  // event, which ends an older copy's context, stays.
+  noScriptStartedPostMessage: true,
   main() {
     // A second injection into the same isolated world leaves the page to the first one.
     if (!claimPage(globalThis)) return;
