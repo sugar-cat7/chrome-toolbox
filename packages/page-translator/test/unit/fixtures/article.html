@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vesper the Tidebound - Glimmerdeep Saga Fan Wiki</title>
+    <style>
+      body {
+        font-family: sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav class="site-nav">
+        <a href="/">Home</a> | <a href="/bosses">Bosses</a> | <a href="/items">Items</a> |
+        <a href="/maps">Maps</a>
+        <span class="material-icons">search</span>
+        <form action="/search">
+          <input type="search" name="q" placeholder="Search the wiki" aria-label="Search" />
+          <button type="submit">Search</button>
+        </form>
+      </nav>
+    </header>
+    <main id="content">
+      <h1>Vesper the Tidebound</h1>
+      <p class="lead">
+        Vesper the Tidebound is the third boss of the
+        <a href="/areas/sunken-choir">Sunken Choir</a>. She guards the
+        <span translate="no">Glimmerdeep</span> lantern and attacks with waves of cold water.
+      </p>
+      <table class="infobox">
+        <caption>
+          Boss overview
+        </caption>
+        <tr>
+          <th>Recommended level</th>
+          <td>42</td>
+        </tr>
+        <tr>
+          <th>Weakness</th>
+          <td>Lightning <img src="/icons/bolt.png" alt="bolt" /> damage</td>
+        </tr>
+        <tr>
+          <th>Drops</th>
+          <td>
+            <a href="/items/tide-pearl">Tide Pearl</a>, <a href="/items/choir-bell">Choir Bell</a>
+          </td>
+        </tr>
+      </table>
+      <h2 id="strategy">Strategy</h2>
+      <p>
+        Phase 2 begins at 50% HP. Roll <a href="/mechanics/roll">backward</a> to dodge the light
+        attack, then press <kbd>R2</kbd> to counter.
+      </p>
+      <p>
+        Equip the <em>Stormglass Ring</em> before the fight<!-- editors: update after patch 1.4 -->,
+        because her heavy attack drains your stamina.
+      </p>
+      <ul>
+        <li>Stay near the <strong>pillars</strong> during the flood.</li>
+        <li>Use <code>/dodge-roll</code> macros only on PC.</li>
+        <li>Break the four bells to stop her healing song.</li>
+      </ul>
+      <p>Hold jump to reach the upper ledge with the Feather<wbr />step Boots.</p>
+      <div class="note">
+        Patch notes:<br />Version 1.3 lowered her health.<br />Version 1.4 fixed the ledge glitch.
+      </div>
+      <h2 id="lore">Lore</h2>
+      <p>
+        The Sunken Choir was once a cathedral built on the shore of a quiet bay. When the sea rose,
+        the singers refused to leave and kept singing while the water filled the hall. Vesper led
+        the choir, and the old tales say her voice could calm a storm for a whole night. The lantern
+        she guards still holds the last note of that song. Travelers who hear it far from the coast
+        say it sounds like rain on glass. Some scholars in the game believe the lantern is the
+        reason the bay never freezes.
+      </p>
+      <p>このボスは水属性の攻撃が多いので、雷の武器を用意しておくと楽になります。</p>
+      <pre>damage = base * 1.5</pre>
+      <p class="notranslate">Glimmerdeep Saga</p>
+      <a class="card" href="/bosses/hollow-organist">
+        <div>Next boss</div>
+        <div>The Hollow Organist waits in the bell tower.</div>
+      </a>
+      <h2 id="comments">Comments</h2>
+      <form class="comment-form">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty">
+          <option>Easy mode</option>
+          <option>Hard mode</option>
+        </select>
+        <textarea name="body">Write your tips here</textarea>
+        <button type="submit">Post comment</button>
+      </form>
+      <div contenteditable="true">Draft notes the reader is typing</div>
+    </main>
+    <footer>
+      <p>
+        Fan wiki made for testing. Contact:
+        <a href="mailto:editors@wiki.fixture.test">editors@wiki.fixture.test</a>
+      </p>
+    </footer>
+  </body>
+</html>
