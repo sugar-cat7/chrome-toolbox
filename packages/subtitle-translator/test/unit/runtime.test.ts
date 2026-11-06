@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
-import { sidePanelPort, startBackground, type PanelApi } from '../../src/runtime.ts';
+import {
+  senderKind,
+  type Sender,
+  sidePanelPort,
+  startBackground,
+  type PanelApi,
+} from '../../src/runtime.ts';
+import { addressed, isFor } from '../../src/protocol.ts';
 
 afterEach(() => {
   fakeBrowser.reset();
@@ -27,7 +34,10 @@ describe('extension runtime wiring', () => {
       expect(
         listener?.(
           { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
-          {},
+          {
+            url: fakeBrowser.runtime.getURL('/sidepanel.html'),
+            origin: fakeBrowser.runtime.getURL('/').replace(/\/$/u, ''),
+          },
           resolve,
         ),
       ).toBe(true);
@@ -58,5 +68,85 @@ describe('extension runtime wiring', () => {
         models: { translate: 'gemma4-e4b', clef: 'clef-flash', asr: 'gemma4-e4b' },
       },
     });
+  });
+});
+
+const youtube = 'https://www.youtube.com/watch?v=abcdefghijk';
+describe('sender routing', () => {
+  it.each([
+    {
+      sender: 'side panel',
+      given: { url: fakeBrowser.runtime.getURL('/sidepanel.html') },
+      kind: 'page',
+    },
+    {
+      sender: 'sandboxed extension page',
+      given: { url: fakeBrowser.runtime.getURL('/sidepanel.html'), origin: 'null' },
+      kind: 'other',
+    },
+    {
+      sender: 'offscreen',
+      given: { url: fakeBrowser.runtime.getURL('/offscreen.html') },
+      kind: 'offscreen',
+    },
+    {
+      sender: 'youtube top frame',
+      given: { url: youtube, tab: { id: 3 }, frameId: 0 },
+      kind: 'content',
+    },
+    {
+      sender: 'youtube iframe',
+      given: { url: youtube, tab: { id: 3 }, frameId: 2 },
+      kind: 'other',
+    },
+    {
+      sender: 'example.com tab',
+      given: { url: 'https://example.com/', tab: { id: 3 }, frameId: 0 },
+      kind: 'other',
+    },
+    {
+      sender: 'lookalike host',
+      given: { url: 'https://www.youtube.com.example.com/', tab: { id: 3 }, frameId: 0 },
+      kind: 'other',
+    },
+  ] satisfies { sender: string; given: Sender; kind: string }[])(
+    'senderKind: $sender',
+    ({ given, kind }) => {
+      expect(senderKind(given)).toBe(kind);
+    },
+  );
+
+  it.each([
+    { sender: 'offscreen', given: { url: fakeBrowser.runtime.getURL('/offscreen.html') } },
+    { sender: 'youtube top frame', given: { url: youtube, tab: { id: 3 }, frameId: 0 } },
+    { sender: 'a web page', given: { url: 'https://example.com/', tab: { id: 3 }, frameId: 0 } },
+  ] satisfies { sender: string; given: Sender }[])(
+    'answers sender_forbidden to $sender for a message not in its table',
+    async ({ given }) => {
+      const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+      const stop = startBackground();
+      const listener = add.mock.calls[0]?.[0];
+      const reply = await new Promise((resolve) => {
+        listener?.(
+          { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
+          given,
+          resolve,
+        );
+      });
+      expect(reply).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
+      stop();
+    },
+  );
+});
+
+describe('addressed messages', () => {
+  it('keeps the message and adds the target, which isFor reads before any validation', () => {
+    const message = addressed('panel', { type: 'subs/status', payload: { a: 1 } });
+    expect(message).toEqual({ type: 'subs/status', payload: { a: 1 }, target: 'panel' });
+    expect(isFor('panel', message)).toBe(true);
+    expect(isFor('content', message)).toBe(false);
+    expect(isFor('panel', { type: 'x' })).toBe(false);
+    expect(isFor('panel', null)).toBe(false);
+    expect(isFor('panel', 'panel')).toBe(false);
   });
 });
