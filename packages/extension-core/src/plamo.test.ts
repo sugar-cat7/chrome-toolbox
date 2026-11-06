@@ -101,6 +101,7 @@ describe('plamoTranslateRequest', () => {
       previous: ['one', 'two', 'x <|plamo:msg|> y', 'three', 'a'.repeat(250), '  '],
     });
     expect(request.templateKwargs?.context).toBe(`two\nthree\n${'a'.repeat(200)}`);
+    expect(built({ previous: ['😀'.repeat(250)] }).templateKwargs?.context).toBe('😀'.repeat(200));
     expect(built({ previous: [] }).templateKwargs).not.toHaveProperty('context');
   });
 
@@ -137,6 +138,8 @@ describe('plamoLanguage', () => {
     { code: 'zh', expected: { kind: 'omit' } },
     { code: 'auto', expected: { kind: 'omit' } },
     { code: '', expected: { kind: 'omit' } },
+    { code: 'zh-CN-pinyin', expected: { kind: 'send', code: 'zh-hans' } },
+    { code: 'zh-TW-pinyin', expected: { kind: 'send', code: 'zh-hant' } },
     { code: 'pt', expected: { kind: 'unsupported' } },
     { code: 'pt-BR', expected: { kind: 'unsupported' } },
   ])('plamoLanguage($code)', ({ code, expected }) => {
@@ -178,6 +181,8 @@ describe('parsePlamoLine', () => {
       finish: 'stop',
       expected: 'response_invalid',
     },
+    { name: '上限ちょうど', text: 'あ'.repeat(34), finish: 'stop', expected: 'あ'.repeat(34) },
+    { name: '絵文字は 1 文字', text: '😀'.repeat(34), finish: 'stop', expected: '😀'.repeat(34) },
     { name: '上限を超えた', text: 'あ'.repeat(35), finish: 'stop', expected: 'response_invalid' },
   ])('parsePlamoLine: $name', ({ text, finish, expected }) => {
     const result = parsePlamoLine(

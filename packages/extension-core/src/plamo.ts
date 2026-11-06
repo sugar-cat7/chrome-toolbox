@@ -9,12 +9,8 @@ export const PLAMO_STOP = ['<|plamo:tag|>', '<|plamo:bos|>'] as const;
 export const PLAMO_LICENSE_URL = 'https://plamo.preferredai.jp/info/plamo-community-license-ja';
 export const PLAMO_LIMITS = { contextLines: 3, contextLineChars: 200, maxTokens: 256 } as const;
 /** The 53 languages of the model card (`pt` is not one of them). */
-export const PLAMO_LANGUAGES: readonly string[] = [
-  ...['ja', 'en', 'zh-hans', 'zh-hant', 'ko', 'ar', 'az', 'be', 'bg', 'bn', 'ca', 'ceb', 'de'],
-  ...['es', 'et', 'eu', 'fa', 'fr', 'gu', 'he', 'hi', 'hr', 'hu', 'hy', 'id', 'it', 'jv', 'ka'],
-  ...['kk', 'km', 'lt', 'lv', 'ml', 'mr', 'ms', 'my', 'ne', 'nl', 'pa', 'pl', 'ru', 'si', 'sk'],
-  ...['sl', 'sr', 'sw', 'ta', 'te', 'th', 'tl', 'ur', 'uz', 'vi'],
-];
+// oxfmt-ignore
+export const PLAMO_LANGUAGES: readonly string[] = ['ja', 'en', 'zh-hans', 'zh-hant', 'ko', 'ar', 'az', 'be', 'bg', 'bn', 'ca', 'ceb', 'de', 'es', 'et', 'eu', 'fa', 'fr', 'gu', 'he', 'hi', 'hr', 'hu', 'hy', 'id', 'it', 'jv', 'ka', 'kk', 'km', 'lt', 'lv', 'ml', 'mr', 'ms', 'my', 'ne', 'nl', 'pa', 'pl', 'ru', 'si', 'sk', 'sl', 'sr', 'sw', 'ta', 'te', 'th', 'tl', 'ur', 'uz', 'vi'];
 
 /** What to do with a source language: send this code, leave `source_lang` out, or refuse. */
 export type PlamoLanguage = Readonly<

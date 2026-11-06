@@ -9,6 +9,7 @@ import {
   parseCommentBatch,
   parseGenre,
   parseSummary,
+  PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
   plamoTranslateRequest,
   summaryPrompt,
@@ -25,6 +26,7 @@ import {
   STUB_PLAMO_PREFIX,
   withPlamo,
   type LlamaStub,
+  type StubChat,
 } from './llama-stub.ts';
 
 // The stub speaks what the extensions send, through the real client: if a prompt or reply
@@ -168,24 +170,62 @@ describe('llama.cpp stub', () => {
     expect(STUB_PLAMO_PREFIX).toBe('訳P:');
   });
 
+  // The responder is called directly: through the client, 400, 404 and 5xx all read as model_refused.
+  const REFUSED = { status: 400, body: { error: { code: 400, type: 'invalid_request_error' } } };
+  const plamoChat = (
+    change: Partial<StubChat> = {},
+    kwargs: Record<string, unknown> = {},
+  ): StubChat => ({
+    messages: [{ role: 'user', content: 'Okay chat' }],
+    model: PLAMO_TRANSLATE_MODEL,
+    temperature: 0,
+    stop: [...PLAMO_STOP],
+    chat_template_kwargs: { target_lang: 'ja', source_lang: 'en', ...kwargs },
+    ...change,
+  });
+  const ask = (chat: StubChat, responder = withPlamo(defaultResponder)) =>
+    responder({ method: 'POST', path: '/v1/chat/completions', body: chat, chat });
+  const noStop = (): StubChat => {
+    const { stop: _stop, ...rest } = plamoChat();
+    return rest;
+  };
+
   test.each([
-    { name: 'system メッセージ', change: 'system' },
-    { name: 'grammar', change: 'grammar' },
-    { name: 'stop がない', change: 'no-stop' },
-    { name: 'response_format', change: 'response-format' },
-  ])('withPlamo refuses a PLaMo chat with $name with 400', async ({ change }) => {
-    stub.respond = withPlamo(defaultResponder);
-    const request = plamoRequest();
-    const changed = {
-      system: {
-        ...request,
-        messages: [{ role: 'system' as const, content: 'x' }, ...request.messages],
-      },
-      grammar: { ...request, grammar: 'root ::= "a"' },
-      'no-stop': { ...request, stop: [] },
-      'response-format': { ...request, jsonSchema: {} },
-    }[change];
-    expect(codeOf(await client.chat(changed ?? request))).toBe('model_refused');
+    {
+      name: 'system メッセージ',
+      chat: plamoChat({
+        messages: [
+          { role: 'system', content: 'x' },
+          { role: 'user', content: 'Okay chat' },
+        ],
+      }),
+    },
+    { name: 'grammar', chat: plamoChat({ grammar: 'root ::= "a"' }) },
+    { name: 'stop のキーがない', chat: noStop() },
+    { name: '空の stop', chat: plamoChat({ stop: [] }) },
+    { name: 'response_format', chat: plamoChat({ response_format: { type: 'json_object' } }) },
+    { name: '大文字と地域の言語コード', chat: plamoChat({}, { source_lang: 'zh-CN' }) },
+    { name: '対応していない言語コード', chat: plamoChat({}, { source_lang: 'pt' }) },
+    { name: '文脈の予約トークン', chat: plamoChat({}, { context: 'a <|plamo:tag|> b' }) },
+    {
+      name: '用語集の source の予約トークン',
+      chat: plamoChat({}, { glossary: [{ source: '<|plamo:x', target: 'y' }] }),
+    },
+    {
+      name: '用語集の target の予約トークン',
+      chat: plamoChat({}, { glossary: [{ source: 'x', target: '<|plamo:y' }] }),
+    },
+    {
+      name: 'ASCII の空白だけの原文',
+      chat: plamoChat({ messages: [{ role: 'user', content: ' \t\r\n' }] }),
+    },
+  ])('withPlamo refuses a PLaMo chat with $name with exactly HTTP 400', async ({ chat }) => {
+    expect(await ask(chat)).toEqual(REFUSED);
+  });
+
+  test('withPlamo accepts a line of only U+3000, as the real server does', async () => {
+    const reply = await ask(plamoChat({ messages: [{ role: 'user', content: '\u3000' }] }));
+    expect(reply.status).toBeUndefined();
   });
 
   test('withPlamo leaves Gemma chats to the wrapped responder', async () => {
@@ -205,5 +245,9 @@ describe('llama.cpp stub', () => {
   test('the default stub lists no PLaMo and answers a PLaMo chat with 404', async () => {
     expect(await client.models()).toEqual({ ok: true, value: ['stub-model'] });
     expect(codeOf(await client.chat(plamoRequest()))).toBe('model_refused');
+    expect(await ask(plamoChat(), defaultResponder)).toEqual({
+      status: 404,
+      body: { error: { code: 404 } },
+    });
   });
 });

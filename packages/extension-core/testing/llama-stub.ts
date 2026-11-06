@@ -8,6 +8,7 @@ import {
   COMMENT_CATEGORY_CODES,
   commentBatchPrompt,
   genrePrompt,
+  PLAMO_LANGUAGES,
   PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
   summaryPrompt,
@@ -172,15 +173,23 @@ const PLAMO_REFUSED: StubReply = {
 const sameStrings = (a: readonly string[] | undefined, b: readonly string[]): boolean =>
   a !== undefined && a.length === b.length && a.every((item, i) => item === b[i]);
 
-/** Whether a PLaMo chat has the form PLaMo's chat template accepts (see `plamoTranslateRequest`). */
+/**
+ * Whether a PLaMo chat has the form PLaMo's chat template accepts (see `plamoTranslateRequest`):
+ * emptiness is ASCII-only, `source_lang` is one of the model card's codes, and no variable
+ * holds the reserved `<|plamo:`.
+ */
 function plamoForm(chat: StubChat): boolean {
   const [only, ...rest] = chat.messages;
+  const kwargs = chat.chat_template_kwargs;
+  const sourceLang = kwargs?.source_lang;
   return (
     only?.role === 'user' &&
     rest.length === 0 &&
-    only.content.trim() !== '' &&
-    !only.content.includes('<|plamo:') &&
-    chat.chat_template_kwargs?.target_lang === 'ja' &&
+    !/^[ \t\r\n]*$/u.test(only.content) &&
+    kwargs?.target_lang === 'ja' &&
+    (sourceLang === undefined ||
+      (typeof sourceLang === 'string' && PLAMO_LANGUAGES.includes(sourceLang))) &&
+    !JSON.stringify([only.content, kwargs.context, kwargs.glossary]).includes('<|plamo:') &&
     sameStrings(chat.stop, PLAMO_STOP) &&
     chat.grammar === undefined &&
     chat.response_format === undefined
