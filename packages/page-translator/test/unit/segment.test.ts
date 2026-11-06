@@ -10,9 +10,11 @@ import {
 } from '@chrome-toolbox/extension-core';
 import { pageLangHint } from '../../src/language.ts';
 import {
+  containerOf,
   createScanner,
   INLINE_TAGS,
   isSkipped,
+  scanCursor,
   segmentsOf,
   type RequestUnit,
   type Segment,
@@ -612,6 +614,134 @@ describe('segmentsOf and the scanner', () => {
     expect(clock.runNext()).toBe(false);
     expect(calls).toBe(1);
     expect(done).toBe(false);
+  });
+
+  it('scans one block of 2,000 lines in slices of at most sliceMs', () => {
+    // One block: its paragraphs used to be made in one go, whatever their number.
+    const root = mount(
+      `<div>${Array.from({ length: 2000 }, (_, i) => `Line ${i} of the guide.`).join('<br>')}</div>`,
+    );
+    const clock = manualTimers();
+    let ticks = 0;
+    let id = 0;
+    let sliceStart = 0;
+    const slices: { ticks: number; segments: Segment[] }[] = [];
+    createScanner({
+      root,
+      hint: undefined,
+      nextId: () => {
+        ticks += 1;
+        return ++id;
+      },
+      timers: clock.timers,
+      now: () => ticks / 100,
+      onSegments: (segments) => slices.push({ ticks: ticks - sliceStart, segments }),
+      onShadowRoot: () => undefined,
+      onDone: () => undefined,
+    });
+    do {
+      sliceStart = ticks;
+    } while (clock.runNext());
+    expect(slices.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...slices.map((slice) => slice.ticks))).toBeLessThanOrEqual(800);
+    const segments = slices.flatMap((slice) => slice.segments);
+    expect(segments.map(source)).toEqual(
+      Array.from({ length: 2000 }, (_, i) => `Line ${i} of the guide.`),
+    );
+    for (const segment of segments) expectWellFormed(segment);
+  });
+});
+
+describe('the scan cursor and containerOf', () => {
+  /** Every segment `cursor` makes, and the containers it announced, in order. */
+  function drain(options: { root: Element | ShadowRoot; shallow?: boolean }): {
+    segments: Segment[];
+    containers: (Element | ShadowRoot)[];
+  } {
+    const containers: (Element | ShadowRoot)[] = [];
+    const segments: Segment[] = [];
+    const cursor = scanCursor({
+      ...options,
+      hint: undefined,
+      nextId: ids(),
+      onShadowRoot: () => undefined,
+      onContainer: (container) => containers.push(container),
+    });
+    while (cursor.step(segments));
+    return { segments, containers };
+  }
+
+  it('reads only the root’s own paragraphs when shallow', () => {
+    const root = mount(
+      '<div id="box">Intro text here<p>Nested paragraph text</p>Outro words here</div>',
+    );
+    const box = must(root.querySelector('#box'));
+    expect(drain({ root: box, shallow: true }).segments.map(source)).toEqual([
+      'Intro text here',
+      'Outro words here',
+    ]);
+    expect(drain({ root: box }).segments.map(source)).toEqual([
+      'Intro text here',
+      'Outro words here',
+      'Nested paragraph text',
+    ]);
+  });
+
+  it('announces each container before it reads its children', () => {
+    const root = mount('<div id="box">Top line<section><p>Inner text</p></section></div>');
+    const box = must(root.querySelector('#box'));
+    const host = must(root.querySelector('p'));
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = 'Shadow words here';
+    const { segments, containers } = drain({ root: box });
+    expect(containers).toEqual([box, must(root.querySelector('section')), host, shadow]);
+    expect(segments.map(source)).toEqual(['Top line', 'Inner text', 'Shadow words here']);
+    expect(drain({ root: shadow, shallow: true }).segments.map(source)).toEqual([
+      'Shadow words here',
+    ]);
+  });
+
+  it('reads nothing of a skipped root', () => {
+    const root = mount('<div class="notranslate">Keep this phrase</div>');
+    const box = must(root.firstElementChild);
+    expect(drain({ root: box, shallow: true })).toEqual({ segments: [], containers: [] });
+  });
+
+  it.each([
+    { name: 'a text in a list item', pick: (li: Element) => li.firstChild, expected: 'li' },
+    {
+      name: 'a text in a link',
+      pick: (li: Element) => li.querySelector('a')?.firstChild,
+      expected: 'li',
+    },
+    { name: 'a link', pick: (li: Element) => li.querySelector('a'), expected: 'li' },
+    { name: 'the list item itself', pick: (li: Element) => li, expected: 'li' },
+    {
+      name: 'a span holding a block',
+      pick: (li: Element) => li.querySelector('#wrap'),
+      expected: 'span',
+    },
+    {
+      name: 'a text in a block in a span',
+      pick: (li: Element) => li.querySelector('#inner')?.firstChild,
+      expected: 'div',
+    },
+  ])('containerOf($name)', ({ pick, expected }) => {
+    const root = mount(
+      '<ul><li>Read the <a href="/g">guide</a> first. <span id="wrap"><div id="inner">Block</div></span></li></ul>',
+    );
+    const item = must(root.querySelector('li'));
+    const container = containerOf(must(pick(item)));
+    expect(container instanceof Element ? container.localName : container).toBe(expected);
+  });
+
+  it('gives the shadow root as the container of the text at its top', () => {
+    const root = mount('<div id="host"></div>');
+    const shadow = must(root.querySelector('#host')).attachShadow({ mode: 'open' });
+    shadow.innerHTML = 'Rendered <b>inside</b> the shadow';
+    expect(containerOf(must(shadow.firstChild))).toBe(shadow);
+    expect(containerOf(must(shadow.querySelector('b')))).toBe(shadow);
+    expect(containerOf(document.createTextNode('Detached text'))).toBeUndefined();
   });
 });
 

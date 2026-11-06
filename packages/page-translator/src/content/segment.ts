@@ -472,32 +472,71 @@ function paragraphSegments(
   );
 }
 
+/** Where the reading of one container stands: the next child, and the paragraph so far. */
+type ContainerRead = {
+  readonly parent: Element | ShadowRoot;
+  readonly block: Element;
+  readonly hint: string | undefined;
+  readonly nextId: () => number;
+  child: ChildNode | null;
+  pieces: Piece[];
+  last: ChildNode | undefined;
+};
+
+/** Starts reading the children of `parent`, which belong to `block` (a shadow root's to its host). */
+const readContainer = (
+  parent: Element | ShadowRoot,
+  block: Element,
+  hint: string | undefined,
+  nextId: () => number,
+): ContainerRead => ({
+  parent,
+  block,
+  hint,
+  nextId,
+  child: parent.firstChild,
+  pieces: [],
+  last: undefined,
+});
+
+/** Ends the paragraph read so far, adding its segments to `out`. */
+function endParagraph(read: ContainerRead, out: Segment[]): void {
+  const { pieces, block, last } = read;
+  if (last !== undefined)
+    for (const segment of paragraphSegments({ pieces, block, last }, read.hint, read.nextId))
+      out.push(segment);
+  read.pieces = [];
+  read.last = undefined;
+}
+
+/**
+ * Reads the next child of the container, adding to `out` the segments of a paragraph it ends;
+ * false once every child is read (the last paragraph then ended). The next child is taken when
+ * this one is read, so a child the page removes in between ends the reading there.
+ */
+function readNext(read: ContainerRead, out: Segment[]): boolean {
+  const child = read.child;
+  if (child === null) {
+    endParagraph(read, out);
+    return false;
+  }
+  read.child = child.nextSibling;
+  if (!addPieces(child, read.pieces)) endParagraph(read, out);
+  // A side-by-side translation already there is not the paragraph's.
+  else if (!isElement(child) || !OWN_TAGS.has(child.localName)) read.last = child;
+  return true;
+}
+
 /** The segments of `parent`'s children, which belong to `block` (a shadow root's to its host). */
 function segmentsIn(
-  parent: ParentNode,
+  parent: Element | ShadowRoot,
   block: Element,
   hint: string | undefined,
   nextId: () => number,
 ): Segment[] {
   const segments: Segment[] = [];
-  let pieces: Piece[] = [];
-  let last: ChildNode | undefined;
-  const end = (): void => {
-    if (last !== undefined)
-      for (const segment of paragraphSegments({ pieces, block, last }, hint, nextId))
-        segments.push(segment);
-    pieces = [];
-    last = undefined;
-  };
-  for (const child of parent.childNodes) {
-    if (!addPieces(child, pieces)) {
-      end();
-      continue;
-    }
-    // A side-by-side translation already there is not the paragraph's.
-    if (!isElement(child) || !OWN_TAGS.has(child.localName)) last = child;
-  }
-  end();
+  const read = readContainer(parent, block, hint, nextId);
+  while (readNext(read, segments));
   return segments;
 }
 
@@ -513,6 +552,101 @@ export function segmentsOf(
   nextId: () => number,
 ): Segment[] {
   return isSkipped(block) ? [] : segmentsIn(block, block, hint, nextId);
+}
+
+/**
+ * The container whose own paragraphs hold `node`: `node` itself when it is a block or an open
+ * shadow root (its children changed), otherwise the nearest block or shadow root above it.
+ * `undefined` for a node in no element (a detached text, the document).
+ */
+export function containerOf(node: Node): Element | ShadowRoot | undefined {
+  for (let at: Node | null = node; at !== null; at = at.parentNode) {
+    if (isShadowRoot(at)) return at;
+    if (isElement(at) && isBlock(at)) return at;
+  }
+  return undefined;
+}
+
+export type CursorOptions = Readonly<{
+  root: Element | ShadowRoot;
+  hint: string | undefined;
+  nextId: () => number;
+  /** Only the root's own paragraphs (a block, or a shadow root's top), no element under it. */
+  shallow?: boolean;
+  /** An open shadow root met on the way, which the cursor then reads too. */
+  onShadowRoot?: (root: ShadowRoot) => void;
+  /** A container (a block, or an open shadow root) whose children are read next. */
+  onContainer?: (container: Element | ShadowRoot) => void;
+}>;
+
+/** A scan that goes forward one small step at a time (`scanCursor`). */
+export type ScanCursor = Readonly<{
+  /**
+   * Visits one element or reads one child of a container, adding the segments of a paragraph
+   * that ends to `out`; false once the scan is over.
+   */
+  step(out: Segment[]): boolean;
+}>;
+
+/**
+ * Walks the elements under `root` (skipping the subtrees `isSkipped` closes) and makes the
+ * paragraphs of every block element (`segmentsOf`) and of every open shadow root's top, in
+ * document order, one step at a time: each step visits one element or reads one child, so the
+ * caller can stop between any two (a block of thousands of lines included). A shadow root is
+ * read where its host stands; closed ones cannot be seen. `shallow` reads the root's own
+ * paragraphs only.
+ */
+export function scanCursor(options: CursorOptions): ScanCursor {
+  const { root, hint, nextId, onShadowRoot, onContainer } = options;
+  const shallow = options.shallow ?? false;
+  const doc = root.ownerDocument;
+  const accept = (node: Node): number =>
+    isElement(node) && closedHere(node) ? FILTER_REJECT : FILTER_ACCEPT;
+  // Depth first: a shadow root is walked before the rest of its host's subtree.
+  const walkers: TreeWalker[] = [];
+  /** Containers met and not read yet, in document order. */
+  const containers: (readonly [Element | ShadowRoot, Element])[] = [];
+  let reading: ContainerRead | undefined;
+
+  const enterShadow = (host: Element, shadow: ShadowRoot): void => {
+    if (!translateOff(host)) containers.push([shadow, host]);
+    if (!shallow) walkers.push(doc.createTreeWalker(shadow, SHOW_ELEMENT, accept));
+  };
+  const visit = (element: Element): void => {
+    if (isBlock(element) && !translateOff(element)) containers.push([element, element]);
+    const shadow = element.shadowRoot;
+    if (shallow || shadow === null) return;
+    onShadowRoot?.(shadow);
+    enterShadow(element, shadow);
+  };
+
+  if (isShadowRoot(root)) {
+    if (!closedAbove(root.host)) enterShadow(root.host, root);
+  } else if (!closedAbove(root)) {
+    if (!shallow) walkers.push(doc.createTreeWalker(root, SHOW_ELEMENT, accept));
+    visit(root);
+  }
+  return {
+    step(out) {
+      if (reading !== undefined) {
+        if (!readNext(reading, out)) reading = undefined;
+        return true;
+      }
+      const next = containers.shift();
+      if (next !== undefined) {
+        const [parent, block] = next;
+        onContainer?.(parent);
+        reading = readContainer(parent, block, hint, nextId);
+        return true;
+      }
+      const walker = walkers.at(-1);
+      if (walker === undefined) return false;
+      const node = walker.nextNode();
+      if (node === null) walkers.pop();
+      else if (isElement(node)) visit(node);
+      return true;
+    },
+  };
 }
 
 export type ScannerOptions = Readonly<{
@@ -531,54 +665,31 @@ export type ScannerOptions = Readonly<{
 }>;
 
 /**
- * Walks the elements under `root` (skipping the subtrees `isSkipped` closes) and makes the
- * paragraphs of every block element (`segmentsOf`), in slices of at most `sliceMs`: the first
- * slice runs at once, the next after `timers.set(…, 0)`. Open shadow roots are reported and
- * scanned where they stand; closed ones cannot be seen. `cancel` stops it without `onDone`.
+ * Scans `root` with a `scanCursor` in slices of at most `sliceMs`: the first slice runs at once,
+ * the next after `timers.set(…, 0)`. A slice may stop between two paragraphs of one block.
+ * `cancel` stops it without `onDone`.
  */
 export function createScanner(options: ScannerOptions): { cancel(): void } {
   const { root, hint, nextId, timers, now, onSegments, onShadowRoot, onDone } = options;
   const sliceMs = options.sliceMs ?? SLICE_MS;
-  const doc = root.ownerDocument;
-  const accept = (node: Node): number =>
-    isElement(node) && closedHere(node) ? FILTER_REJECT : FILTER_ACCEPT;
-  // Depth first: a shadow root is walked before the rest of its host's subtree.
-  const walkers: TreeWalker[] = [];
+  const cursor = scanCursor({ root, hint, nextId, onShadowRoot });
   let found: Segment[] = [];
   let timer: number | undefined;
   let stopped = false;
 
-  const enterShadow = (host: Element, shadow: ShadowRoot): void => {
-    if (!translateOff(host))
-      for (const segment of segmentsIn(shadow, host, hint, nextId)) found.push(segment);
-    walkers.push(doc.createTreeWalker(shadow, SHOW_ELEMENT, accept));
-  };
-  const visit = (element: Element): void => {
-    if (isBlock(element) && !translateOff(element))
-      for (const segment of segmentsIn(element, element, hint, nextId)) found.push(segment);
-    const shadow = element.shadowRoot;
-    if (shadow === null) return;
-    onShadowRoot(shadow);
-    enterShadow(element, shadow);
-  };
-
   const step = (): void => {
     timer = undefined;
     const started = now();
-    for (let walker = walkers.at(-1); walker !== undefined; walker = walkers.at(-1)) {
-      const next = walker.nextNode();
-      if (next === null) {
-        walkers.pop();
-        continue;
-      }
-      if (isElement(next)) visit(next);
-      if (stopped || now() - started >= sliceMs) break;
+    let more = true;
+    while (!stopped) {
+      more = cursor.step(found);
+      if (!more || now() - started >= sliceMs) break;
     }
     const segments = found;
     found = [];
     if (!stopped && segments.length > 0) onSegments(segments);
     if (stopped) return;
-    if (walkers.length > 0) {
+    if (more) {
       timer = timers.set(step, 0);
       return;
     }
@@ -586,17 +697,10 @@ export function createScanner(options: ScannerOptions): { cancel(): void } {
     onDone();
   };
 
-  if (isShadowRoot(root)) {
-    if (!closedAbove(root.host)) enterShadow(root.host, root);
-  } else if (!closedAbove(root)) {
-    walkers.push(doc.createTreeWalker(root, SHOW_ELEMENT, accept));
-    visit(root);
-  }
   step();
   return {
     cancel() {
       stopped = true;
-      walkers.length = 0;
       found = [];
       if (timer !== undefined) timers.clear(timer);
       timer = undefined;
