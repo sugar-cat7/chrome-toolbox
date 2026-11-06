@@ -1,179 +1,189 @@
+import { encodeWav } from '@chrome-toolbox/extension-core';
 import { describe, expect, it } from 'vitest';
-import { runAsrBench, transcribe, type AsrEngine } from './asr.ts';
+import { decodeWav, runAsrBench } from './asr.ts';
 import type { AudioSample } from './datasets.ts';
 import { parseVoices } from './make-audio.ts';
 
-describe('transcribe', () => {
-  it.each([
-    { engine: 'whisper', path: '/inference', reply: { text: 'halo semua', language: 'id' } },
-    {
-      engine: 'llama',
-      path: '/v1/chat/completions',
-      reply: { choices: [{ message: { content: '{"text":"halo semua","lang":"id"}' } }] },
-    },
-  ])('$engine transcribes through $path', async ({ engine, path, reply }) => {
-    const calls: string[] = [];
-    const result = await transcribe(engine as AsrEngine, 'http://127.0.0.1:9', new Uint8Array(44), {
-      fetch: async (url) => {
-        calls.push(new URL(url instanceof Request ? url.url : url).pathname);
-        return Response.json(reply);
-      },
-    });
-    expect(calls).toEqual([path]);
-    expect(result).toMatchObject({ text: 'halo semua', lang: 'id' });
-  });
+const sample = (id: string, lang: AudioSample['lang'], transcript: string): AudioSample => ({
+  id,
+  lang,
+  voice: 'v',
+  transcript,
+});
+const wavOf = (samples: number): Uint8Array => encodeWav(new Int16Array(samples), 16000);
+const chatReply = (content: string, finishReason = 'stop'): Response =>
+  Response.json({ choices: [{ message: { content }, finish_reason: finishReason }] });
+type Body = { model?: string; id_slot?: number; messages: { content: unknown }[] };
+const bodyOf = (init: RequestInit | undefined): Body =>
+  JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Body;
+const audioSamples = (body: Body): number => {
+  const parts = body.messages[1]?.content;
+  const audio = Array.isArray(parts)
+    ? (parts as { type: string; input_audio?: { data: string } }[]).find(
+        (part) => part.type === 'input_audio',
+      )
+    : undefined;
+  return audio?.input_audio === undefined
+    ? 0
+    : (Buffer.from(audio.input_audio.data, 'base64').length - 44) / 2;
+};
+const base = { server: 'http://127.0.0.1:9', model: 'fixture-model' };
 
-  it('sends multipart file, verbose_json and language=auto to whisper', async () => {
-    let form: FormData | undefined;
-    await transcribe('whisper', 'http://127.0.0.1:9/', new Uint8Array(44), {
-      fetch: async (_url, init) => {
-        form = init?.body as FormData;
-        return Response.json({ text: 'x', language: 'english' });
-      },
-    }).then((result) => expect(result.lang).toBe('en'));
-    expect(form?.get('response_format')).toBe('verbose_json');
-    expect(form?.get('language')).toBe('auto');
-    expect(form?.get('file')).toBeInstanceOf(Blob);
-  });
-
-  it('sends input_audio and a json_schema to llama', async () => {
-    let body: unknown;
-    await transcribe('llama', 'http://127.0.0.1:9', new Uint8Array([1, 2, 3]), {
-      model: 'm',
-      fetch: async (_url, init) => {
-        body = JSON.parse(typeof init?.body === 'string' ? init.body : '');
-        return Response.json({ choices: [{ message: { content: '{"text":"x","lang":"en"}' } }] });
-      },
-    });
-    const parsed = body as {
-      model: string;
-      messages: { content: { type: string; input_audio?: unknown }[] }[];
-      response_format: { type: string; json_schema: { name: string } };
-    };
-    expect(parsed.model).toBe('m');
-    expect(parsed.messages[0]?.content[0]).toEqual({
-      type: 'input_audio',
-      input_audio: { data: 'AQID', format: 'wav' },
-    });
-    expect(parsed.messages[0]?.content[1]?.type).toBe('text');
-    expect(parsed.response_format).toMatchObject({
-      type: 'json_schema',
-      json_schema: { name: 'output' },
-    });
-  });
-
-  it('throws a readable error on HTTP failure and on invalid llama JSON', async () => {
-    await expect(
-      transcribe('whisper', 'http://127.0.0.1:9', new Uint8Array(44), {
-        fetch: async () => new Response('', { status: 503 }),
-      }),
-    ).rejects.toThrow(/HTTP 503/);
-    await expect(
-      transcribe('llama', 'http://127.0.0.1:9', new Uint8Array(44), {
-        fetch: async () => Response.json({ choices: [{ message: { content: 'nope' } }] }),
-      }),
-    ).rejects.toThrow(/invalid/);
+describe('decodeWav', () => {
+  it('reads the samples after the data chunk, also past other chunks', () => {
+    const wav = encodeWav(Int16Array.from([5, -6, 7]), 16000);
+    const list = new TextEncoder().encode('LIST\u0004\u0000\u0000\u0000abcd');
+    const padded = new Uint8Array([...wav.subarray(0, 36), ...list, ...wav.subarray(36)]);
+    expect([...(decodeWav(wav) ?? [])]).toEqual([5, -6, 7]);
+    expect([...(decodeWav(padded) ?? [])]).toEqual([5, -6, 7]);
+    expect(decodeWav(new Uint8Array(10))).toBeUndefined();
   });
 });
 
 describe('runAsrBench', () => {
-  const sample = (id: string, lang: AudioSample['lang'], transcript: string): AudioSample => ({
-    id,
-    lang,
-    voice: 'v',
-    transcript,
-  });
-
-  it('scores zh by characters and excludes mixed samples from language accuracy', async () => {
-    const hypotheses = new Map([
-      ['zh1', { text: '你好', language: 'zh' }],
-      ['mx1', { text: 'ok いいね', language: 'ja' }],
-    ]);
-    const report = await runAsrBench({
-      engine: 'whisper',
-      server: 'http://127.0.0.1:9',
-      samples: [sample('zh1', 'zh', '你好世界'), sample('mx1', 'mixed', 'ok いいね')],
-      loadWav: (id) => new TextEncoder().encode(id),
+  it('sends the extension request: model, slot 0 and the wav as input_audio', async () => {
+    const bodies: Body[] = [];
+    await runAsrBench({
+      ...base,
+      samples: [sample('a', 'en', 'hello there')],
+      loadWav: () => wavOf(24_000),
       fetch: async (_url, init) => {
-        const file = init?.body instanceof FormData ? init.body.get('file') : null;
-        return Response.json(hypotheses.get(file instanceof Blob ? await file.text() : ''));
+        bodies.push(bodyOf(init));
+        return chatReply('en\thello there\n');
       },
     });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ model: 'fixture-model', id_slot: 0 });
+    expect(audioSamples(bodies[0] as Body)).toBe(24_000);
+  });
+
+  it('scores zh and ja by characters and excludes mixed samples from language accuracy', async () => {
+    const byLength = new Map([
+      [16_000, 'zh\t你好\n'],
+      [32_000, 'ja\tこんにちは世界\n'],
+      [48_000, 'ja\tok いいね\n'],
+    ]);
+    const lengthOf = new Map([
+      ['zh1', 16_000],
+      ['ja1', 32_000],
+      ['mx1', 48_000],
+    ]);
+    const report = await runAsrBench({
+      ...base,
+      samples: [
+        sample('zh1', 'zh', '你好世界'),
+        sample('ja1', 'ja', 'こんにちは世界'),
+        sample('mx1', 'mixed', 'ok いいね'),
+      ],
+      loadWav: (id) => wavOf(lengthOf.get(id) ?? 0),
+      fetch: async (_url, init) => chatReply(byLength.get(audioSamples(bodyOf(init))) ?? ''),
+    });
     expect(report.byLang['zh']).toMatchObject({ errorRate: 0.5, langAccuracy: 1 });
+    expect(report.byLang['ja']).toMatchObject({ errorRate: 0, langAccuracy: 1 });
     expect(report.byLang['mixed']?.errorRate).toBe(0);
     expect(report.byLang['mixed']?.langAccuracy).toBeUndefined();
   });
 
-  it('counts a wrong or missing language as a miss and keeps going after a failure', async () => {
+  it('counts silent rows and language accuracy with the line format', async () => {
     const replies = [
-      Response.json({ text: 'hello', language: 'es' }),
-      new Response('', { status: 500 }),
-      Response.json({ text: 'hola' }),
+      chatReply('en\thello\n'),
+      chatReply('es\thello\n'),
+      chatReply('en\t\n'),
+      chatReply('ko\t안녕', 'length'),
     ];
     const report = await runAsrBench({
-      engine: 'whisper',
-      server: 'http://127.0.0.1:9',
-      samples: [sample('a', 'en', 'hello'), sample('b', 'en', 'hello'), sample('c', 'es', 'hola')],
-      loadWav: () => new Uint8Array(44),
+      ...base,
+      samples: [
+        sample('a', 'en', 'hello'),
+        sample('b', 'en', 'hello'),
+        sample('c', 'en', 'hello'),
+        sample('d', 'ko', '안녕'),
+      ],
+      loadWav: () => wavOf(16_000),
       fetch: async () => replies.shift() ?? new Response('', { status: 500 }),
     });
-    expect(report.byLang['en']).toMatchObject({ errorRate: 0, langAccuracy: 0 });
-    expect(report.byLang['es']?.langAccuracy).toBe(0);
-    expect(report.rows.filter((row) => row.error !== undefined)).toHaveLength(1);
+    expect(report.byLang['en']).toMatchObject({ silent: 1, failed: 0, langAccuracy: 2 / 3 });
+    expect(report.rows.find((row) => row.id === 'c')).toMatchObject({
+      silent: true,
+      hypothesis: '',
+      detectedLang: 'en',
+    });
+    expect(report.byLang['ko']).toMatchObject({ silent: 0, failed: 1, langAccuracy: 0 });
+    expect(report.rows.find((row) => row.id === 'd')?.error).toBe('response_invalid');
   });
 
-  it('keeps a language whose samples all failed in byLang and counts failures as misses', async () => {
+  it('scores chunked clips by joining the chunk transcripts', async () => {
+    const lengths: number[] = [];
+    const chunkReplies = ['en\tokay chat\n', 'en\twe are going in\n'];
     const report = await runAsrBench({
-      engine: 'whisper',
-      server: 'http://127.0.0.1:9',
-      samples: [
-        sample('e', 'en', 'hello'),
-        sample('k1', 'ko', '안녕'),
-        sample('k2', 'ko', '안녕'),
-        sample('s1', 'es', 'hola'),
-        sample('s2', 'es', 'hola'),
-      ],
-      loadWav: (id) => new TextEncoder().encode(id),
+      ...base,
+      samples: [sample('a', 'en', 'okay chat we are going in')],
+      loadWav: () => wavOf(40_000),
+      chunkMs: 1500,
       fetch: async (_url, init) => {
-        const file = init?.body instanceof FormData ? init.body.get('file') : null;
-        const id = file instanceof Blob ? await file.text() : '';
-        if (id === 'e') return Response.json({ text: 'hello', language: 'en' });
-        if (id === 's1') return Response.json({ text: 'hola', language: 'es' });
-        return new Response('', { status: 500 });
+        lengths.push(audioSamples(bodyOf(init)));
+        return chatReply(chunkReplies.shift() ?? 'en\t\n');
       },
     });
-    expect(report.byLang['ko']).toMatchObject({ failed: 2, langAccuracy: 0 });
-    expect(report.byLang['ko']?.errorRate).toBeUndefined();
-    expect(report.byLang['ko']?.p50Ms).toBeUndefined();
-    expect(report.byLang['es']).toMatchObject({ failed: 1, langAccuracy: 0.5, errorRate: 0 });
-    expect(report.byLang['en']).toMatchObject({ failed: 0, langAccuracy: 1 });
+    expect(lengths).toEqual([24_000, 16_000]);
+    expect(report.rows[0]).toMatchObject({
+      hypothesis: 'okay chat we are going in',
+      errorRate: 0,
+      detectedLang: 'en',
+    });
+    expect(report.rows[0]?.chunkMs).toHaveLength(2);
+    expect(report.byLang['en']?.p50Ms).toBeDefined();
+  });
+
+  it('runs the samples in order n times with repeat', async () => {
+    const order: string[] = [];
+    const report = await runAsrBench({
+      ...base,
+      samples: [sample('a', 'en', 'one'), sample('b', 'en', 'two')],
+      loadWav: (id) => wavOf(id === 'a' ? 16_000 : 32_000),
+      repeat: 2,
+      fetch: async (_url, init) => {
+        order.push(audioSamples(bodyOf(init)) === 16_000 ? 'a' : 'b');
+        return chatReply('en\tone\n');
+      },
+    });
+    expect(order).toEqual(['a', 'b', 'a', 'b']);
+    expect(report.rows).toHaveLength(4);
+  });
+
+  it('keeps going after a failure and counts a failed row as a language miss', async () => {
+    const replies = [chatReply('en\thello\n'), new Response('', { status: 500 })];
+    const report = await runAsrBench({
+      ...base,
+      samples: [sample('a', 'en', 'hello'), sample('b', 'en', 'hello')],
+      loadWav: () => wavOf(16_000),
+      fetch: async () => replies.shift() ?? new Response('', { status: 500 }),
+    });
+    expect(report.byLang['en']).toMatchObject({ failed: 1, langAccuracy: 0.5, errorRate: 0 });
   });
 
   it('counts a missing WAV as a dataset gap, not an engine failure or a language miss', async () => {
     const report = await runAsrBench({
-      engine: 'whisper',
-      server: 'http://127.0.0.1:9',
+      ...base,
       samples: [sample('a', 'en', 'hello'), sample('b', 'en', 'hello')],
-      loadWav: (id) => (id === 'a' ? new Uint8Array(44) : undefined),
-      fetch: async () => Response.json({ text: 'hello', language: 'en' }),
+      loadWav: (id) => (id === 'a' ? wavOf(16_000) : undefined),
+      fetch: async () => chatReply('en\thello\n'),
     });
     expect(report.byLang['en']).toMatchObject({ missing: 1, failed: 0, langAccuracy: 1 });
     expect(report.rows.find((row) => row.id === 'b')).toMatchObject({ missing: true });
     expect(report.rows.find((row) => row.id === 'b')?.error).toBeUndefined();
-    expect(report.rows.find((row) => row.id === 'b')?.langOk).toBeUndefined();
   });
 
   it('fails with a dataset error when every WAV is missing', async () => {
     let calls = 0;
     await expect(
       runAsrBench({
-        engine: 'whisper',
-        server: 'http://127.0.0.1:9',
+        ...base,
         samples: [sample('a', 'en', 'hello')],
         loadWav: () => undefined,
         fetch: async () => {
           calls += 1;
-          return Response.json({ text: 'hello' });
+          return chatReply('en\thello\n');
         },
       }),
     ).rejects.toThrow(/no WAV file found for any of 1 samples/);
@@ -183,15 +193,14 @@ describe('runAsrBench', () => {
   it('fails instead of reporting zeros when no sample could be transcribed', async () => {
     await expect(
       runAsrBench({
-        engine: 'llama',
-        server: 'http://127.0.0.1:9',
+        ...base,
         samples: [sample('a', 'en', 'hello')],
-        loadWav: () => new Uint8Array(44),
+        loadWav: () => wavOf(16_000),
         fetch: async () => {
           throw new TypeError('fetch failed');
         },
       }),
-    ).rejects.toThrow(/every sample failed.*fetch failed/);
+    ).rejects.toThrow(/every sample failed.*network_failed/);
   });
 });
 

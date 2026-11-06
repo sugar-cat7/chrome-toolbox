@@ -1,3 +1,4 @@
+export { createAsrClient, encodeWav, wavBase64, type AsrClient } from './asr.ts';
 export { createQueue, type Queue, type Task } from './queue.ts';
 export {
   createLlamaClient,
@@ -35,12 +36,16 @@ export {
 } from './settings.ts';
 export { connectionPort, type ConnectionPort, type HostPermissions } from './connection.ts';
 export {
+  asrMaxTokens,
+  asrPrompt,
+  asrTextLimit,
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentBatchPrompt,
   commentReplyBudget,
   GENRE_MAX_TOKENS,
   genrePrompt,
+  parseAsrLine,
   parseCommentBatch,
   parseGenre,
   parseSummary,
@@ -54,6 +59,8 @@ export {
   summaryLine,
   summaryLines,
   summaryPrompt,
+  type AsrLine,
+  type AsrPrompt,
   type CommentBatchItem,
   type CommentCorrection,
   type GlossaryEntry,

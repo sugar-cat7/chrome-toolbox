@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  asrMaxTokens,
+  asrPrompt,
+  asrTextLimit,
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentBatchPrompt,
   GENRE_MAX_TOKENS,
   genrePrompt,
+  parseAsrLine,
   parseCommentBatch,
   parseGenre,
   parseSubtitleLine,
@@ -207,6 +211,98 @@ describe('parseSubtitleLine', () => {
       source,
     );
     expect(result.ok ? result.value : result.error.internalCode).toBe(expected);
+  });
+});
+
+describe('speech recognition prompt', () => {
+  const glossary = [{ source: 'Fixture Ch', target: 'フィクスチャ' }];
+  const input = {
+    wavBase64: 'UklGRg==',
+    durationMs: 1500,
+    sourceLang: 'ko',
+    context: 'Fixture Quest',
+    glossary,
+  };
+
+  it.each([
+    { durationMs: 1500, limit: 76, maxTokens: 236 },
+    { durationMs: 300, limit: 28, maxTokens: 92 },
+    { durationMs: 60_000, limit: 400, maxTokens: 1208 },
+  ])('asr limits for $durationMs ms', ({ durationMs, limit, maxTokens }) => {
+    expect(asrTextLimit(durationMs)).toBe(limit);
+    expect(asrMaxTokens(durationMs)).toBe(maxTokens);
+  });
+
+  it('puts the stream part, the task and the fixed language before the audio part', () => {
+    const [, message] = asrPrompt(input).messages;
+    expect(message.role).toBe('user');
+    expect(message.content).toHaveLength(2);
+    const [text, audio] = message.content;
+    expect(text?.type === 'text' ? text.text : '').toBe(
+      `${subtitleStreamPart(input)}\n\nTask: transcribe\n\nSpoken language: "ko"`,
+    );
+    expect(audio).toEqual({
+      type: 'input_audio',
+      input_audio: { data: 'UklGRg==', format: 'wav' },
+    });
+  });
+
+  it('names no spoken language when the language is not fixed', () => {
+    const [, message] = asrPrompt({ ...input, sourceLang: 'auto' }).messages;
+    const text = message.content[0];
+    expect(text?.type === 'text' ? text.text : '').toMatch(/Task: transcribe$/u);
+  });
+
+  it('shares the system turn and the stream part with subtitlePrompt', () => {
+    const shared = { context: 'Fixture Quest', glossary };
+    const translation = subtitlePrompt({ ...shared, source: 'hi', sourceLang: 'en', previous: [] });
+    const asr = asrPrompt({ ...input, ...shared });
+    expect(asr.messages[0]).toEqual(translation.messages[0]);
+    const text = asr.messages[1].content[0];
+    expect((text?.type === 'text' ? text.text : '').startsWith(subtitleStreamPart(shared))).toBe(
+      true,
+    );
+    expect(user(translation).startsWith(subtitleStreamPart(shared))).toBe(true);
+  });
+
+  it.each([
+    { name: '自動', sourceLang: 'auto', grammarHas: '[a-z] [a-z]', grammarLacks: '"ko"' },
+    { name: '韓国語に固定', sourceLang: 'ko', grammarHas: '"ko"', grammarLacks: '[a-z] [a-z]' },
+  ])('asr grammar: $name', ({ sourceLang, grammarHas, grammarLacks }) => {
+    const { grammar } = asrPrompt({ ...input, sourceLang });
+    expect(grammar).toContain(grammarHas);
+    expect(grammar).not.toContain(grammarLacks);
+    expect(grammar).toContain('root ::= lang "\\t" text "\\n"');
+    expect(grammar).toContain('text ::= [^\\t\\n<>]{0,76}');
+  });
+});
+
+describe('parseAsrLine', () => {
+  it.each([
+    {
+      name: '英語',
+      text: 'en\tOkay chat, we are going in.\n',
+      finish: 'stop',
+      expected: { lang: 'en', text: 'Okay chat, we are going in.' },
+    },
+    { name: '無音', text: 'en\t\n', finish: 'stop', expected: { lang: 'en', text: '' } },
+    { name: '途中で切れた', text: 'ko\t안녕', finish: 'length', expected: 'response_invalid' },
+    { name: '改行がない', text: 'ko\t안녕', finish: 'stop', expected: 'response_invalid' },
+    {
+      name: '上限まで続いた',
+      text: `en\t${'ha'.repeat(38)}\n`,
+      finish: 'stop',
+      expected: 'response_invalid',
+    },
+    { name: '言語がない', text: 'hello\n', finish: 'stop', expected: 'response_invalid' },
+    { name: '言語が大文字', text: 'EN\thello\n', finish: 'stop', expected: 'response_invalid' },
+  ])('$name', ({ text, finish, expected }) => {
+    const result = parseAsrLine(
+      { text, finishReason: finish, timing: undefined },
+      asrMaxTokens(1500),
+      1500,
+    );
+    expect(result.ok ? result.value : result.error.internalCode).toEqual(expected);
   });
 });
 

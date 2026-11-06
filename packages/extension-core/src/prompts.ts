@@ -1,5 +1,5 @@
 import { Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
-import { cutByMaxTokens, type ChatMessage, type ChatReply } from './llm.ts';
+import { cutByMaxTokens, type ChatMessage, type ChatPartsMessage, type ChatReply } from './llm.ts';
 import {
   COMMENT_CATEGORIES,
   GENRE_NAMES,
@@ -406,6 +406,82 @@ export function parseSubtitleLine(
   if (line.trim() === '' || line.includes('\n') || codePoints(line) >= subtitleLimit(source))
     return Err(failure('response_invalid'));
   return Ok(line);
+}
+
+/** Characters a transcript may take: 40 per second of audio and 16 more, at most 400. */
+export const asrTextLimit = (durationMs: number): number =>
+  Math.min(400, Math.ceil((durationMs / 1000) * 40) + 16);
+/** Token budget of one transcription line: 8 and 3 per character its grammar allows. */
+export const asrMaxTokens = (durationMs: number): number => 8 + 3 * asrTextLimit(durationMs);
+
+/** A transcription: the shared system turn, then the stream part, the task and the audio. */
+export type AsrPrompt = Readonly<{
+  messages: readonly [ChatMessage, ChatPartsMessage];
+  grammar: string;
+}>;
+/** What the model heard: the ISO 639-1 code of the spoken language; an empty `text` is silence. */
+export type AsrLine = Readonly<{ lang: string; text: string }>;
+
+/**
+ * The transcription of one clip of speech. The user turn starts with `subtitleStreamPart`, as a
+ * translation does (so the glossary's sources also hint at the spelling of spoken names), then
+ * the task and, when the language is fixed, that language; the audio part comes last. The reply
+ * is one line `<lang>\t<text>\n`: `lang` is two lowercase letters, or exactly `sourceLang` when
+ * it is fixed; `text` has at most `asrTextLimit(durationMs)` characters without tab, newline,
+ * `<` or `>`.
+ */
+export const asrPrompt = (
+  input: Readonly<{
+    wavBase64: string;
+    durationMs: number;
+    sourceLang: string;
+    context: string;
+    glossary: readonly GlossaryEntry[];
+  }>,
+): AsrPrompt => {
+  const fixed = input.sourceLang !== 'auto';
+  const text = [
+    subtitleStreamPart(input),
+    'Task: transcribe',
+    ...(fixed ? [`Spoken language: ${JSON.stringify(input.sourceLang)}`] : []),
+  ].join('\n\n');
+  return {
+    messages: [
+      { role: 'system', content: SUBTITLE_SYSTEM },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text },
+          { type: 'input_audio', input_audio: { data: input.wavBase64, format: 'wav' } },
+        ],
+      },
+    ],
+    grammar: [
+      'root ::= lang "\\t" text "\\n"',
+      fixed ? `lang ::= ${JSON.stringify(input.sourceLang)}` : 'lang ::= [a-z] [a-z]',
+      `text ::= [^\\t\\n<>]{0,${asrTextLimit(input.durationMs)}}`,
+    ].join('\n'),
+  };
+};
+
+/**
+ * The line of a transcription reply. A reply that is cut, lacks its newline or tab, has a
+ * language that is not two lowercase letters, or whose text reached the length bound fails: a
+ * transcript that runs to its bound is mostly speech made up of silence, repeated, so it is
+ * not shown. An empty `text` is silence.
+ */
+export function parseAsrLine(
+  reply: ChatReply,
+  maxTokens: number,
+  durationMs: number,
+): Result<AsrLine> {
+  if (cutByMaxTokens(reply, maxTokens) || !reply.text.endsWith('\n'))
+    return Err(failure('response_invalid'));
+  const match = /^([a-z]{2})\t([^\t\n]*)\n$/u.exec(reply.text);
+  const [, lang, text] = match ?? [];
+  if (lang === undefined || text === undefined || codePoints(text) >= asrTextLimit(durationMs))
+    return Err(failure('response_invalid'));
+  return Ok({ lang, text });
 }
 
 /**

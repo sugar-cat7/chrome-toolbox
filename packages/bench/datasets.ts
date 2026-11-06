@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-export const sampleLangs = ['en', 'id', 'ko', 'es', 'zh', 'mixed'] as const;
+export const sampleLangs = ['en', 'id', 'ko', 'es', 'zh', 'ja', 'mixed'] as const;
 export const sampleKinds = ['speech', 'chat'] as const;
 export type TextSample = {
   id: string;
