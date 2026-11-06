@@ -335,7 +335,14 @@ describe('runSlotBench with --audio', () => {
     voice: 'synthetic',
     transcript: 'made up',
   });
-  type Call = { kind: 'asr' | 'translate'; slot: unknown; model: unknown; at: number };
+  type Call = {
+    kind: 'asr' | 'translate';
+    slot: unknown;
+    model: unknown;
+    at: number;
+    /** The request body's length: tells clips of different lengths apart. */
+    size: number;
+  };
 
   /** A server that answers audio chats with `asrLine` and translations with a made-up line. */
   function audioServer(options: {
@@ -366,6 +373,7 @@ describe('runSlotBench with --audio', () => {
         slot: body.id_slot,
         model: body.model,
         at: clock.now(),
+        size: text.length,
       });
       if (asr) clock.advance(options.asrMs ?? 0);
       else {
@@ -460,20 +468,34 @@ describe('runSlotBench with --audio', () => {
     expect(report.idle).toMatchObject({ sent: 4, failed: 0, sourceP50Ms: 200, count: 0 });
   });
 
-  it('cycles through the manifest samples in order', async () => {
-    const seen: string[] = [];
+  it('sends the manifest samples in order, one per tick, repeating', async () => {
+    const clips: Record<string, Uint8Array> = {
+      a: encodeWav(new Int16Array(ASR_SAMPLE_RATE), ASR_SAMPLE_RATE),
+      b: encodeWav(new Int16Array(2 * ASR_SAMPLE_RATE), ASR_SAMPLE_RATE),
+    };
     const server = audioServer({});
     await runSlotBench({
       ...server.base,
       audio: {
         samples: [sample('a', 'en'), sample('b', 'en')],
-        loadWav: (id) => {
-          seen.push(id);
-          return WAV;
-        },
+        loadWav: (id) => clips[id],
       },
     });
-    expect(seen).toEqual(['a', 'b']);
+    const sizes = server.calls
+      .filter((c) => c.kind === 'asr')
+      .slice(0, 4)
+      .map((c) => c.size);
+    const [a, b] = [sizes[0] as number, sizes[1] as number];
+    expect(b).toBeGreaterThan(a);
+    expect(sizes).toEqual([a, b, a, b]);
+  });
+
+  it('rejects an unpinned audio run, since ASR always uses slot 0', async () => {
+    const server = audioServer({});
+    await expect(
+      runSlotBench({ ...server.base, pinSlots: false, audio: audio(sample('a', 'en')) }),
+    ).rejects.toThrow(/audio.*pinned|pinned.*audio/i);
+    expect(server.calls).toEqual([]);
   });
 
   it('fails the target when ja p95 exceeds 3000 ms', async () => {

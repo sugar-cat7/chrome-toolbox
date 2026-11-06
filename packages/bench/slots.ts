@@ -185,6 +185,10 @@ export async function runSlotBench(options: SlotBenchOptions): Promise<SlotRepor
   const modelOption = options.model === undefined ? {} : { model: options.model };
   const { commentClients } = options;
   if (commentClients.length === 0) throw new Error('slot bench needs at least one comment stream');
+  if (options.audio !== undefined && !pinSlots)
+    throw new Error(
+      'audio runs must pin slots: ASR always uses slot 0, so an unpinned run is mislabelled',
+    );
   const now = options.now ?? ((): number => performance.now());
   const sleep =
     options.sleep ??
@@ -389,6 +393,8 @@ async function main(): Promise<void> {
     },
   });
   if (values.server === undefined) throw new Error('--server <url> is required');
+  if (values.audio && values.model === undefined)
+    throw new Error('--model <name> is required with --audio');
   if (values.model !== undefined && values.model.trim() === '')
     throw new Error('--model must not be empty');
   const model = values.model?.trim();
