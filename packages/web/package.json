@@ -1,5 +1,5 @@
 {
-  "name": "@starter/web",
+  "name": "@chrome-toolbox/web",
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
@@ -19,13 +19,14 @@
     "typegen": "cf workers types -m local"
   },
   "dependencies": {
-    "@starter/contracts": "workspace:*",
-    "@starter/observability": "workspace:*",
-    "@starter/ui": "workspace:*",
+    "@chrome-toolbox/contracts": "workspace:*",
+    "@chrome-toolbox/observability": "workspace:*",
+    "@chrome-toolbox/ui": "workspace:*",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@axe-core/playwright": "catalog:",
@@ -33,7 +34,6 @@
     "@cloudflare/config": "catalog:",
     "@cloudflare/vite-plugin": "catalog:",
     "@playwright/test": "catalog:",
-    "@starter/api": "workspace:*",
     "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -50,7 +50,8 @@
     "runtime": "worker",
     "resultBoundaries": {
       "src/server.ts:fetch": "HTTP runtime ingress must return the platform Response.",
-      "src/assets.ts:compressAsset": "HTTP asset adapter must return the compressed platform Response."
+      "src/assets.ts:compressAsset": "HTTP asset adapter must return the compressed platform Response.",
+      "src/notes.ts:handleNotes": "HTTP ingress projects a handled Result into a platform Response."
     }
   }
 }

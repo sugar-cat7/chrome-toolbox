@@ -110,6 +110,9 @@ describe('cold app addition', () => {
         expect(existsSync(root)).toBe(false);
       }
     },
+    // Each case runs the real add command and finalizes the managed files: 21–27 s on a Windows
+    // runner and 35 s inside a generated project's push hook, past the shared 30 s budget.
+    90_000,
   );
 });
 
@@ -198,6 +201,35 @@ it('matches CLI stdin behavior for a gitignored source file and CLI runtime meta
       expect(output?.toString()).toContain("'value'");
     },
   );
+});
+
+it("formats scripts in one batch under the source's own formatter config", () => {
+  // An ignore pattern the batch does not recognize makes it decline, and every script then costs
+  // its own formatter process: generator tests that render projects slow past their timeouts.
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      readFileSync(new URL('./format-batch.mjs', import.meta.url), 'utf8'),
+    ],
+    {
+      cwd: source,
+      input: JSON.stringify({
+        entries: [['packages/example/src/index.ts', 'export const value="text";']],
+        sideConfigs: [],
+      }),
+      encoding: 'utf8',
+      timeout: 30_000,
+    },
+  );
+  const response = result.stdout
+    .split('\n')
+    .findLast((line) => line.startsWith('STARTER_FORMAT_BATCH '));
+  expect({ status: result.status, response }).toEqual({
+    status: 0,
+    response: `STARTER_FORMAT_BATCH ${JSON.stringify(["export const value = 'text';\n"])}`,
+  });
 });
 
 it('reports malformed formatting before naturally draining a tracked SDK child', async () => {

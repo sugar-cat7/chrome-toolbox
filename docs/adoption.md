@@ -1,5 +1,440 @@
 # Adoption decisions
 
+## Chrome extension foundation (WXT), 2026-10-28
+
+Selected WXT 0.21.5 (npm publish 2026-10-26, older than the 24-hour rule) for the MV3 extensions. Since [wxt-v0.21.0](https://github.com/wxt-dev/wxt/releases/tag/wxt-v0.21.0) (2026-07-26) Vite is a peer (`^6.3.4 || ^7 || ^8.0.0-0`) and WXT uses Vite's module runner, so the existing `vite → @voidzero-dev/vite-plus-core` override and peer rule cover it; the 0.21.0 npm build is marked invalid upstream, 0.21.1+ are usable. WXT supplies file-based entrypoints, manifest generation, a dev server and first-party Vitest/fake-browser testing (`wxt/testing/vitest-plugin`, `wxt/testing/fake-browser`); it already depends on `@webext-core/fake-browser`, so that package is not a direct dependency. [CRXJS](https://github.com/crxjs/chrome-extension-tools) 3.0.0 (2026-09-24) remains the fallback: it fits plain Vite+ builds but has no test harness and an open Rolldown service-worker issue (#1235).
+
+Probe, before adoption: an isolated workspace with this repository's pnpm 12.11.2 rules (exact versions, Vite+ core alias, `minimumReleaseAge` 1440 strict) ran `wxt prepare`, `wxt build` (Vite 8.3.3), Vitest 5.0.3 with `WxtVitest()` and TypeScript 7.0.2 successfully. Playwright 1.64.0 `launchPersistentContext` with `channel: 'chromium'`, headless, `--disable-extensions-except`/`--load-extension` loaded the build, found the service worker and opened the side panel ([Playwright extensions](https://playwright.dev/docs/chrome-extensions)); it needs Chromium build 1248 (Chrome for Testing 156.0.8078.4, `playwright install chromium`). Branded Chrome removed `--load-extension` in 137 (chromium-extensions PSA, 2025-04-04), so E2E never uses branded Chrome. WXT dev mode with `webExt.disabled` and a fixed 127.0.0.1 port answers 404 on `/`, so `pnpm dev` treats a manifest written by the current run as readiness.
+
+In-repository finding: `imports: false` still registers unimport's Vite plugin with `autoImport` enabled, which injected `wxt/utils/storage` into `packages/ui` for a destructured `storage` prop and broke the build. Each `wxt.config.ts` sets `autoImport: false` from the `config:resolved` hook; imports stay explicit and no WXT source is patched. Recheck on WXT upgrades.
+
+Chrome APIs used now: `sidePanel` ([reference](https://developer.chrome.com/docs/extensions/reference/api/sidePanel), updated 2026-09-11; `setPanelBehavior` opens it from the action), `storage`, `permissions` with `optional_host_permissions` for LAN llama.cpp hosts (match patterns ignore ports; `localhost`/`127.0.0.1` are granted at install). The comment service worker also uses `tabs.sendMessage` with `{ frameId }` to return annotations to the sending frame ([reference](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage), updated 2026-09-24; the promise rejects when the frame has no receiver, which the pipeline treats as nothing to annotate) and `storage.local.onChanged` to rebuild its pipeline when the model settings change. The built-in `LanguageDetector` is `[Exposed=Window, SecureContext]` in the [Translator and Language Detector APIs](https://webmachinelearning.github.io/translation-api/) (checked 2026-10-28), so the service worker always uses the script-based guess. Planned for subtitles, not yet adopted: `offscreen` (`USER_MEDIA` has no idle limit; [reference](https://developer.chrome.com/docs/extensions/reference/api/offscreen), updated 2026-09-21) with `tabCapture.getMediaStreamId`, which needs a user invocation.
+
+Agent loop: [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) 1.12.0 (npm 2026-10-22) exposes `install_extension`, `reload_extension`, `list_extensions` and related tools only with `--categoryExtensions` ([configuration](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/chrome-devtools-mcp-v1.12.0/docs/configuration.md), [extension debugging](https://developer.chrome.com/docs/devtools/agents/extensions)). `.mcp.json` pins it with `--isolated` (temporary profile) and `--filesystemRoot=.`; it is optional and outside setup/checks/CI.
+
+Not verified: installing the dev build through chrome-devtools-mcp end to end, how `--filesystemRoot=.` resolves for each MCP client, an official statement that extensions with host permissions are exempt from Chrome's Local Network Access prompt, and whether an agent-triggered action satisfies `tabCapture`'s user-invocation requirement.
+
+## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
+
+Status: **PARTIAL (updated 2026-10-28).** The benchmark tools are implemented and unit-tested (`packages/bench/`), and the procedure was first run on 2026-10-28 against a llama.cpp router server ([setup](llama-server.md)) with synthetic data only (see "Real-server results" below). Cells in the sections that follow remain `PENDING` unless that section lists a number. Still PENDING: measurements on real stream data (100 lines per language), the user's 20-sentence translation check, and the Qwen-family comparison. The decisions below are provisional (R8 / R10) until those close.
+
+### Real-server results (2026-10-28, synthetic data)
+
+Status update: the benches ran once against a real llama.cpp router server. All inputs were synthetic: the self-written fixtures in `packages/bench/fixtures/` and 15 macOS `say` clips. No real stream data was used, and the JSONL results under `bench-data/results/` are local only (gitignored). The "Status: PENDING" paragraph above still applies to everything not listed here.
+
+Server: `llama-server` from llama.cpp b11669 (commit `620d2225cc43`), built from source with Metal on an Apple M4 Max 36 GB (macOS 15.8.2). A prebuilt binary that had been built on macOS 26 failed on macOS 15.8.2 with a libSystem symbol error, so the server was built from source. Router mode on host `127.0.0.1`, port `18082` at the time (now `18083`, R21), with models `gemma4-e4b`, `gemma4-e2b`, `clef-flash`, `--models-max 2`, `--parallel 2`, `ctx-size 8192`, `--reasoning off`; `clef-flash` preset `ctx-size 4096`, `batch-size 2048`, `ubatch-size 2048`, `image-max-tokens 512`. [llama-server.md](llama-server.md) describes how to reproduce this server. Its CPU, projector and launchd `ProcessType` settings were adopted later on 2026-10-28 and measured there; the numbers in this section predate them.
+
+Router mode: every request needs `model`, and `GET /props` returns the router's own info without `total_slots`. Per-model values come from `GET /props?model=<name>`; `LlamaClient.props({ model })` and `bench:slots --model <name>` use it.
+
+| Measurement                                                           | Result                                                                                                                                                                                                                |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bench:translate` gemma4-e4b, `--chat-batch 20`, fixtures (25 rows)   | 25/25 ok. Speech p50 about 0.9-1.4 s per language (all-lang p50 1355 ms, p95 2454 ms). Chat batches (2 comments each in the fixture set) about 2.1-2.5 s. The per-comment tuple JSON Schema is accepted by llama.cpp. |
+| `bench:asr --engine llama` gemma4-e4b (`input_audio`), 15 `say` clips | 15/15 ok. Language accuracy 1.00 in en/id/ko/es/zh. Error rate 0 except ko 0.048. p50 about 1.28-1.51 s, p95 about 1.53-1.70 s.                                                                                       |
+| `bench:clef` clef-flash                                               | `CLEF_MODE=systemone`, accuracy 0.95 on 20 synthetic comments, p50 364 ms. Cold model load about 74 s, warm single judgment about 0.4-0.5 s. Still works with parallel 2.                                             |
+
+`pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:18082 --model gemma4-e4b --seconds 20` (fixtures, subtitle every 1.5 s, comment batches of 20):
+
+| case             | sent/expected | late | ok  | failed | p50 ms | p95 ms | target (p50<=2000, p95<=3000) | comment batches ok | comment batches failed | batch p50 ms | batch p95 ms |
+| ---------------- | ------------- | ---- | --- | ------ | ------ | ------ | ----------------------------- | ------------------ | ---------------------- | ------------ | ------------ |
+| idle, pinned     | 14/14         | 0    | 14  | 0      | 963    | 1468   | PASS                          | 0                  | 0                      | -            | -            |
+| loaded, pinned   | 14/14         | 5    | 14  | 0      | 1274   | 2582   | PASS                          | 1                  | 0                      | 25252        | 25252        |
+| idle, unpinned   | 14/14         | 0    | 14  | 0      | 1047   | 1195   | PASS                          | 0                  | 0                      | -            | -            |
+| loaded, unpinned | 14/14         | 0    | 14  | 0      | 1237   | 1428   | PASS                          | 1                  | 0                      | 24242        | 24242        |
+
+Reading: subtitles stay within the targets under comment load, but a 20-comment batch takes about 25 s on this server, and only one completed in the 20 s window per loaded phase, so the loaded rows rest on a short sample. Pinned shows 5 late ticks and a p95 of 2582 ms against 1428 ms unpinned; with one run each this difference is not a conclusion.
+
+Provisional decisions (R8 / R10, not final until the PENDING items close):
+
+- Default server `http://127.0.0.1:18083` (router mode): the server in [llama-server.md](llama-server.md) listens on 18083 since R21 (2026-10-28). Saved settings load as saved.
+- Translation: `gemma4-e4b`. ASR: `gemma4-e4b` through llama.cpp `input_audio`. Toxicity: `clef-flash` (`systemone`). whisper.cpp is not used.
+- Extension settings carry `models: { translate, clef, asr }` with these defaults.
+
+PENDING: real-stream measurements (100 lines per language), the user's 20-sentence translation check, and the Qwen-family comparison (`qwen38-27b` is 13 GB, which together with Clef is close to the 20 GB limit).
+
+### Fast English chat on three slots (R39, 2026-10-29)
+
+Server: the router server of [llama-server.md](llama-server.md) (llama.cpp b11669, Apple M4 Max) with `--parallel 3` and `[*] ctx-size = 12288`; `GET /props?model=gemma4-e4b` reported `total_slots` 3 and `n_ctx` 4096 per slot. Models gemma4-e4b and clef-flash. Other applications were running.
+
+Replay: a recorded English Twitch chat (1,426 lines over 8 minutes, about 3 lines per second; local only, never committed) was fed into `createCommentPipeline` at its recorded pace, with the real Clef judge, the runtime's queues (model 4, Clef 1) and 30 s timeouts. Both models were warmed up first. "2 batches" takes the slot count from `/props`, as the runtime does; "1 batch" calls `setServerSlots(2)` on the same server. "First annotation" runs from ingest to the first annotation of the comment: a translation, a rule or cache verdict, a failed line, or the original after 8 s. "By rule" is the stats' `trivial` (stock reactions, votes, emotes and laughter, copypasta). Each row is one run. Other applications shared the machine and its GPU, and how busy they were changed between pairs, so compare rows within a pair. Pair 2 ran in reverse order (this change first) with a 1-minute load average of about 10.
+
+| Pair | Code             | Batches at once | Expired     | First annotation p50 / p95 | Model batches (comments) | Batch p50 / p95  | Clef calls (call p50) | Clef skipped | Cached | By rule |
+| ---- | ---------------- | --------------- | ----------- | -------------------------- | ------------------------ | ---------------- | --------------------- | ------------ | ------ | ------- |
+| 1    | before (6fd815f) | 1               | 385 (27.0%) | 3,029 / 8,900 ms           | 219 (530)                | 2,342 / 3,185 ms | 530 (658 ms)          | -            | 383    | 86      |
+| 1    | this change      | 1               | 349 (24.5%) | 2,797 / 8,800 ms           | 228 (544)                | 2,153 / 3,340 ms | 451 (720 ms)          | 93           | 355    | 136     |
+| 1    | before (6fd815f) | 2               | 390 (27.3%) | 4,896 / 9,305 ms           | 258 (551)                | 3,148 / 7,305 ms | 551 (671 ms)          | -            | 357    | 86      |
+| 1    | this change      | 2               | 323 (22.7%) | 2,077 / 8,897 ms           | 327 (586)                | 1,366 / 6,286 ms | 490 (670 ms)          | 96           | 339    | 136     |
+| 2    | before (6fd815f) | 2               | 472 (33.1%) | 6,422 / 9,532 ms           | 184 (471)                | 5,161 / 8,954 ms | 471 (656 ms)          | -            | 355    | 86      |
+| 2    | this change      | 2               | 404 (28.3%) | 5,216 / 9,296 ms           | 227 (505)                | 3,884 / 8,456 ms | 425 (680 ms)          | 80           | 339    | 136     |
+
+A third pair ran while the load average was 25-52 and is left out: in its run of this change the replay itself fell 4 minutes behind the recorded pace (733 s instead of about 487 s). Both of its runs expired 33%.
+
+Of the 1,426 lines, the fast-path rules alone (no server) find 42 without letters or digits, 72 stock reactions and votes, 50 emote and laughter lines (new), 14 copypasta and 410 lone words that skip Clef (new; many repeat a text and are then answered from the cache). The other 838 go to the model and Clef as before.
+
+Reading:
+
+- With two batches, this change lowered the expired share by about 5 points in both pairs (27.3% → 22.7%, 33.1% → 28.3%) and the first-annotation p50 by 1.2-2.8 s. The p95 stayed at 8.9-9.3 s, the time an expiring comment waits.
+- Work per comment: the rules answered 50 more lines without the model or Clef (by rule 86 → 136), and Clef was asked about 83-84% of the comments the model judged instead of all of them (80-96 lone words skipped per run). Most repeated lone words (`HOLD`, `YES`) were already answered from the text cache, so Clef calls fell only 10-11% while the model judged 6-7% more comments.
+- On the unchanged code a second batch did not help (pair 1): the batch p95 rose from 3.2 s to 7.3 s and the expired share stayed at 27%. Clef and two Gemma batches share one GPU, which was saturated. With this change, two batches expired 1.8 points fewer than one.
+- The target (p50 within 2 s up to 10 lines per second) is still not met on a fast English chat: a fifth to over a quarter of the comments expire at 3 lines per second.
+- Memory, one sample each under load: Gemma 4.99 GB resident with `ctx-size = 12288` (4.46-4.51 GB with 8192 and `--parallel 2` in [llama-server.md](llama-server.md#measurements), measured idle), Clef footprint 0.44 GB (0.24-0.25 GB there).
+
+`pnpm --filter @chrome-toolbox/bench bench:slots -- --server http://127.0.0.1:18083 --model gemma4-e4b --seconds 30 --comment-streams 2` (fixtures, subtitle every 1.5 s, comment batches of 20 on slots 1 and 2), two runs, and one run with one comment stream in the same session:
+
+| comment streams | case             | sent/expected | late | ok  | failed | p50 ms | p95 ms | target (p50<=2000, p95<=3000) | comment batches ok | comment batches failed | batch p50 ms | batch p95 ms |
+| --------------- | ---------------- | ------------- | ---- | --- | ------ | ------ | ------ | ----------------------------- | ------------------ | ---------------------- | ------------ | ------------ |
+| 2 (run 1)       | idle, pinned     | 20/20         | 0    | 20  | 0      | 499    | 588    | PASS                          | 0                  | 0                      | -            | -            |
+| 2 (run 1)       | loaded, pinned   | 20/20         | 6    | 20  | 0      | 1265   | 2474   | PASS                          | 6                  | 0                      | 11652        | 13356        |
+| 2 (run 1)       | idle, unpinned   | 20/20         | 0    | 20  | 0      | 510    | 622    | PASS                          | 0                  | 0                      | -            | -            |
+| 2 (run 1)       | loaded, unpinned | 20/20         | 4    | 20  | 0      | 1234   | 1775   | PASS                          | 6                  | 0                      | 11859        | 12195        |
+| 2 (run 2)       | idle, pinned     | 20/20         | 0    | 20  | 0      | 505    | 674    | PASS                          | 0                  | 0                      | -            | -            |
+| 2 (run 2)       | loaded, pinned   | 20/20         | 6    | 20  | 0      | 1421   | 2165   | PASS                          | 6                  | 0                      | 12978        | 13349        |
+| 2 (run 2)       | idle, unpinned   | 20/20         | 0    | 20  | 0      | 557    | 795    | PASS                          | 0                  | 0                      | -            | -            |
+| 2 (run 2)       | loaded, unpinned | 19/20         | 18   | 19  | 0      | 3028   | 3846   | FAIL                          | 6                  | 0                      | 14545        | 16188        |
+| 1               | idle, pinned     | 20/20         | 0    | 20  | 0      | 501    | 654    | PASS                          | 0                  | 0                      | -            | -            |
+| 1               | loaded, pinned   | 20/20         | 4    | 20  | 0      | 1225   | 1636   | PASS                          | 3                  | 0                      | 10999        | 12075        |
+| 1               | idle, unpinned   | 20/20         | 0    | 20  | 0      | 526    | 685    | PASS                          | 0                  | 0                      | -            | -            |
+| 1               | loaded, unpinned | 19/20         | 16   | 19  | 0      | 2376   | 3370   | FAIL                          | 3                  | 0                      | 14320        | 15153        |
+
+Reading: with slots pinned, as the extensions send them, subtitles stayed within the targets under two comment streams in both runs (p50 1,265-1,421 ms, p95 2,165-2,474 ms), against 1,225 / 1,636 ms under one stream. The second stream doubled the comment batches finished (3 → 6 in 30 s) and added 40-200 ms to the subtitle p50 and 530-840 ms to its p95. Unpinned, subtitles missed the target in the one-stream run and in one of the two two-stream runs.
+
+Two Gemma decodes at once, measured on the same server on 2026-10-29 (one request alone against two at a time): about 1.55 times the total generation speed of one (75 → 115 tokens per second), each about 20% slower than alone. That is why a second comment batch pays off only while the GPU has room.
+
+### Clef only where it matters (R43, 2026-10-29)
+
+Clef-Flash (Q4_K_M, 6.7 GB) evaluates its whole prompt on every `/v1/systemone` request, about 1.5 ms per prompt token or 0.25-0.3 s of GPU per comment; on the fast English chat above it took about half of the GPU time. Since R43 the comment extension asks Clef about a comment only when:
+
+- it holds an abuse cue: a self-written list of Japanese (anywhere in the text), English and Spanish (whole words) insults, calls for death or violence, sexual insults and slurs, outside @mentions. Clef judges it while the model runs, as before.
+- it holds no cue and the model calls it `abusive`. Clef judges it after the model's reply, and the batch is shown once Clef answered.
+
+Every other comment keeps the model's category, and its reply is reused from the text cache. The cue list routes comments to Clef and decides nothing itself. R39's lone-word rule is a special case of this one and was removed.
+
+Router coverage on Clef positives recorded from live chats (score 0.8 or more; local only, never committed), with the category gemma4-e4b gave each comment on the server above (batches of 3, temperature 0):
+
+| Set                                                                          | Comments | Model says `abusive` | Abuse cue | Sent to Clef (cue or model) |
+| ---------------------------------------------------------------------------- | -------- | -------------------- | --------- | --------------------------- |
+| Japanese Twitch chat, Clef positives                                         | 60       | 28                   | 48        | 53 (88%)                    |
+| English Twitch chat, Clef positives                                          | 22       | 6                    | 19        | 20 (91%)                    |
+| Other comments of an English Twitch chat and an English/Spanish YouTube chat | 240      | 1                    | 8         | 9 (3.8%)                    |
+
+The 9 positives not sent to Clef are mostly Clef's own misreadings (praise of food, game instructions) and put-downs without a listed word. Of the 1,408 lines with text in the English replay, 44 (3.1%) hold a cue.
+
+Replay: the recorded English Twitch chat of the R39 section (1,426 lines over 8 minutes; local only) at its recorded pace through `createCommentPipeline`, with the real Clef judge, the runtime's queues (model 4, Clef 1), 30 s timeouts and two batches at once (slot count from `/props`). "Before" is the code of R39, "after" this change; both sides ran twice on 2026-10-29 in the order before, after, after, before, and once more each on 2026-10-30. Other applications shared the machine; the load column is the 1-minute load average at the start and end of each run.
+
+| Pair | Code   | Load (start → end) | Expired     | First annotation p50 / p95 | Model batches (comments) | Batch p50 / p95   | Clef calls (call p50) | Clef skipped | Cached | Abusive (Clef + model) | Failed lines |
+| ---- | ------ | ------------------ | ----------- | -------------------------- | ------------------------ | ----------------- | --------------------- | ------------ | ------ | ---------------------- | ------------ |
+| 1    | before | 4.4 → 4.2          | 469 (32.9%) | 6,066 / 10,299 ms          | 184 (470)                | 4,805 / 10,932 ms | 394 (746 ms)          | 76           | 309    | 21 (21 + 0)            | 10           |
+| 1    | after  | 3.5 → 121.9        | 184 (12.9%) | 456 / 8,703 ms             | 549 (698)                | 536 / 1,402 ms    | 37 (302 ms)           | 661          | 366    | 23 (23 + 0)            | 39           |
+| 2    | after  | 107.1 → 5.1        | 94 (6.6%)   | 551 / 8,396 ms             | 534 (793)                | 662 / 2,653 ms    | 39 (527 ms)           | 754          | 361    | 23 (23 + 0)            | 38           |
+| 2    | before | 4.7 → 7.5          | 314 (22.0%) | 3,858 / 9,057 ms           | 260 (577)                | 3,502 / 6,527 ms  | 478 (659 ms)          | 99           | 357    | 23 (19 + 4)            | 11           |
+| 3    | before | 3.9 → 3.8          | 200 (14.0%) | 1,299 / 8,503 ms           | 406 (693)                | 1,236 / 4,334 ms  | 585 (460 ms)          | 108          | 355    | 28 (24 + 4)            | 32           |
+| 3    | after  | 4.5 → 3.5          | 0 (0.0%)    | 398 / 1,483 ms             | 728 (876)                | 523 / 1,139 ms    | 45 (294 ms)           | 831          | 372    | 28 (28 + 0)            | 51           |
+
+Reading:
+
+- Clef calls fell by about 90% (394-585 → 37-45), and the model batch p50 fell from 1.2-4.8 s to 0.5-0.7 s: the GPU no longer spends most of its time on Clef. The expired share fell in every pair (32.9% → 12.9%, 22.0% → 6.6%, 14.0% → 0.0%) and the first-annotation p50 to 0.4-0.6 s. In the quiet pair 3 nothing expired and the first-annotation p95 was 1.5 s on this chat of about 3 lines per second; in pairs 1 and 2 the after runs met a load spike to over 100 from other processes, which left the p95 at 8.4-8.7 s.
+- The server itself was faster on 2026-10-30 (before: batch p50 1.2 s against 3.5-4.8 s the day before), so compare within a pair only.
+- Abusive verdicts held in each pair (21 → 23, 23 → 23, 28 → 28), now all decided by Clef: the before runs' 4 model-only verdicts were lone words R39 never sent to Clef.
+- Failed lines (a model line that did not decode) rose from 10-11 to 38-51 per run. A failed line is never cached, so every copy of a failing text, often a chant, goes to the model again and fails again; with Clef no longer holding the GPU, more of those copies reached the model instead of expiring. A logged run of this change (quiet machine, 50 failed lines) showed two causes: 33 translations that reached the grammar's length bound without being one piece repeated (R42 already keeps one that is), and 17 lines cut by `max_tokens` before they ended, 16 of them in 1-comment batches. R46 below removes both.
+
+### Clef errors (R53, 2026-11-02)
+
+A failed Clef request no longer fails its comment batch or stops the batch's chat call: the comments keep the model's category, and `judgeError` in `comments/stats` names the cause. The Clef judge reads llama.cpp's error answers as llama.cpp b11669 (commit `620d2225cc43`, the server above) writes them, checked in its source on 2026-11-02: `format_error_response` gives 400 for an invalid request and 404 for "not found"; the router's `router_validate_model` (`tools/server/server-models.cpp`) answers 400 `model '<name>' not found` for a model it has no preset for; a route the server does not have answers 404 "File Not Found" (`tools/server/server-http.cpp`); a model that is not a decision model gets 501. So 501, 404 and a 400 in the router's form `model '<name>' not found` are `clef_unavailable` (the model judges abuse from then on, until the settings change); any other HTTP error (a 400 for that request alone, a 503 while the router loads the model) is `response_invalid`; a rejected fetch or the 30 s timeout is `network_failed`. Tests: `toxicity.test.ts` and the pipeline's "a Clef error never fails the batch" cases; not run against a real server.
+
+### Failed lines (R46, 2026-10-30)
+
+- `parseCommentBatch`: a line whose category parsed but whose translation reached its length bound, and is not one piece repeated (R42), keeps its category without a translation. It is a finished verdict, shown in the original and cached, so its copies no longer go to the model.
+- `commentBatchMaxTokens`: 8 tokens per line plus, for a translated comment, 3 tokens per character its grammar allows the translation (2 × source characters + 16, at most 2,000), instead of 16 plus one per source character. Over the 823 finished translation lines of that run a line took at most one token per character (p50 0.73, p95 0.93). The cut replies, re-sent alone with more room, all reached their grammar bound; 15 of 16 within one token per bound character, and the runaway lines filled with spaces (also in a run with one per character) at 2.05 and 2.44. So a 1-comment batch finishes its line, and a runaway ends at its bound and is read as above, once, since its answer is cached.
+
+Replay of the same recorded chat on 2026-10-30 (quiet machine, load average 3-5; each reply logged and classified locally):
+
+| Code                                      | Failed lines | Lines at the grammar bound | `max_tokens` cuts | Expired | First annotation p50 / p95 | Cached | Largest reply |
+| ----------------------------------------- | ------------ | -------------------------- | ----------------- | ------- | -------------------------- | ------ | ------------- |
+| R43, before R46                           | 50           | 34 (33 failed)             | 17                | 1       | 404 / 2,235 ms             | 373    | 91 tokens     |
+| R46 with 1 token per character (not kept) | 3            | 40 (kept)                  | 3                 | 0       | 385 / 1,484 ms             | 385    | 143 tokens    |
+| R46                                       | 0            | 43 (kept)                  | 0                 | 0       | 383 / 1,519 ms             | 386    | 205 tokens    |
+
+About 5% of the comments the model judged now show in the original with the model's category because their translation ran to its bound; before R46 they failed the same way, and their copies were asked again.
+
+### Display cost (R45, 2026-10-30)
+
+A profile of the comment extension ranked what it costs the page and the service worker (process CPU from CDP `SystemInfo.getProcessInfo`, main-thread `Performance.getMetrics` in thread ticks, CPU profiles at 100 µs). R45 changed:
+
+- Display: a concealed line (mode `blur`, shown as 伏せる) is a bar of its category's colour with the label 伏せたコメント（<category>）· クリックで表示, its children hidden (`visibility`, R51), instead of `filter: blur(4px)`; a blurred text shadow was measured and not kept. Rules that reach into a line's children key on `data-ca-conceal`, which only hidden and blurred lines carry. Annotations are written as they arrive: writing them in the first callback of the observer on the chat list (the page's next change) or after 100 ms was tried and reverted (R51, below).
+- Lookups: the YouTube adapter walks a line's children for `#message` and `#author-name`, which every line repeats; the session keeps the list the observer attached; the Twitch adapter keeps the lines it read by id (500, weakly); listeners compare a message's `type` before any zod decode; author roles are checked against a Set; compiled kept-text patterns are cached (200).
+- Service worker: a summary works out its parts once per request and normalizes each comment once; `isCopypasta` counts every run of 6 code units first and searches only the starts whose run occurs 3 times.
+
+Fixture runs: the made-up live chat (`test/browser/fixtures`) in a 400×940 frame of the made-up watch page, headless Playwright Chromium, the llama.cpp stub. Each run warmed up for 30 s and measured 60 s. Builds were interleaved, 3 runs each, shown as mean (min–max). "Before" is `ca380e6`, "after" is R45. Process CPU is % of one core.
+
+Every line concealed at 50 lines a second, against the same build with every line shown:
+
+| Concealment                        | Main thread ms/s, shown → concealed | GPU process %, shown → concealed |
+| ---------------------------------- | ----------------------------------- | -------------------------------- |
+| `filter: blur(4px)` (before)       | 194.1 → 175.1 (0.90×)               | 4.93 → 11.06 (2.24×)             |
+| Text shadow (measured, not kept)   | 194.3 → 175.2 (0.90×)               | 4.89 → 6.79 (1.39×)              |
+| Bar of the category colour (R45)   | 191.0 → 191.6 (1.00×)               | 4.87 → 4.57 (0.94×)              |
+| Bar with a label (R51, 2026-11-02) | 156.5 → 157.1 (1.00×)               | 6.20 → 6.04 (0.97×)              |
+
+On the fixture of the first profile, which kept all 250 lines in one tall document, the filter took 926 ms/s of main thread against 225 for shown lines. The fixture now scrolls its list inside the frame, as YouTube's does, so only the lines on screen are drawn.
+
+Default filters:
+
+| Rate   | Build             | Main thread ms/s    | GPU process %    | All processes %  | Layouts per posted line |
+| ------ | ----------------- | ------------------- | ---------------- | ---------------- | ----------------------- |
+| 20 / s | no content script | 142.5 (142.0–143.2) | 3.13 (3.08–3.18) | 20.0 (20.0–20.1) | 1.00                    |
+| 20 / s | before            | 157.9 (151.0–161.8) | 3.97 (3.80–4.21) | 28.1 (27.1–28.9) | 1.24 (1.21–1.28)        |
+| 20 / s | after             | 151.0 (146.0–157.3) | 3.35 (3.33–3.36) | 27.1 (26.7–27.4) | 1.17                    |
+| 50 / s | no content script | 220.9 (216.4–227.8) | 3.56 (3.47–3.63) | 28.6 (28.2–29.2) | 1.00                    |
+| 50 / s | before            | 188.0 (184.9–192.8) | 6.38 (6.31–6.44) | 37.8 (37.4–38.5) | 1.14                    |
+| 50 / s | after             | 196.9 (193.8–202.6) | 4.86 (4.85–4.87) | 37.0 (36.7–37.5) | 1.15                    |
+
+The "after" rows were measured with the annotation writes R51 reverted (the page's next change, or 100 ms); writing as each message arrives measured 1.14 layouts per line at 50 lines a second (table below). The page's own main-thread time varies more than the extension adds: the chat without the content script took the most at 50 lines a second.
+
+Content script CPU per comment (CPU profiles). The fixture ran 120 s. The live streams ran 75 s, with both builds side by side in their own headed browsers against the real llama.cpp server at `127.0.0.1:18083`.
+
+| Chat                             | Before   | After    | Id lookups in `read` | `textElement`  | `messageElement` |
+| -------------------------------- | -------- | -------- | -------------------- | -------------- | ---------------- |
+| Fixture, 20 / s                  | 81.8 µs  | 62.0 µs  | 21.1 → 7.4 µs        | 10.9 → 5.0 µs  | 1.4 → 1.5 µs     |
+| Fixture, 50 / s                  | 58.3 µs  | 34.2 µs  | 13.0 → 6.5 µs        | 13.1 → 2.8 µs  | 1.2 → 1.1 µs     |
+| Live YouTube (445 lines in 75 s) | 457.5 µs | 154.4 µs | 241.5 → 30.1 µs      | 90.5 → 14.7 µs | 6.5 → 3.3 µs     |
+| Live Twitch (215 lines in 75 s)  | 267.0 µs | 140.5 µs | –                    | –              | 38.3 → 1.4 µs    |
+
+When the annotations are written (50 lines a second, default filters, 2 runs each):
+
+| Writes                                                  | Layouts per posted line |
+| ------------------------------------------------------- | ----------------------- |
+| No content script                                       | 1.00                    |
+| Before: as each message arrives                         | 1.14                    |
+| The page's next change, or after 100 ms (R51: reverted) | 1.15                    |
+| After: as each message arrives                          | 1.14                    |
+| Only a 100 ms timer                                     | 1.08                    |
+
+The fixture chat forces a layout as it posts each line: it reads the list's height to follow the newest line. YouTube's own list does the same: in the first profile's live trace, its `showNewItems_` and `setAtBottom` forced 87 of the 147 layouts that script forced. Both happen before any MutationObserver callback runs. So a write in that callback still takes a layout of its own in the next frame, and it saves no layouts over writing as each message arrives; only fewer write moments save some. R51 keeps writing as each message arrives: less code and no added latency.
+
+Service worker:
+
+- A summary at 5,000 comments in the fixture took 48-59 ms before and 16-35 ms after, round trip from the side panel. Its CPU per comment fell from 38.5 to 16.8 µs at 50 lines a second, and from 61.5 to 27.9 µs at 20.
+- On 5,000 comments of 5 minutes in Node, `summarize` took 18.4 ms before and 7.2 ms after. That is 4.2 and 1.6 times one normalization of every comment. It made 3 normalizations a comment before and at most 1 after.
+- `isCopypasta` on 1,000 characters with no repeated phrase took 2.1 ms (Latin) and 8.5 ms (kana) before, and 0.04 ms after. Its answers equal those of the full search (property test).
+
+### Genre categories (R62, 2026-11-05)
+
+The comment prompt gained per-stream categories (`spoiler` and the genre categories `instruction` `n`, `relay` `r`, `ghosting` `g`, `privacy` `v`, `sensitive` `e`): the fixed system turn keeps only `a`, `s`, `q`, `i` and `c`, the user turn names the genre and defines the categories the stream has on (`streamCategories`), and the grammar allows only their codes. `pnpm --filter @chrome-toolbox/bench bench:genre -- --server http://127.0.0.1:18083 --model gemma4-e4b` (`packages/bench/genre.ts`) sends the self-written sets of `packages/extension-core/test/fixtures/genre-eval/` with that prompt and grammar: per genre in file order, batches of 3, temperature 0, no slot pinned, a made-up title per genre, no relaxation and no spoiler note. Japanese lines are classified only, as in the extension. Results go to `bench-data/results/genre-*.jsonl` (local).
+
+Server: the router server of [llama-server.md](llama-server.md) at `http://127.0.0.1:18083` (`/props` `build_info` `b1-620d222`, the llama.cpp commit `620d2225cc43` above), model gemma4-e4b with MTP, `--parallel 3`; it was not restarted or reconfigured. Other applications were running.
+
+Sets: 238 made-up lines, six genres (fps 45, story 40, horror 39, chat 39, singing 35, board 40), every line `{text, genre, expected}`, with tricky negatives per genre (「次どこ降りる？」, guesses, talk about a finished match or hand, 神 as praise, 総選挙, 前世 in a story, small talk, a one-word shout). 108 lines expect `chatter`, 148 `chatter`, `question` or `important`. Positives: spoiler 10, instruction 19, relay 18, ghosting 9, privacy 18, sensitive 16. No real chat, streamer, agency or viewer name.
+
+"Chatter FP" is the share of lines expected `chatter` that the model put in a stream category; the target is precision 0.8 or more for the new categories and chatter FP 3% or less.
+
+| Run | Definitions                              | spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP   | Chatter, question, important FP |
+| --- | ---------------------------------------- | ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------ | ------------------------------- |
+| 1   | first draft                              | 1.00 / 1.00   | 0.95 / 0.95       | 1.00 / 0.89 | 0.60 / 0.67    | 0.88 / 0.78   | 1.00 / 0.81     | 3.7% (4/108) | 4.7% (7/148)                    |
+| 2   | revision 1                               | 0.91 / 1.00   | 0.95 / 1.00       | 0.94 / 0.89 | 0.71 / 0.56    | 0.76 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 6.1% (9/148)                    |
+| 3   | revision 2 (kept)                        | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.94 | 0.89 / 0.89    | 0.84 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.1% (6/148)                    |
+| 4   | revision 3 (reverted)                    | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.89 | 0.88 / 0.78    | 0.80 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.7% (7/148)                    |
+| 5   | revision 2 again (final, confirms run 3) | 0.91 / 1.00   | 0.95 / 1.00       | 1.00 / 0.94 | 0.89 / 0.89    | 0.84 / 0.89   | 1.00 / 0.94     | 3.7% (4/108) | 4.1% (6/148)                    |
+
+- Run 1's examples came from the research and some equalled set lines (「対面の待ち三六索」, 「覚悟しとけ、この後泣くぞ」, 「今日の晩ご飯なに？」), so it overstates. From revision 1 on, no example in a definition is a set line; what overlaps is generic cue wording (〜たほうがいい, から来ました, さっきの試合).
+- Revision 1 made ghosting a stated fact during a match and widened privacy, relay and sensitive; ghosting lost sniping lines and privacy took small-talk questions (a birthday, a voice actor) once its "not" list named them. Revision 2 wrote ghosting as relaying or sniping with guesses and finished rounds left out, dropped the priming words from privacy's "not" list, and added "Most comments fit none of them." to the system turn. Revision 3 (guesses as never spoiler or ghosting, people in a game or show as never privacy) did worse and was reverted.
+- Kept (runs 3 and 5, identical): precision 0.84-1.00 for every new category (target met). **Chatter FP 3.7% (4/108) misses the 3% target** in every run. The four lines: a guess about the last boss called a spoiler, 「この人怪しくない？」 about a character called privacy, a guess about a hand (〜そう) called ghosting, and 「逃げてー！」 in horror called an instruction (a shout the set labels chatter; arguably an instruction). Other ordinary lines flagged: a birthday question and a voice-actor question, both as privacy. Missed positives: a sensitive question wrapped in 「麻雀は置いといて」, a ghosting wait without a source, a line about another streamer's birthday stream (relay), and a 前世 claim and a partner question (privacy).
+- Prompt size (llama-server `/tokenize`, one comment): system turn 616 tokens, the same for every stream; user turn 367 tokens for an `other` stream (relay, privacy, sensitive defined) and 688 for an `fps` stream (five categories), against about 30 before R62. The user-turn prefix repeats from batch to batch of a stream, so llama.cpp's prompt cache keeps it on a slot that last served that stream. Batches in the final run: p50 311 ms, p95 844 ms.
+- Limits: 9-19 positives per category, written by the same person who wrote the definitions; no real chat. A real-stream check is part of Task G2.
+
+#### Fix round 1 (R64-R66, 2026-11-05)
+
+The sets now cover all 10 detectable genres (puzzle_rta, watchalong, sports_viewing and deduction added; 374 lines at the time of the runs: positives spoiler 24, instruction 24, relay 27, ghosting 15, privacy 26, sensitive 24; 167 chatter lines, 234 chatter, question or important). The bench now leaves a failed line out of the false-positive shares (none failed in these runs). Same server and settings as above; load average about 3. Two runs, the limit for this round:
+
+| Run        | Definitions                                                                                                                                                                           | spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP   | Chatter, question, important FP |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------ | ------------------------------- |
+| 6 (before) | revision 2, as committed in ddfd7f3                                                                                                                                                   | 0.88 / 0.96   | 0.96 / 1.00       | 0.93 / 0.96 | 0.93 / 0.87    | 0.89 / 0.92   | 1.00 / 0.96     | 3.6% (6/167) | 3.4% (8/234)                    |
+| 7 (after)  | one pass: privacy for real people only, instruction needs a concrete action, hedged guesses are chat for spoiler and ghosting, relay leaves news of this match to ghosting or spoiler | 1.00 / 0.96   | 0.96 / 0.96       | 0.92 / 0.85 | 0.76 / 0.87    | 0.88 / 0.81   | 1.00 / 1.00     | 2.4% (4/167) | 3.4% (8/234)                    |
+
+- Run 6's six chatter lines flagged were the four known confusions: guesses as spoiler (3) or ghosting (1), a character as privacy, a shout as an instruction. Run 7 fixed the spoiler guesses and the character, but ghosting took two more lines about a finished match or hand and a question, relay lost recall (a streamer live elsewhere read as chat), and privacy lost recall (partner and whereabouts questions).
+- Shipped, per category, from the two runs: spoiler and instruction as in run 7; ghosting and privacy as in run 6 with one sentence each (a guess is chat unless it states hidden information as a known fact; only real people count, never characters); relay as in run 6, narrowed by R66 (a neutral mention that another streamer exists or played the same game is chat, a comparison is sensitive); sensitive widened by R66 (comparisons with an identifiable streamer, kind or not; sexual remarks or requests aimed at real people; 不謹慎 jokes or baiting about real disasters and deaths). R66 came after both runs, so this combination and the 27 lines added for R66 (14 sensitive positives of the three kinds, 13 negatives: neutral mentions of streamers, voice compliments, disaster-themed games and shows; 401 lines now) are **not measured in-repo**. Acceptance is the held-out set (R65).
+
+#### Fix round 2 (2026-11-05)
+
+Definitions only, stated briefly as principles after the held-out results at a7e3c89. Relay is a report of what another stream shows, says or did, or a push to go there or raid it (凸). Privacy is identifying real-world facts, not small talk. An instruction tells the streamer to do something. Ghosting is hidden information stated as fact from a source the streamer cannot see. A hope about an outcome is not a spoiler. The sets were relabelled to match: 15 lines about arriving from another stream, or about another streamer also playing or being live with the same title, are now chatter. 31 lines were added, with board weighted: readings of the table, wishes for luck, worries about a hand, small-talk questions, hopes about outcomes, plus relay pushes and reports, a stated hand and an instruction. 432 lines: positives spoiler 24, instruction 25, relay 21, ghosting 16, privacy 26, sensitive 38; 209 chatter lines, 282 chatter, question or important. Three runs, the limit for this round:
+
+| Run            | Definitions                                                                                                                                                     | spoiler P / R      | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP    | Chatter, question, important FP |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------- | ------------------------------- |
+| 8 (A, shipped) | every definition shortened to its principle, few or no examples                                                                                                 | 0.92 / 1.00        | 0.89 / 0.96       | 0.78 / 1.00 | 0.90 / 0.56    | 0.91 / 0.81   | 0.95 / 0.53     | 4.8% (10/209) | 5.0% (14/282)                   |
+| 9 (A again)    | the same file: a script error left A in place                                                                                                                   | identical to run 8 |                   |             |                |               |                 | 4.8% (10/209) | 5.0% (14/282)                   |
+| 10 (B)         | A's principles with the positive detail of a7e3c89 restored (examples, sniping, religion and territorial bait) and an arrival phrase quoted as chatter in relay | 0.89 / 1.00        | 0.93 / 1.00       | 0.64 / 1.00 | 0.82 / 0.88    | 0.92 / 0.85   | 0.94 / 0.87     | 8.6% (18/209) | 7.4% (21/282)                   |
+
+- **No run meets the ≤3% chatter and ordinary FP targets.** By the round's rule (FP targets first, then the highest minimum precision), A is the best run and ships exactly.
+- **What run A got wrong on the chatter and ordinary lines:**
+  - five arrival and "also live" lines read as relay;
+  - a shout and a wish for luck read as instructions;
+  - a past event and an earlier match result read as spoilers;
+  - two small-talk questions read as privacy;
+  - a question about what just happened read as ghosting;
+  - 「何切る？」 read as an instruction;
+  - a disaster-set anime read as sensitive.
+- **Cutting the positive detail cost recall:**
+  - sensitive: religion promotion was read as spam or chatter, and territorial bait and sexual or comparison lines were missed;
+  - ghosting: sniping and stated hands were missed.
+- **What run B showed:**
+  - Quoting 「○○さんの枠から来ました」 as chatter primed relay: 12 false positives.
+  - Restoring the examples brought sensitive and ghosting recall back (0.87, 0.88).
+  - It also brought back ghosting false positives on guesses.
+- **Board** (53 lines): chatter FP A 3.8% (1/26), B 15.4% (4/26).
+- **These runs are not comparable to the earlier ones:** the relabelled lines now count as relay false positives.
+
+#### Fix round 3 (2026-11-05)
+
+Candidate C, built from two earlier versions with no new wording:
+
+- spoiler, instruction and ghosting exactly as in run A (d767908);
+- relay, privacy and sensitive exactly as at a7e3c89, where sensitive already includes R66.
+
+The values were checked against both sources before the run. The sets are the 432 lines of fix round 2. One run:
+
+| Run             | Definitions                                                                   | spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP     | Chatter, question, important FP |
+| --------------- | ----------------------------------------------------------------------------- | ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | -------------- | ------------------------------- |
+| 11 (C, shipped) | A's spoiler, instruction and ghosting; a7e3c89's relay, privacy and sensitive | 0.86 / 1.00   | 0.86 / 1.00       | 0.51 / 0.86 | 0.75 / 0.56    | 0.92 / 0.88   | 1.00 / 0.76     | 10.5% (22/209) | 9.6% (27/282)                   |
+
+- **The relabelled lines conflict with C's relay text.** a7e3c89's relay definition names "I came from X's stream" as relay. Fix round 2 relabelled those lines, and "also live with the same title", as chatter. C flags 14 of those 15 lines; A flagged 5.
+- **Without the 15 relabelled lines, C is still worse than A:**
+
+  | Run | Chatter FP   | Chatter, question, important FP |
+  | --- | ------------ | ------------------------------- |
+  | C   | 4.1% (8/194) | 4.9% (13/267)                   |
+  | A   | 2.6% (5/194) | 3.4% (9/267)                    |
+
+  A's figures here match the held-out results for A (2.5% and 3.4%).
+
+- **Sensitive recall recovers** from 0.53 (A) to 0.76, with no false positives.
+- **Ghosting changes:** precision falls from 0.90 to 0.75 (guesses and questions about a shot); its definition is the same as A's.
+- **Other chatter lines flagged:** spoilers on past events, a shout and a wish for luck as instructions, 「何切る？」, and small-talk questions as privacy (2).
+- **C ships per the controller's instruction.** The held-out comparison of A and C decides.
+
+#### Choice of the shipped definitions (2026-11-05)
+
+The candidates were also run on a held-out set of 497 made-up lines. A separate agent wrote it without seeing the definitions or these sets, and it is kept outside the repo. Two fix rounds took principles from its misses, so it served as a development set. A fourth candidate, D, is run A with a7e3c89's sensitive wording. Each candidate was run once at temperature 0:
+
+| Candidate       | Held-out chatter FP | Held-out chatter, question, important FP | Held-out lowest precision | Held-out sensitive recall | In-repo chatter FP       | In-repo sensitive recall |
+| --------------- | ------------------- | ---------------------------------------- | ------------------------- | ------------------------- | ------------------------ | ------------------------ |
+| a7e3c89         | 3.4% (8/236)        | 3.1% (10/325)                            | 0.80 (ghosting)           | 0.75                      | not run on the 432 lines | –                        |
+| A               | 2.5% (6/236)        | 3.4% (11/325)                            | 0.81 (relay)              | 0.60                      | 4.8% (10/209)            | 0.53                     |
+| C               | 3.4% (8/236)        | 3.1% (10/325)                            | 0.79 (ghosting)           | 0.72                      | 10.5% (22/209)           | 0.76                     |
+| **D (shipped)** | **2.1% (5/236)**    | **2.8% (9/325)**                         | **0.80 (ghosting)**       | **0.70**                  | 5.7% (12/209)            | 0.74                     |
+
+D ships. On the held-out set it is the only candidate under 3% on both false-positive measures with every precision at 0.80 or above. On false positives it is within two lines of A on both sets, and it keeps most of the R66 sensitive recall that A lost. A final blind set, written after this choice and never used for tuning, gives the reported number.
+
+#### Final blind test (2026-11-05)
+
+A third agent wrote 335 made-up lines across all 10 genres after D was chosen, without seeing any definition or earlier set. This set was run once, on 6241b74, and nothing was tuned on it. This is the number to quote.
+
+| spoiler P / R | instruction P / R | relay P / R | ghosting P / R | privacy P / R | sensitive P / R | Chatter FP   | Chatter, question, important FP |
+| ------------- | ----------------- | ----------- | -------------- | ------------- | --------------- | ------------ | ------------------------------- |
+| 0.88 / 1.00   | 1.00 / 0.92       | 0.86 / 0.95 | 0.57 / 0.57    | 1.00 / 1.00   | 0.91 / 0.87     | 4.6% (8/175) | 3.8% (9/238)                    |
+
+- **The ≤3% chatter target is not met on unseen lines.** The tuned sets overstated it. The flagged lines follow the same patterns as before:
+  - guesses about what comes next, read as spoiler or ghosting;
+  - praise of a past read and a question about how the streamer knew, read as ghosting;
+  - jokes about a fictional state's politics, read as sensitive;
+  - neutral mentions of another streamer, read as relay.
+- **Ghosting is the weakest category.** It had only 7 positives, so its numbers are coarse; 4 of 7 flags were right. It is only enabled for fps, board and deduction.
+- **The viewer can reverse mistakes.** Removed lines stay in the side panel's hidden list. Marking one as fine adds a correction to the stream's next prompts and allowlists that text (R30). Each category's display can be changed per streamer.
+
+### Server prerequisites
+
+- [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
+- llama.cpp build b11475 or newer on Apple Silicon (Metal). Older builds collapse Clef probabilities toward uniform (see the Clef sources below).
+- Clef server: start with `-ub 2048`. A Clef prompt must fit in the micro-batch (default 512).
+- Translation server: start with `--parallel 3` (R39, 2026-10-29; `--parallel 2` before) so subtitles keep slot 0 and two comment batches run on slots 1 and 2. `bench:slots` refuses to run when `/props` reports fewer slots than its comment streams plus one.
+- Translation candidates: use non-thinking variants, or start llama-server with `--reasoning-budget 0`. The benches send `chat_template_kwargs: {"enable_thinking": false}`, but a template that ignores it still spends tokens and time on thinking.
+- Superseded by R8 / R10 and R21 (2026-10-28): the router server ([llama-server.md](llama-server.md)) listens on `http://127.0.0.1:18083`, ASR uses gemma4-e4b through llama.cpp `input_audio`, and whisper.cpp is not used. The earlier interim defaults (whisper.cpp on `http://127.0.0.1:8081`, translation server on `http://127.0.0.1:8080`) no longer apply.
+- Real stream data (utterances, chat, audio) lives in `bench-data/`, which is gitignored and never committed. Self-written fixtures are in `packages/bench/fixtures/`.
+
+### Candidate models (all Q4_K_M)
+
+| Role        | Candidates                                                                            |
+| ----------- | ------------------------------------------------------------------------------------- |
+| Translation | Gemma-family instruct, about 4B and 12-14B; Qwen-family instruct, about 4B and 12-14B |
+| ASR         | whisper.cpp multilingual model vs a llama.cpp audio-input model                       |
+| Decision    | Clef-flash (9B) on llama.cpp, vs the LLM category-classification fallback             |
+
+Record for each model: source URL, file hash, date, and resident memory (`ps -o rss= -p <llama-server pid>`).
+
+### Commands the user runs
+
+Fixtures are the default input. For a real measurement, point `--set` (and `--manifest` for audio) at data under `bench-data/`.
+
+1. `pnpm --filter @chrome-toolbox/bench bench:make-audio [-- --manifest <jsonl> --out bench-data/audio]` synthesizes test audio with macOS `say` from `packages/bench/fixtures/audio.jsonl` into `bench-data/audio/<id>.wav`. It writes WAV files only, no results file.
+2. `pnpm --filter @chrome-toolbox/bench bench:translate -- --server http://127.0.0.1:8080 --model <name> --set bench-data/text [--chat-batch 20] [--judge-server <url>] [--slot <n>] [--out <jsonl>]` runs once per translation candidate over 100 utterances and 100 chat lines per language. `--chat-batch N` (default 1) sends up to N consecutive chat lines in one comment-batch request, as the comment extension does (spec §7: up to 20); a speech line or the end of the set closes a batch early. `--judge-server` adds the LLM-judge score; the CLI stops before measuring if either server fails `/health`.
+3. `pnpm --filter @chrome-toolbox/bench bench:asr -- --engine whisper --server http://127.0.0.1:8081 --model <name> --set bench-data/audio/real --manifest bench-data/audio/real/manifest.jsonl` and the same with `--engine llama --server <url>` compare ASR engines per language. Without `--set`/`--manifest` it reads the synthesized `bench-data/audio` and `packages/bench/fixtures/audio.jsonl`.
+4. `pnpm --filter @chrome-toolbox/bench bench:clef -- --server <clef-server-url> [--model <name>] [--set bench-data/clef.jsonl]` probes `/v1/systemone`, falls back to logprobs, and prints `CLEF_MODE=<systemone|logprobs|unavailable>` as the last line.
+5. `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <translation-server-url> [--seconds 60] [--comment-streams 2]` measures subtitle latency under comment load, with and without slot pinning. Each comment stream sends its next batch as soon as the last one answered, pinned to slot 1, 2 and so on (default 1 stream). It prints its settings and a table to stdout and writes no results file.
+
+`bench:translate`, `bench:asr` and `bench:clef` write JSONL to `bench-data/results/` (or `--out`). The first line is a meta record, `{"type": "meta", …}`, with the timestamp, git SHA, server URL, model, the server's `GET /props` `build_info`/`model_path`/`total_slots` (null for whisper.cpp, which has no `/props`) and the generation settings. Each following line is one row.
+
+### Real data formats (`bench-data/`, gitignored)
+
+- Text (`--set <dir>`): every `*.jsonl` file in the directory, read in file-name order. One line is `{"id": string, "lang": "en"|"id"|"ko"|"es"|"zh"|"mixed", "kind": "speech"|"chat", "text": string}`; ids must be unique across the set. Keep one stream per file in spoken order: the subtitle prompt gets the previous three `speech` lines of the same file and language as context, and that history restarts when the file or the language changes.
+- Audio (`--manifest <jsonl>` plus `--set <dir>`): one line is `{"id": string, "lang": …same values…, "voice": string, "transcript": string}`. `voice` is used only by `bench:make-audio`; use `""` for recordings. The audio for a line is `<set>/<id>.wav`, for example `bench-data/audio/real/en-1.wav`; 16 kHz mono 16-bit PCM matches the synthesized clips. A missing WAV is reported in the `missing wav` column and excluded from failures, error rate and language accuracy.
+- Clef (`--set <jsonl>`): one line is `{"text": string, "toxic": boolean}`.
+
+### What the reports mean
+
+- `bench:translate` prints one row per `lang/kind` and an `all` row: attempts, successes, p50/p95 of successful requests, p95 and max over every attempt (a failed request counts at its elapsed time), and the mean judge score with `scored/total`. A chat row's latency is its whole batch, which is how long that comment waits. Judge failures are listed separately and never mark a translation as failed.
+- `bench:slots` schedules a subtitle every 1.5 s and measures each from its scheduled tick, so a slow reply also delays the ticks behind it. `late` counts ticks sent after their schedule, `sent/expected` shows ticks that never went out before the window closed, and the comment columns time each 20-comment batch of every stream together. `PASS` needs p50 ≤ 2000 ms and p95 ≤ 3000 ms with every expected tick sent and none failed.
+- Generation settings are fixed in `packages/bench/generation.ts`: temperature 0, `max_tokens` 256 per subtitle, `commentBatchMaxTokens` for a comment batch (8 per line, plus for a translated comment 3 per character its grammar allows the translation, 2 × source characters + 16, since R46; 16 plus one per source character before, and 32 + 160 per comment before R20) and 16 for the judge, and `chat_template_kwargs: {"enable_thinking": false}`. A template that does not read `enable_thinking` still thinks, so use non-thinking model variants or start llama-server with `--reasoning-budget 0`. Otherwise thinking tokens count toward the latency and the token budget.
+- ASR caveat: zh is scored by CER after NFKC normalisation only. A Traditional Chinese transcript of Simplified reference text counts as wrong characters. Converting it needs a conversion table that the repository does not have, and no dependency was added. Check zh hypotheses by eye before reading the zh error rate.
+
+### Server interfaces the benches rely on (checked 2026-10-28)
+
+llama.cpp at [`8ca4060`](https://github.com/ggml-org/llama.cpp/commit/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552) (master, 2026-10-28T00:26Z):
+
+- [server README](https://github.com/ggml-org/llama.cpp/blob/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552/tools/server/README.md): `id_slot` ("Assign the completion task to an specific slot", default -1) and `cache_prompt` are options of `POST /completion`. The chat section says "`/completion`-specific features such as `mirostat` are also supported" on `/v1/chat/completions`. That `id_slot` is honoured there follows from this sentence and is unverified in the source. Also from the README: `GET /props` `total_slots` ("defined by `--parallel` option") and `build_info`/`model_path`; the `timings` object with `prompt_ms`, `predicted_ms` and `predicted_n` in the chat response example; `chat_template_kwargs` ("additional parameters to the json templating system", example `{"enable_thinking": false}`); and `--reasoning-budget` ("0 for immediate end").
+- [`server-common.cpp`](https://github.com/ggml-org/llama.cpp/blob/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552/tools/server/server-common.cpp): for `response_format.type == "json_schema"` the schema is read from `response_format.json_schema.schema`, which is the shape the extension client sends. Request `chat_template_kwargs` are merged over the server's own.
+- [`server-task.cpp`](https://github.com/ggml-org/llama.cpp/blob/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552/tools/server/server-task.cpp): the non-streaming chat response adds `timings` only when stats are set. The extension client therefore treats a missing or malformed `timings` as absent, not as a failed reply.
+- [`common/json-schema.cpp`](https://github.com/ggml-org/llama.cpp/blob/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552/common/json-schema.cpp): an array schema reads `items` before `prefixItems`, an array value becomes a fixed tuple, `const` becomes a literal, and a boolean schema fails with "schema must be an object". zod's `toJSONSchema` emits `"items": false` beside `prefixItems`, which this parser rejects. For that reason `commentBatchPrompt` built its per-comment tuple schema by hand (`prefixItems`, `minItems` = `maxItems` = batch length, no `items`) until R20 replaced it with the GBNF line grammar below.
+
+Compact comment batch reply (R20, checked 2026-10-28 against the server's own build, llama.cpp b11669 [`620d222`](https://github.com/ggml-org/llama.cpp/commit/620d2225cc436ab0b001e3200e590e3b286ef9ab)):
+
+- Format: one line per comment, `<n>\t<code>[\t<ja>]\n`, where `<n>` is the batch-local number 1..N, `<code>` is one letter (`a` abusive, `s` spam, `p` spoiler, `q` question, `i` important, `c` chatter; `COMMENT_CATEGORY_CODES`), and the translation exists exactly for comments with `translate: true`, at most 2 characters per source character plus 16 (so one runaway translation cannot use up the batch). `commentBatchPrompt` builds the GBNF grammar per call (numbers, translation fields and their `{0,n}` bounds fixed), the client sends it as `grammar`, and `parseCommentBatch` reads it strictly: a missing, renumbered or wrongly shaped line, a translation that reached its bound, or a last line without its newline in a reply that `max_tokens` may have cut (`finish_reason: "length"`, or no reason and the whole budget used) fails only its own comment. [`grammars/README.md`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/grammars/README.md) documents `{m,n}` and recommends `x{0,N}` over chained optionals; [`src/llama-grammar.cpp`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/src/llama-grammar.cpp) expands it into N rules and treats N above 2000 (`MAX_REPETITION_THRESHOLD`) as unbounded, so the bound is capped at 2000.
+- [`server-common.cpp`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/tools/server/server-common.cpp): `/v1/chat/completions` rejects `grammar` together with `json_schema`, passes `grammar` to the chat template session, and keeps the request's `grammar` unless the session builds its own (only for a JSON schema or tools). [`server-schema.cpp`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/tools/server/server-schema.cpp) then applies it as a user grammar.
+- [`common/parsers/gemma4.cpp`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/common/parsers/gemma4.cpp): with a JSON schema, Gemma 4's reply is constrained to a fenced ` ```json ` block; without a schema or tools the content is everything up to `<|channel>`/`<channel|>`, and [`peg-parser.cpp`](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/common/peg-parser.cpp) does not trim it, so the final newline reaches the client (seen live: `finish_reason: "stop"` and a trailing `\n`).
+- Live on the router server (gemma4-e4b, port 18083, parallel 2, 2026-10-28), the same 9 synthetic comments in three batches of 3 with the shipped prompt and parser, interleaved runs: pretty-printed JSON 270 output tokens (30.0 per comment), 5.3-5.6 s generation, 6.3-6.6 s wall; line format 119 tokens (13.2 per comment), 2.4-2.5 s generation, 3.1-3.5 s wall, 9/9 lines parsed and the same categories (the JSON reply left the spam comment's `ja` empty). `/tokenize`: a translated JSON item costs 19 tokens around its translation, a line 5 (4 untranslated). `bench:translate --chat-batch 3` on the fixtures: 15.2 output tokens per chat comment against 34.3 in the JSON run above, 10/10 translated. A first prompt without the example made the model copy English comments as their "translation"; the shipped prompt has a two-line example. Budgets in those batches: 100, 185 and 142 tokens against 31, 46 and 42 used.
+
+whisper.cpp at [`21ba6d2`](https://github.com/ggml-org/whisper.cpp/commit/21ba6d269a02c14309355cb96822db6058d4cf48) (master, 2026-10-27T14:17Z):
+
+- [`examples/server/server.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/examples/server/server.cpp): `POST /inference` takes the multipart fields `file`, `response_format` and `language`. `verbose_json` sets `language` to `whisper_lang_str_full(...)`, which [`src/whisper.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/src/whisper.cpp) maps to the full name (`english`, `chinese`, `korean`, `spanish`, `indonesian`). `bench:asr` maps those names back to ISO codes. The source does not validate a per-request `language=auto`. That it triggers detection the same way as the CLI's `auto` is unverified.
+
+### Results (PENDING)
+
+| Item                                               | Value                                                                                                                  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Translation model, subtitles                       | PENDING                                                                                                                |
+| Translation model, comments                        | PENDING                                                                                                                |
+| ASR engine and model                               | PENDING                                                                                                                |
+| Clef mode                                          | PENDING                                                                                                                |
+| `--parallel`                                       | 3 (R39, 2026-10-29): subtitles on slot 0, two comment batches on slots 1 and 2; see "Fast English chat on three slots" |
+| p50 / p95 per language                             | PENDING                                                                                                                |
+| Total memory                                       | PENDING                                                                                                                |
+| Judge vs human spot check (20 sentences, spec §10) | PENDING, needs the user                                                                                                |
+| Source URLs, file hashes, measurement date         | PENDING                                                                                                                |
+
+If a language misses the 2 second target, follow the order in spec §6 ("遅延が 2 秒を超えるとき").
+
+### Interim defaults until measured
+
+- Clef judge mode: the comment extension falls back to LLM category classification (spec §7) unless a measurement returns `CLEF_MODE=systemone`.
+- ASR engine: gemma4-e4b through llama.cpp `input_audio` (R8 / R10, provisional, 2026-10-28). whisper.cpp (`http://127.0.0.1:8081`) is not used; choosing it would need the user's confirmation (spec §10).
+- Translation server: `http://127.0.0.1:18083` (router server, R21; supersedes `http://127.0.0.1:18082` and the interim `http://127.0.0.1:8080`).
+
+### Clef sources and probe
+
+The mode decision is recorded after a real measurement (pending, see above). Sources checked on 2026-10-28 against llama.cpp master [`8ca4060`](https://github.com/ggml-org/llama.cpp/commit/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552) (2026-10-28T00:26Z). `POST /v1/systemone` came from [#29818](https://github.com/ggml-org/llama.cpp/pull/29818), merged 2026-10-02T09:56Z as `a4cb4c61fd9d9c2066c7c1747821d3d65b8943bd`. That confirms the secondary report's date, but this PR did not support Clef yet. Clef text support came from [#29831](https://github.com/ggml-org/llama.cpp/pull/29831), merged 2026-10-03T00:50Z as `99b95488cac0f00ce3f05af113a8c1e287753f87`. Vision came from [#29969](https://github.com/ggml-org/llama.cpp/pull/29969), merged 2026-10-05 as `9871df5911a03a813518bcd623ee2eba91bf32aa`. The [server README](https://github.com/ggml-org/llama.cpp/blob/8ca4060b7e30e76baaa5670ee1ec1b760b7f8552/tools/server/README.md) (TypeSafe/Jev-compatible) and `tools/server/tests/unit/test_systemone.py` define the shape. A request has `state` (a string or JSON) and `questions`, which maps an id to `{type: choice|score|noul, instructions, criteria}`. A `choice` answer is `answers.<id>.{choice, probabilities, confidence}`. The probabilities sum to 1 and are keyed by the option. `noul` returns only `noul`, the probability of true. A model that is not a decision model gets HTTP 501, and an invalid request gets 400. A server that runs Clef serves only this endpoint and has no text generation. `GET /v1/models` lists `decisions` in `architecture.output_modalities` for a native decision model.
+
+Model: [Cloudflare/clef-flash](https://huggingface.co/Cloudflare/clef-flash) (revision `f0b7d3cd65296abfe459e6c228b618f5d8b26d2f`, Apache-2.0, 9B, Qwen3.5-9B backbone). It was announced in the [Cloudflare blog](https://blog.cloudflare.com/clef-decision-models) on 2026-10-01. The card describes the Jev/SystemOne `POST /v1/systemone` with the same answer fields and one logit per option, softmaxed per question. It does not mention GGUF or llama.cpp. The joint schema head is a separate file, `joint_head.safetensors`, beside the backbone shards. A converter that reads only the backbone would therefore drop it (inference from the file layout, not observed). Open PR [#30113](https://github.com/ggml-org/llama.cpp/pull/30113) states that `llama-server` needs `<arch>.decision.type` metadata and that some generic community conversions of decision models lack it. The report that community GGUFs may lack the decision head therefore holds for generic conversions. It does not hold for the two main Clef-flash GGUFs. The [ggml-org/Clef-Flash-GGUF](https://huggingface.co/ggml-org/Clef-Flash-GGUF) revision `6e2a164d70aae2af7fce86005da3f91805565b1d` was converted from the revision above, and its `convert.log` writes every `decision.*` tensor. It ships Q4_K_M, Q8_0, BF16 and mmproj files. [bartowski/Cloudflare_clef-flash-GGUF](https://huggingface.co/bartowski/Cloudflare_clef-flash-GGUF) revision `5fcdd9ba6d3d5b962ad149e31457de5783e49de5` was made with b11430, and its card says the head is kept at Q8_0 in every quantization.
+
+Runtime caveats from primary sources: [#30064](https://github.com/ggml-org/llama.cpp/issues/30064) reported that Clef probabilities on Apple Metal collapsed toward uniform. The cause was a Metal `MUL_MAT+ADD` fusion bug, not quantization. It was fixed by [#30100](https://github.com/ggml-org/llama.cpp/pull/30100) (`7e8324f5feba1d8be3f966e1791e84107e40cdd7`, 2026-10-07), first released in [b11475](https://github.com/ggml-org/llama.cpp/releases/tag/b11475), so the reference Mac needs b11475 or newer. A Clef prompt must fit in `--ubatch-size` (default 512, [#30073](https://github.com/ggml-org/llama.cpp/issues/30073) open). [#30583](https://github.com/ggml-org/llama.cpp/issues/30583) (arm64 CPU load crash) is open and does not affect Metal.
+
+Probe: `pnpm --filter @chrome-toolbox/bench bench:clef -- --server <url>` first sends a `choice` question with options `yes`/`no` to `/v1/systemone`. Any network error, non-2xx status or missing `probabilities.yes`/`no` makes it fall back to `/v1/chat/completions`. That request asks for a one-token yes/no answer with `logprobs: true`, `top_logprobs: 5` and `chat_template_kwargs.enable_thinking: false`. It normalizes p(yes) over the yes/no variants in `top_logprobs`. If both fail, the mode is `unavailable` and the exit status is non-zero. If the probe succeeds, the CLI scores `packages/bench/fixtures/clef.jsonl`: 20 self-written comments, abusive when p ≥ 0.5. A failed sample counts as wrong. It prints the accuracy and p50, and writes the rows to `bench-data/results/`. If every sample fails, the mode is downgraded to `unavailable`. The last stdout line is `CLEF_MODE=<systemone|logprobs|unavailable>`. Because a Clef server has no text generation, `logprobs` can only come from a text model, so it is a variant of the spec §7 LLM fallback. It does not mean Clef is running. Not run against a real Clef-flash server: no llama-server is installed here. Against an unreachable server the CLI prints `CLEF_MODE=unavailable` and exits 1.
+
 ## Project-local cf operations, 2026-10-11
 
 The [official project command specification](https://developers.cloudflare.com/cf/projects/) and its [official source](https://github.com/cloudflare/cloudflare-docs/blob/production/src/content/docs/cf/projects/index.mdx), cf beta.14 release notes/installed command handlers, npm metadata and plugin types were checked before this change. A real `cf build --mode offline` rejected the formerly selected stable plugin1.63.1: cf requires the v2 beta delegate. The official beta tag resolves to `2.0.0-beta.sha-91c870c02`, published2026-10-09T10:05:13.393Z, with Vite7/8 peers and the same config0.24.1/Miniflare5.20261006.1-alpha contracts. Pin that exact version after a separate minimal Worker build/HTTP development probe. A first discovery fixture unintentionally triggered pnpm's implicit dependency preparation and used ordinary Vite8.3.4; it is not accepted as the selected toolchain's install proof. The corrected fixture uses the repository's `verifyDepsBeforeRun:false`, Vite+ core alias, peer policy,24-hour maturity and explicit narrow build permissions; its explicit install/frozen reinstall and actual cf build succeeded. Source and generated real runtime/UI checks must validate the final input as well.
@@ -171,3 +606,11 @@ Installed Vite+ core 1.1.0 initializes Windows realpaths with an asynchronous `e
 A fresh generated fullstack Agent then reproduced a normal pre-commit failure when its own `TMPDIR` was inside ignored `.state/`: Vite+ inherited the parent ignore rules and found no targets. The official [Git hook routing specification](https://github.com/git/git/blob/v2.55.0/Documentation/githooks.adoc) and [repository environment](https://github.com/git/git/blob/v2.55.0/Documentation/git.adoc), checked on 2026-10-12 UTC, require foreign Git operations to clear exported local routing variables. The exact staged copy now uses the existing verification Git-boundary helper with that cleared environment; only checkout-index reads the user's actual index. Formatter, lint and structure run in the independent boundary, without a new configuration manager or dependency. Real Git rehearsals deliberately put temporary snapshots under ignored `.state/` and assert valid, invalid, repaired, partial-stage and linked-worktree behavior, unchanged user configuration/content and final snapshot cleanup. The old Agent's unrecorded-path workaround is not accepted as the repair; fresh committed-input CI and generated verification must prove it.
 
 The ignored-temporary-directory real push then exposed two test fixtures assuming their temporary parent had no Git history. They now use the same independent unborn Git boundary before creating their child repositories. Every original null-SHA, exported-routing, exact-parent-HEAD, unborn-status, remote-ref and unchanged-source assertion remains; a leaked `GIT_DIR` still overrides the boundary and fails the real linked push. Production Git-discovery behavior is unchanged: the existing `ownHeadSha` guard already distinguishes owned source provenance from a parent checkout. Full ignored-TMPDIR hook and current-input OS verification must rerun. A second fresh Agent also retained a default Wrangler log `ENOSPC` warning from the zero-capacity home filesystem; the official environment-variable specification was checked on 2026-10-12 and its owned-log-directory recovery is now in troubleshooting. This records environment recovery without silently changing runtime/deployment semantics.
+
+## Undici advisories (2026-11-05)
+
+Security CI on `62fa0f4` blocked on eight HIGH Trivy findings: [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx) (TLS validation bypass through dropped Agent options), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26) (cache poisoning through cross-origin redirects), [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm) (TLS 1.2 renegotiation DoS) and [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) (content-encoding DoS), each against undici 7.29.1 and 8.11.2. They were published 2026-10-23 and 2026-10-27 and are fixed in 7.30.1 and 8.12.2 (npm 2026-10-15), which also fix the four MEDIUM undici advisories of the same batch. Both lines are true positives, so the dependency moves; no finding is ignored.
+
+jsdom 30.1.2 requires `^8.11.2`, so only the lock moves its copy, to 8.12.3 (npm 2026-10-19, latest). Miniflare 5.20261006.1-alpha, which wrangler 4.149.0, cf beta.14 and the v2 Vite plugin share, pins `undici` exactly at 7.29.1. Miniflare itself pins 7.30.1 from 5.20261023.0-beta (npm 2026-10-26), but moving the Cloudflare toolchain from that alpha to a beta is a separate SDK adoption. The version-scoped override `miniflare@5.20261006.1-alpha>undici: 7.30.1` applies the patch release upstream chose and stops applying once Miniflare is upgraded. Both versions are older than the 24-hour maturity rule.
+
+Compatibility, on macOS with the updated lock: the Miniflare-backed web runtime test (2 cases, real `vp dev` through the v2 plugin), the jsdom suites of comment-assistant (1111 cases) and ui (10 cases) passed, and a full local `pnpm security:check` reported zero blocking findings with no undici finding left. Hosted Linux/Windows Worker and generated-preset gates remain the acceptance evidence.

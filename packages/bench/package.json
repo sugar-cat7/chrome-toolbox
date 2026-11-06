@@ -1,0 +1,31 @@
+{
+  "name": "@chrome-toolbox/bench",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts",
+    "build": "tsc -p .",
+    "bench:translate": "node translate.ts",
+    "bench:asr": "node asr.ts",
+    "bench:make-audio": "node make-audio.ts",
+    "bench:clef": "node clef.ts",
+    "bench:slots": "node slots.ts",
+    "bench:genre": "node genre.ts"
+  },
+  "dependencies": {
+    "@chrome-toolbox/extension-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "starter": {
+    "runtime": "library"
+  }
+}

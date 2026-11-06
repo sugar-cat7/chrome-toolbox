@@ -26,6 +26,7 @@ export function contentId(root: string): string {
             `${pkg.directory}/src/routeTree.gen.ts`,
           ]
         : []),
+      ...(pkg.runtime === 'extension' ? [`${pkg.directory}/.wxt`] : []),
       ...(pkg.runtime === 'desktop'
         ? [
             `${pkg.directory}/src-tauri/target`,

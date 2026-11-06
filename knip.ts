@@ -19,7 +19,8 @@ export default {
         pkg.directory,
         {
           entry: [
-            'src/**/*.{ts,tsx}',
+            // A Node-only tooling package keeps its modules outside `src/` and has none.
+            ...(existsSync(path.join(pkg.directory, 'src')) ? ['src/**/*.{ts,tsx}'] : []),
             ...(existsSync(path.join(pkg.directory, 'src')) &&
             walk(path.join(pkg.directory, 'src')).some((filename) => filename.endsWith('.css'))
               ? ['src/**/*.css']
@@ -27,7 +28,7 @@ export default {
             ...(existsSync(path.join(pkg.directory, 'test')) ? ['test/**/*.ts'] : []),
           ],
           project: [
-            'src/**/*.{ts,tsx}',
+            ...(existsSync(path.join(pkg.directory, 'src')) ? ['src/**/*.{ts,tsx}'] : []),
             ...(existsSync(path.join(pkg.directory, 'src')) &&
             walk(path.join(pkg.directory, 'src')).some((filename) => filename.endsWith('.css'))
               ? ['src/**/*.css']

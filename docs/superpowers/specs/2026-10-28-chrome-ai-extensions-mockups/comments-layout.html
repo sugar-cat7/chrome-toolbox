@@ -1,0 +1,375 @@
+<style>
+  .wrap {
+    display: flex;
+    gap: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #ddd;
+    font-family: system-ui, sans-serif;
+    font-size: 12px;
+  }
+  .vid {
+    flex: 1.5;
+    background: linear-gradient(135deg, #3b2a5c, #1d3b5a 60%, #0f2a33);
+    position: relative;
+    min-height: 300px;
+  }
+  .vid .live {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: #e00;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .vid .sub {
+    position: absolute;
+    bottom: 14px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #fff;
+  }
+  .vid .sub span {
+    background: rgba(0, 0, 0, 0.75);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .chat {
+    flex: 1;
+    background: #fff;
+    color: #111;
+    display: flex;
+    flex-direction: column;
+    min-width: 240px;
+  }
+  .chat .hd {
+    padding: 8px 10px;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+  }
+  .chips {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    border-bottom: 1px solid #eee;
+    background: #fafafa;
+  }
+  .chip {
+    border: 1px solid #ccc;
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 10.5px;
+    background: #fff;
+  }
+  .chip.on {
+    background: #3a7afe;
+    color: #fff;
+    border-color: #3a7afe;
+  }
+  .chip.off {
+    text-decoration: line-through;
+    color: #999;
+  }
+  .msg {
+    padding: 5px 10px;
+    line-height: 1.45;
+  }
+  .msg .au {
+    color: #777;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .msg .orig {
+    color: #999;
+    font-size: 10.5px;
+    display: block;
+  }
+  .msg.q {
+    background: #eef4ff;
+    border-left: 3px solid #3a7afe;
+  }
+  .msg.imp {
+    background: #fff7e0;
+    border-left: 3px solid #f0a500;
+  }
+  .tag {
+    font-size: 9.5px;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 4px;
+    vertical-align: 1px;
+  }
+  .tag.q {
+    background: #3a7afe;
+    color: #fff;
+  }
+  .tag.imp {
+    background: #f0a500;
+    color: #fff;
+  }
+  .hidden-row {
+    color: #999;
+    font-size: 10.5px;
+    padding: 4px 10px;
+    font-style: italic;
+  }
+  .side {
+    width: 280px;
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    font-family: system-ui, sans-serif;
+    font-size: 12px;
+    overflow: hidden;
+  }
+  .side .tabs {
+    display: flex;
+    border-bottom: 1px solid #eee;
+  }
+  .side .tabs span {
+    flex: 1;
+    text-align: center;
+    padding: 8px 0;
+    color: #777;
+  }
+  .side .tabs .on {
+    color: #111;
+    font-weight: 700;
+    border-bottom: 2px solid #3a7afe;
+  }
+  .side .sec {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f3f3f3;
+  }
+  .side h5 {
+    margin: 0 0 4px;
+    font-size: 11px;
+    color: #777;
+  }
+  .seg {
+    display: inline-flex;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .seg span {
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+  .seg .on {
+    background: #3a7afe;
+    color: #fff;
+  }
+  .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: #f0a500;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .muted {
+    color: #888;
+    font-size: 11px;
+  }
+  .frow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+  }
+  .sw {
+    width: 28px;
+    height: 15px;
+    border-radius: 999px;
+    background: #3a7afe;
+    position: relative;
+    display: inline-block;
+  }
+  .sw:after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    top: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+  }
+  .sw.x {
+    background: #ccc;
+  }
+  .sw.x:after {
+    left: 2px;
+    right: auto;
+  }
+  .sel {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 11px;
+  }
+</style>
+
+<h2>コメント機能：チャット欄とサイドパネル</h2>
+<p class="subtitle">
+  ライブチャットを日本語に翻訳したうえで、Clef の有害判定と LLM
+  のカテゴリ分類をかけ、表示を切り替えます（コメントの削除はしません）。Twitch
+  でも同じ見え方にします。操作をどこに置くか、A と B のどちらが使いやすそうですか？
+</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>チャット欄の上にフィルターのチップを差し込み、要約はサイドパネルで見る</h3>
+      <p>
+        表示の切り替えはチャットを見ながらワンタップでできます。YouTube
+        側の画面に手を加える量は増えます。
+      </p>
+      <div class="wrap" style="margin-top: 8px">
+        <div class="vid">
+          <span class="live">LIVE</span>
+          <div class="sub"><span>よしチャット、ついにラスボスに行くよ</span></div>
+        </div>
+        <div class="chat">
+          <div class="hd">ライブチャット <span class="muted">翻訳 ON · 原文 ▾</span></div>
+          <div class="chips">
+            <span class="chip on">質問 ★</span><span class="chip on">重要 ★</span
+            ><span class="chip">雑談</span> <span class="chip off">攻撃的</span
+            ><span class="chip off">スパム</span><span class="chip off">ネタバレ</span>
+          </div>
+          <div class="msg">
+            <span class="au">lucas_b</span>やっと来た、ラスボス！<span class="orig"
+              >FINALLY the final boss lets gooo</span
+            >
+          </div>
+          <div class="msg q">
+            <span class="au">mika_tw</span>第2形態ってどのくらい長いの？<span class="tag q"
+              >質問</span
+            ><span class="orig">how long is the second phase?</span>
+          </div>
+          <div class="hidden-row">― 非表示 3件（攻撃的 1・スパム 2）</div>
+          <div class="msg">
+            <span class="au">게임러버</span>頑張って！応援してる<span class="orig"
+              >화이팅! 응원해요</span
+            >
+          </div>
+          <div class="msg imp">
+            <span class="au">mod_kai</span>次回の配信は土曜 21時（JST）だよ<span class="tag imp"
+              >重要</span
+            ><span class="orig">next stream is Sat 9PM JST</span>
+          </div>
+          <div class="msg">
+            <span class="au">Pedro_s</span>40回は草<span class="orig">40 deaths lmaooo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>チャット欄は表示の切り替えだけにして、操作と要約はすべてサイドパネルに置く</h3>
+      <p>
+        YouTube や Twitch
+        の画面への差し込みは最小限になり、仕様変更に強くなります。切り替えるにはサイドパネルを開く必要があります。
+      </p>
+      <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap">
+        <div class="wrap" style="flex: 1; min-width: 300px">
+          <div class="vid" style="min-height: 260px"><span class="live">LIVE</span></div>
+          <div class="chat">
+            <div class="hd">ライブチャット</div>
+            <div class="msg"><span class="au">lucas_b</span>やっと来た、ラスボス！</div>
+            <div class="msg q">
+              <span class="au">mika_tw</span>第2形態ってどのくらい長いの？<span class="tag q"
+                >質問</span
+              >
+            </div>
+            <div class="msg"><span class="au">게임러버</span>頑張って！応援してる</div>
+            <div class="msg imp">
+              <span class="au">mod_kai</span>次回の配信は土曜 21時（JST）だよ<span class="tag imp"
+                >重要</span
+              >
+            </div>
+            <div class="msg"><span class="au">Pedro_s</span>40回は草</div>
+          </div>
+        </div>
+        <div class="side" style="width: 220px">
+          <div class="tabs">
+            <span>要約</span><span class="on">フィルター</span><span>設定</span>
+          </div>
+          <div class="sec">
+            <div class="frow">翻訳 <span class="sw"></span></div>
+            <div class="frow">質問をハイライト <span class="sw"></span></div>
+            <div class="frow">重要情報をハイライト <span class="sw"></span></div>
+            <div class="frow">攻撃的（Clef） <span class="sel">隠す ▾</span></div>
+            <div class="frow">スパム・宣伝 <span class="sel">隠す ▾</span></div>
+            <div class="frow">ネタバレ <span class="sel">ぼかす ▾</span></div>
+            <div class="frow">雑談 <span class="sel">表示 ▾</span></div>
+            <div class="muted" style="margin-top: 6px">このチャンネル用に保存 ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="section"
+  style="display: flex; gap: 24px; align-items: flex-start; margin-top: 18px; flex-wrap: wrap"
+>
+  <div class="side">
+    <div class="tabs"><span class="on">要約</span><span>フィルター</span><span>設定</span></div>
+    <div class="sec">
+      <span class="seg"><span>直近5分</span><span class="on">15分</span><span>30分</span></span>
+      <span class="muted">自動更新 ON · 2分前</span>
+    </div>
+    <div class="sec">
+      <h5>主な話題</h5>
+      ・ラスボスへの挑戦（40回死んだ話）<br />・第2形態の攻略法<br />・次回の配信日程
+    </div>
+    <div class="sec">
+      <h5>よくある質問</h5>
+      ・第2形態の長さ（×6）<br />・使っている武器・ビルド（×4）
+    </div>
+    <div class="sec">
+      <h5>盛り上がり</h5>
+      1:02 <span class="bar" style="width: 60px"></span> 第1形態の撃破<br />1:09
+      <span class="bar" style="width: 110px"></span> 初見での回避
+    </div>
+    <div class="sec">
+      <h5>重要コメント</h5>
+      mod_kai：次回は土曜 21時（JST）
+    </div>
+    <div class="sec muted">対象 1,284件 · 英・韓・西・日 → 日本語</div>
+  </div>
+  <div style="flex: 1; min-width: 260px">
+    <h3>どちらの案でも共通の処理と表示</h3>
+    <ul>
+      <li>
+        <b>1コメントにつき推論は1回</b>：取得 → 言語判定（Chrome 内蔵 API）→ 重複の除去・まとめ処理
+        → Clef で有害判定 → 小型 LLM
+        で翻訳とカテゴリ分類を同時に実行。結果は保存し、フィルターと要約で使い回します。
+      </li>
+      <li><b>日本語のコメント</b>は翻訳を飛ばし、分類だけを行います。</li>
+      <li>
+        <b>カテゴリごとの表示方法</b>：表示 / ハイライト / ぼかす / 隠す。隠したコメントは「非表示
+        n件」にまとめ、クリックで開けます。
+      </li>
+      <li>
+        <b>負荷の上限</b
+        >：保持するコメント数に上限を設けた古い順の入れ替え式、画面に見えている範囲だけを処理、流量が多いときは間引き。
+      </li>
+    </ul>
+  </div>
+</div>

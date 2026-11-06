@@ -6,6 +6,7 @@ const ownedBuilds = workspacePackages(process.cwd()).flatMap((pkg) => [
   `${pkg.directory}/.cloudflare/**`,
   `${pkg.directory}/.wrangler/**`,
   `${pkg.directory}/src/routeTree.gen.ts`,
+  ...(pkg.runtime === 'extension' ? [`${pkg.directory}/.wxt/**`] : []),
   ...(pkg.runtime === 'desktop'
     ? [`${pkg.directory}/src-tauri/target/**`, `${pkg.directory}/src-tauri/gen/**`]
     : []),

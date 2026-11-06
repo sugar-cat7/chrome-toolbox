@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { readFile } from 'node:fs/promises';
-import { notesSchema } from '@starter/contracts';
+import { notesSchema } from '@chrome-toolbox/contracts';
 
 test('styled SSR and safe input remain available while hydration is loading', async ({ page }) => {
   let release: (() => void) | undefined;
@@ -138,16 +138,16 @@ test('loading, empty and API-error states have reviewed visual baselines', async
   await page.goto('/');
   await expect(page.getByText('Loading notes…')).toBeVisible();
   const region = page.getByRole('region', { name: 'Notes' });
-  await expect(region).toHaveScreenshot('persistent-loading.png');
+  await expect(region).toHaveScreenshot('volatile-loading.png');
   release?.();
   await expect(page.getByText('No notes yet. Add your first note.')).toBeVisible();
-  await expect(region).toHaveScreenshot('persistent-empty.png');
+  await expect(region).toHaveScreenshot('volatile-empty.png');
   await page.unroute('**/api/notes');
   await page.route('**/api/notes', (route) =>
     route.fulfill({ status: 503, json: { error: { code: 'unavailable' } } }),
   );
   await page.reload();
   await expect(page.getByRole('alert')).toContainText('could not be loaded');
-  await expect(region).toHaveScreenshot('persistent-error.png');
+  await expect(region).toHaveScreenshot('volatile-error.png');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

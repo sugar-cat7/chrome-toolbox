@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
@@ -156,6 +164,39 @@ it('waits for the health body and retries a probe whose body exceeds its deadlin
     expect(existsSync(path.join(root, 'completed-body'))).toBe(true);
     expect(await (await fetch(origin)).text()).toBe('ready');
     expect(servers.children).toHaveLength(1);
+  } finally {
+    await servers.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30000);
+
+it('treats an extension as ready only after this run writes its unpacked manifest', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'starter-extension-'));
+  const servers = new Servers(root);
+  const pkg = {
+    name: 'extension-fixture',
+    directory: '.',
+    runtime: 'extension' as const,
+    dependencies: [],
+    scripts: { dev: 'node server.cjs' },
+  };
+  writeFileSync(
+    path.join(root, 'package.json'),
+    JSON.stringify({ name: pkg.name, scripts: pkg.scripts }),
+  );
+  const unpacked = path.join(root, 'dist/chrome-mv3-dev');
+  mkdirSync(unpacked, { recursive: true });
+  // A previous run's manifest must not satisfy readiness.
+  writeFileSync(path.join(unpacked, 'manifest.json'), '{"stale":true}');
+  const past = new Date(Date.now() - 60_000);
+  utimesSync(path.join(unpacked, 'manifest.json'), past, past);
+  writeFileSync(
+    path.join(root, 'server.cjs'),
+    "const fs=require('node:fs');require('node:http').createServer((req,res)=>{res.statusCode=404;res.end();}).listen(Number(process.env.STARTER_PORT),'127.0.0.1',()=>{console.log('http://127.0.0.1:'+process.env.STARTER_PORT);setTimeout(()=>fs.writeFileSync('dist/chrome-mv3-dev/manifest.json','{\"fresh\":true}'),600);});\n",
+  );
+  try {
+    await servers.start(pkg);
+    expect(readFileSync(path.join(unpacked, 'manifest.json'), 'utf8')).toBe('{"fresh":true}');
   } finally {
     await servers.stop();
     rmSync(root, { recursive: true, force: true });

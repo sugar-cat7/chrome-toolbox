@@ -1,0 +1,38 @@
+{"text": "緑の人怪しくない？", "genre": "deduction", "expected": "chatter"}
+{"text": "緑の人が人狼だよ、他の人の配信で見てきた", "genre": "deduction", "expected": "ghosting"}
+{"text": "投票誰にするの？", "genre": "deduction", "expected": "question"}
+{"text": "ぬいまるさんも別の村で人狼やってるよ", "genre": "deduction", "expected": "chatter"}
+{"text": "今の推理すごい", "genre": "deduction", "expected": "chatter"}
+{"text": "占い師は黄色の人で確定してる、別視点で見た", "genre": "deduction", "expected": "ghosting"}
+{"text": "白っぽいけど人狼な気がする", "genre": "deduction", "expected": "chatter"}
+{"text": "声震えてるけど何歳？", "genre": "deduction", "expected": "privacy"}
+{"text": "青の人の発言矛盾してるよね", "genre": "deduction", "expected": "chatter"}
+{"text": "青の人さっき船長室で一人キルしてたよ", "genre": "deduction", "expected": "ghosting"}
+{"text": "さっきの試合、黄色が人狼だったんだね", "genre": "deduction", "expected": "chatter"}
+{"text": "占い結果どうだった？", "genre": "deduction", "expected": "question"}
+{"text": "人狼より現実の政治の方が嘘ばっかりだよね、首相どう思う？", "genre": "deduction", "expected": "sensitive"}
+{"text": "吊られちゃった…", "genre": "deduction", "expected": "chatter"}
+{"text": "もちこさんの枠から来ました！", "genre": "deduction", "expected": "chatter"}
+{"text": "役職なに？", "genre": "deduction", "expected": "question"}
+{"text": "purple vented in electrical, saw it on his stream", "genre": "deduction", "expected": "ghosting"}
+{"text": "that was a big brain play", "genre": "deduction", "expected": "chatter"}
+{"text": "who do you think it is?", "genre": "deduction", "expected": "question"}
+{"text": "人狼陣営勝利おめでとう", "genre": "deduction", "expected": "chatter"}
+{"text": "どこの会社で働いてるの？", "genre": "deduction", "expected": "privacy"}
+{"text": "タスク早い", "genre": "deduction", "expected": "chatter"}
+{"text": "今の会議、白の人嘘ついてる。他窓で役職見えてた", "genre": "deduction", "expected": "ghosting"}
+{"text": "村人っぽい動き", "genre": "deduction", "expected": "chatter"}
+{"text": "この村何人？", "genre": "deduction", "expected": "question"}
+{"text": "この宗教の教え、人狼にも使えるよ、入信しよう", "genre": "deduction", "expected": "sensitive"}
+{"text": "会議の司会うまい", "genre": "deduction", "expected": "chatter"}
+{"text": "同じ村入ったから今から吊りに行くわ", "genre": "deduction", "expected": "ghosting"}
+{"text": "緊張感やばい", "genre": "deduction", "expected": "chatter"}
+{"text": "次の試合も見る", "genre": "deduction", "expected": "chatter"}
+{"text": "嘘つくの上手すぎ", "genre": "deduction", "expected": "chatter"}
+{"text": "黒確出た？", "genre": "deduction", "expected": "question"}
+{"text": "マップの名前なに？", "genre": "deduction", "expected": "question"}
+{"text": "人狼うまいのはもちこさんの方だよね", "genre": "deduction", "expected": "sensitive"}
+{"text": "人狼って配信者に人気のゲームだよね", "genre": "deduction", "expected": "chatter"}
+{"text": "黄色の人、役職持ちっぽくて怖い", "genre": "deduction", "expected": "chatter"}
+{"text": "ぺんたさんの村でさっき大逆転してたよ", "genre": "deduction", "expected": "relay"}
+{"text": "みんなでふわりさんの人狼配信に凸ろうぜ", "genre": "deduction", "expected": "relay"}

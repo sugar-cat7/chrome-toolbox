@@ -1,0 +1,39 @@
+{
+  "name": "@chrome-toolbox/subtitle-translator",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "typegen": "wxt prepare",
+    "check": "vp check .",
+    "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
+    "test:e2e": "node ../../tools/quality/extension-browser.ts"
+  },
+  "dependencies": {
+    "@chrome-toolbox/contracts": "workspace:*",
+    "@chrome-toolbox/extension-core": "workspace:*",
+    "@chrome-toolbox/ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "wxt": "catalog:"
+  },
+  "starter": {
+    "runtime": "extension"
+  }
+}

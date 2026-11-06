@@ -1,0 +1,43 @@
+{"text": "こわすぎ", "genre": "horror", "expected": "chatter"}
+{"text": "次の部屋…覚悟しとけよ", "genre": "horror", "expected": "spoiler"}
+{"text": "次どの部屋行くの？", "genre": "horror", "expected": "question"}
+{"text": "ロッカーに隠れたほうがいい", "genre": "horror", "expected": "instruction"}
+{"text": "後ろにいた！！", "genre": "horror", "expected": "chatter"}
+{"text": "ふわりさんもこれやってて大絶叫してたw", "genre": "horror", "expected": "relay"}
+{"text": "びっくりした", "genre": "horror", "expected": "chatter"}
+{"text": "その人形、最後に動き出すよ", "genre": "horror", "expected": "spoiler"}
+{"text": "音量注意だった…", "genre": "horror", "expected": "chatter"}
+{"text": "懐中電灯の電池拾っておいて", "genre": "horror", "expected": "instruction"}
+{"text": "この人形絶対動くやつじゃん", "genre": "horror", "expected": "chatter"}
+{"text": "怖がり方で前世わかったわ", "genre": "horror", "expected": "privacy"}
+{"text": "叫び声かわいい", "genre": "horror", "expected": "chatter"}
+{"text": "犯人はお母さんなんだよね", "genre": "horror", "expected": "spoiler"}
+{"text": "このゲーム何時間で終わる？", "genre": "horror", "expected": "question"}
+{"text": "走らないで歩いたほうがいいよ", "genre": "horror", "expected": "instruction"}
+{"text": "夜中に見るんじゃなかった", "genre": "horror", "expected": "chatter"}
+{"text": "ぬいまるの配信から来た", "genre": "horror", "expected": "chatter"}
+{"text": "がんばれ〜", "genre": "horror", "expected": "chatter"}
+{"text": "心霊より政治の方が怖いよね、次の選挙誰に入れる？", "genre": "horror", "expected": "sensitive"}
+{"text": "逃げてー！", "genre": "horror", "expected": "chatter"}
+{"text": "the ghost is actually the sister, just wait", "genre": "horror", "expected": "spoiler"}
+{"text": "nope nope nope", "genre": "horror", "expected": "chatter"}
+{"text": "turn around and go back to the kitchen first", "genre": "horror", "expected": "instruction"}
+{"text": "is this game based on a true story?", "genre": "horror", "expected": "question"}
+{"text": "一人暮らしなの？家どの辺？", "genre": "horror", "expected": "privacy"}
+{"text": "宗教っぽい儀式の部屋こわ", "genre": "horror", "expected": "chatter"}
+{"text": "この先のムービー、ハンカチ用意しとけ", "genre": "horror", "expected": "spoiler"}
+{"text": "BGMが不気味", "genre": "horror", "expected": "chatter"}
+{"text": "この宗教団体入らない？配信で紹介してよ", "genre": "horror", "expected": "sensitive"}
+{"text": "ホラー苦手なのにえらい", "genre": "horror", "expected": "chatter"}
+{"text": "さっきのジャンプスケアやばかった", "genre": "horror", "expected": "chatter"}
+{"text": "that jumpscare got me too lol", "genre": "horror", "expected": "chatter"}
+{"text": "心霊スポット行ったことある？", "genre": "horror", "expected": "question"}
+{"text": "鍵どこにあったっけ？", "genre": "horror", "expected": "question"}
+{"text": "懐中電灯の光きれい", "genre": "horror", "expected": "chatter"}
+{"text": "こんばんは、初見です", "genre": "horror", "expected": "chatter"}
+{"text": "声震えてて草", "genre": "horror", "expected": "chatter"}
+{"text": "見てるだけで怖い", "genre": "horror", "expected": "chatter"}
+{"text": "被災地の心霊スポット凸してみてよ、不謹慎なほど伸びるって", "genre": "horror", "expected": "sensitive"}
+{"text": "災害から脱出するホラー、リアルで怖い", "genre": "horror", "expected": "chatter"}
+{"text": "主人公は助かるって信じてる", "genre": "horror", "expected": "chatter"}
+{"text": "ぺんたさんの配信、今めっちゃ怖いとこやってるから見に行こ", "genre": "horror", "expected": "relay"}

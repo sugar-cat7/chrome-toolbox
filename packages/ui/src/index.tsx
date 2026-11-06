@@ -8,7 +8,7 @@ import {
   type Result,
   type Note,
   type NoteInput,
-} from '@starter/contracts';
+} from '@chrome-toolbox/contracts';
 
 export type NotesAdapter = {
   list(this: void): Promise<Result<Note[], PublicError>>;
@@ -178,3 +178,5 @@ export function NotesPanel({ adapter, storage }: { adapter: NotesAdapter; storag
     </section>
   );
 }
+
+export { ConnectionPanel, type ConnectionAdapter } from './connection.tsx';

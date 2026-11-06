@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  A made-up watch page of a live stream: ytd-watch-flexy with the video's id, the title and the
+  owner link as in test/fixtures/youtube-comments.html (observed on 2026-10-28), and the live
+  chat in iframe#chatframe. Like YouTube's, the iframe's URL names no video (only a
+  continuation), so the chat takes its video from this page. `?rate=<n>` is handed to the chat
+  generator (live-chat.html). The chat is sized like YouTube's and fits Playwright's default
+  viewport (1280×720), so it is on screen.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>watch fixture</title>
+  </head>
+  <body>
+    <ytd-app>
+      <div id="content">
+        <ytd-page-manager id="page-manager">
+          <ytd-watch-flexy>
+            <div id="columns">
+              <div id="primary">
+                <div id="below">
+                  <ytd-watch-metadata>
+                    <div id="above-the-fold">
+                      <div id="title"><h1>Fixture Raid Night: the clockwork tower</h1></div>
+                      <div id="top-row">
+                        <div id="owner">
+                          <ytd-video-owner-renderer
+                            ><a href="/@FixtureStreamer"
+                              >Fixture Streamer</a
+                            ></ytd-video-owner-renderer
+                          >
+                        </div>
+                      </div>
+                    </div>
+                  </ytd-watch-metadata>
+                </div>
+              </div>
+              <div id="secondary">
+                <ytd-live-chat-frame id="chat"
+                  ><iframe id="chatframe" style="width: 400px; height: 480px; border: 0"></iframe
+                ></ytd-live-chat-frame>
+              </div>
+            </div>
+          </ytd-watch-flexy>
+        </ytd-page-manager>
+      </div>
+    </ytd-app>
+    <script>
+      (() => {
+        const params = new URLSearchParams(location.search);
+        // The metadata shows this video once the attribute names it, as on YouTube.
+        document.querySelector('ytd-watch-flexy').setAttribute('video-id', params.get('v') ?? '');
+        const chat = new URLSearchParams({ continuation: 'fixture-continuation' });
+        if (params.has('rate')) chat.set('rate', params.get('rate'));
+        document.getElementById('chatframe').src = `/live_chat?${chat}`;
+      })();
+    </script>
+  </body>
+</html>

@@ -1,9 +1,0 @@
-import { defineConfig } from 'vite-plus';
-
-export default defineConfig({
-  test: {
-    include: ['test/runtime.test.ts', 'test/**/*.runtime.test.ts'],
-    passWithNoTests: false,
-    testTimeout: 30_000,
-  },
-});

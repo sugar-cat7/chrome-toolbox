@@ -1,5 +1,5 @@
 {
-  "name": "@starter/observability",
+  "name": "@chrome-toolbox/observability",
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
@@ -13,10 +13,10 @@
     "build": "vp pack"
   },
   "dependencies": {
+    "@chrome-toolbox/contracts": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/resources": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@starter/contracts": "workspace:*"
+    "@opentelemetry/sdk-trace-base": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

@@ -77,6 +77,34 @@ describe('runtime boundaries', () => {
       },
     );
   });
+  it('keeps browser extensions isolated from each other and from server or native APIs', () => {
+    fixture(
+      {
+        'packages/subtitles/package.json': JSON.stringify({
+          name: '@example/subtitles',
+          starter: { runtime: 'extension' },
+        }),
+        'packages/comments/package.json': JSON.stringify({
+          name: '@example/comments',
+          starter: { runtime: 'extension' },
+        }),
+        'packages/subtitles/src/entrypoints/background.ts':
+          "import '@example/comments/src/router.ts';\nimport 'node:fs';\nimport '@tauri-apps/api/core';",
+        'packages/comments/src/entrypoints/background.ts':
+          "import '@example/contracts';\nexport const ready = true;",
+        'packages/comments/.wxt/types/imports.d.ts': "import 'node:path';",
+      },
+      (root) => {
+        const errors = structure(root);
+        expect(errors).toEqual([
+          expect.stringContaining('application implementation import is forbidden'),
+          expect.stringContaining('runtime boundary violation: node:fs'),
+          expect.stringContaining('runtime boundary violation: @tauri-apps/api/core'),
+        ]);
+        expect(errors.join('\n')).not.toContain('packages/comments');
+      },
+    );
+  });
   it('examines dynamic imports and passes portable shared code', () => {
     fixture(
       { 'packages/contracts/src/index.ts': "export const load = () => import('node:fs');" },
