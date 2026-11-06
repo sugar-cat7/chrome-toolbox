@@ -1,13 +1,15 @@
 // A local stand-in for llama.cpp's HTTP server, so extension E2E tests never depend on a real
 // model server. It runs in Node (outside src/) and speaks the formats the extensions send:
-// health, props, slots and models, the compact comment batch, the chat summary and the genre
-// guess (`/v1/chat/completions`, prompts.ts) and Clef (`/v1/systemone`, toxicity.ts).
+// health, props, slots and models, the compact comment batch, the page batch, the chat summary
+// and the genre guess (`/v1/chat/completions`, prompts.ts) and Clef (`/v1/systemone`,
+// toxicity.ts).
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
   COMMENT_CATEGORY_CODES,
   commentBatchPrompt,
   genrePrompt,
+  pageBatchPrompt,
   PLAMO_LANGUAGES,
   PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
@@ -76,6 +78,9 @@ const SUBTITLE_SYSTEM = subtitlePrompt({
   context: '',
   glossary: [],
 }).messages[0]?.content;
+/** The system turn of the page batch. */
+const PAGE_SYSTEM = pageBatchPrompt({ page: { title: '', site: '' }, units: [] }).messages[0]
+  ?.content;
 /** The genre the stub guesses for every stream. */
 export const STUB_GENRE: StreamGenre = 'story';
 /**
@@ -211,6 +216,33 @@ export const chatCompletion = (content: string): StubReply => ({
     choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
   },
 });
+/** The prefix of a translated piece of a page batch reply: made up, not a model output. */
+export const STUB_PAGE_PREFIX = '訳:';
+const PAGE_MARKER = /(<\/?\d+>|<k\d+\/>)/u;
+/**
+ * The page batch reply, one `<id>\t<translation>` line per segment: each marker is kept, a part
+ * of only whitespace dropped and any other part prefixed with `STUB_PAGE_PREFIX`.
+ */
+export function pageBatchReply(user: string): string {
+  return user
+    .split('\n')
+    .filter((line) => line.startsWith('{'))
+    .map((line): unknown => JSON.parse(line))
+    .flatMap((segment) =>
+      isRecord(segment) && typeof segment.id === 'number' && typeof segment.text === 'string'
+        ? [
+            `${segment.id}\t${segment.text
+              .split(PAGE_MARKER)
+              .map((part, i) => {
+                if (i % 2 === 1) return part;
+                return part.trim() === '' ? '' : `${STUB_PAGE_PREFIX}${part}`;
+              })
+              .join('')}\n`,
+          ]
+        : [],
+    )
+    .join('');
+}
 /** The transcript of an `input_audio` chat is `STUB_TRANSCRIPT` plus a serial number. */
 export const STUB_TRANSCRIPT = 'Stub speech';
 /** The ASR reply `<lang>\t<text>\n` to the `n`th audio chat; made up, not a transcript. */
@@ -368,6 +400,7 @@ export function defaultResponder(request: StubRequest): StubReply {
       if (system === SUMMARY_SYSTEM) return chatCompletion(summaryReply(user));
       if (system === GENRE_SYSTEM) return chatCompletion(STUB_GENRE);
       // Audio chats were answered above: this system turn without audio is a translation.
+      if (system === PAGE_SYSTEM) return chatCompletion(pageBatchReply(user));
       if (system === SUBTITLE_SYSTEM) return chatCompletion(subtitleReply(user));
       return NOT_FOUND;
     }
