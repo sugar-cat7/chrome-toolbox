@@ -110,6 +110,9 @@ describe('cold app addition', () => {
         expect(existsSync(root)).toBe(false);
       }
     },
+    // Each case runs the real add command and finalizes the managed files: 21–27 s on a Windows
+    // runner and 35 s inside a generated project's push hook, past the shared 30 s budget.
+    90_000,
   );
 });
 
