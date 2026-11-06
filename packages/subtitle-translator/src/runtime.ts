@@ -14,7 +14,7 @@ import {
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
-import { createTabPages, type PageInfo } from './page-context.ts';
+import { tabPagesStore, videoOfUrl, type PageInfo } from './page-context.ts';
 import {
   subtitleProtocol,
   type SubtitleMessageType,
@@ -157,8 +157,9 @@ export function startBackground(): () => void {
   const queue = createQueue({ concurrency: 1, maxPending: 16 });
   const fetcher: Fetch = (input, init) => fetch(input, init);
   const llm = llmHandlers({ fetch: fetcher, queue });
-  // What each watch page last reported (16 tabs): the context and glossary of its captions.
-  const pages = createTabPages();
+  // What each watch page last reported (16 tabs): the context and glossary of its captions. Kept
+  // in storage.session too, so the batches after a service worker restart still have them.
+  const pages = tabPagesStore(browser.storage.session);
   const captions = captionTranslation({
     settings: settingsStore(browser.storage.local),
     glossary: glossaryStore(browser.storage.local),
@@ -171,12 +172,42 @@ export function startBackground(): () => void {
       ...llm,
       'subs/page': async ({ info }): Promise<Result<Record<string, never>>> => {
         if (tabId === undefined) return forbidden();
-        pages.report(tabId, info);
-        return Ok({});
+        const kept = await pages.report(tabId, info);
+        return kept.ok ? Ok({}) : kept;
       },
-      'subs/translate': (request) =>
-        tabId === undefined ? forbidden() : captions.translate(request, pages.get(tabId)),
+      'subs/translate': async (request): Promise<Result<TranslateResponse>> => {
+        if (tabId === undefined) return forbidden();
+        const page = await pages.get(tabId);
+        return page.ok ? captions.translate(request, page.value) : page;
+      },
     };
+  }
+  // The result of these two is not used: an entry that stays is replaced by the tab's next
+  // report or ages out, and a translation uses a page only for the video it names.
+  /** A closed tab's page is forgotten. */
+  function onTabRemoved(tabId: number): void {
+    launch(
+      async () => {
+        await pages.forget(tabId);
+      },
+      () => undefined,
+    );
+  }
+  /**
+   * A tab that went to another video, or off a video, forgets its page. Chrome reports `url` only
+   * when the extension may see the tab's URL (the `tabs` permission or a host permission for the
+   * page); without it there is nothing to do here, and the tab's next `subs/page` replaces its
+   * page.
+   */
+  function onTabUpdated(tabId: number, change: Readonly<{ url?: string }>): void {
+    const { url } = change;
+    if (url === undefined) return;
+    launch(
+      async () => {
+        await pages.shows(tabId, videoOfUrl(url));
+      },
+      () => undefined,
+    );
   }
   function onMessage(
     message: unknown,
@@ -197,8 +228,12 @@ export function startBackground(): () => void {
     return true;
   }
   browser.runtime.onMessage.addListener(onMessage);
+  browser.tabs.onRemoved.addListener(onTabRemoved);
+  browser.tabs.onUpdated.addListener(onTabUpdated);
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
+    browser.tabs.onRemoved.removeListener(onTabRemoved);
+    browser.tabs.onUpdated.removeListener(onTabUpdated);
     queue.clear();
     captions.dispose();
   };

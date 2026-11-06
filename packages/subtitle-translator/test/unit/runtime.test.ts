@@ -4,6 +4,7 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
 import { subtitleStreamPart } from '@chrome-toolbox/extension-core';
 import { glossaryStore } from '../../src/glossary.ts';
+import { tabPagesStore } from '../../src/page-context.ts';
 import {
   senderKind,
   type Sender,
@@ -162,23 +163,64 @@ describe('sender routing', () => {
   );
 });
 
+/** llama-server's chat endpoint at the HTTP boundary: every line is translated as `訳:一行`. */
+function stubChat(): { model: string; id_slot: number; messages: { content: string }[] }[] {
+  const bodies: { model: string; id_slot: number; messages: { content: string }[] }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+      return Response.json({
+        choices: [{ message: { content: '訳:一行\n' }, finish_reason: 'stop' }],
+      });
+    }),
+  );
+  return bodies;
+}
+const topFrame = (tab: Browser.tabs.Tab): Browser.runtime.MessageSender => ({
+  url: youtube,
+  tab,
+  frameId: 0,
+});
+const page = {
+  type: 'subs/page',
+  payload: {
+    info: {
+      videoId: 'abcdefghijk',
+      streamer: 'UC-fixture',
+      title: 'Fixture Quest day 3',
+      author: 'Fixture Ch',
+      live: false,
+      tracks: 2,
+    },
+  },
+};
+const translate = (source: string) => ({
+  type: 'subs/translate',
+  payload: {
+    videoId: 'abcdefghijk',
+    sourceLang: 'en',
+    previous: [],
+    sentences: [{ id: '0:a', source }],
+  },
+});
+/** The stream part of a prompt with the page's context and the streamer's glossary. */
+const PAGE_PART = subtitleStreamPart({
+  context: 'Title: Fixture Quest day 3\nChannel: Fixture Ch',
+  glossary: [{ source: 'Fixturo', target: 'Fixturo' }],
+});
+const saveGlossary = async () => {
+  expect(
+    await glossaryStore(fakeBrowser.storage.local).save('UC-fixture', [
+      { source: 'Fixturo', target: '' },
+    ]),
+  ).toMatchObject({ ok: true });
+};
+
 describe('caption translation routes', () => {
   it('answers subs/translate only for a YouTube top frame and uses that tab page context', async () => {
-    const bodies: { model: string; id_slot: number; messages: { content: string }[] }[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_input: string, init?: RequestInit) => {
-        bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
-        return Response.json({
-          choices: [{ message: { content: '訳:一行\n' }, finish_reason: 'stop' }],
-        });
-      }),
-    );
-    expect(
-      await glossaryStore(fakeBrowser.storage.local).save('UC-fixture', [
-        { source: 'Fixturo', target: '' },
-      ]),
-    ).toMatchObject({ ok: true });
+    const bodies = stubChat();
+    await saveGlossary();
     const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
     const stop = startBackground();
     const listener = add.mock.calls[0]?.[0];
@@ -188,33 +230,6 @@ describe('caption translation routes', () => {
       });
     const watch = await fakeBrowser.tabs.create({ url: youtube });
     const other = await fakeBrowser.tabs.create({ url: youtube });
-    const topFrame = (tab: Browser.tabs.Tab): Browser.runtime.MessageSender => ({
-      url: youtube,
-      tab,
-      frameId: 0,
-    });
-    const page = {
-      type: 'subs/page',
-      payload: {
-        info: {
-          videoId: 'abcdefghijk',
-          streamer: 'UC-fixture',
-          title: 'Fixture Quest day 3',
-          author: 'Fixture Ch',
-          live: false,
-          tracks: 2,
-        },
-      },
-    };
-    const translate = (source: string) => ({
-      type: 'subs/translate',
-      payload: {
-        videoId: 'abcdefghijk',
-        sourceLang: 'en',
-        previous: [],
-        sentences: [{ id: '0:a', source }],
-      },
-    });
 
     expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
     expect(await ask(translate('Fixturo is here.'), topFrame(watch))).toEqual(
@@ -222,12 +237,7 @@ describe('caption translation routes', () => {
     );
     // The tab that reported its page gets that page's context and its streamer's glossary.
     expect(bodies[0]).toMatchObject({ model: 'gemma4-e4b', id_slot: 0 });
-    expect(bodies[0]?.messages[1]?.content).toContain(
-      subtitleStreamPart({
-        context: 'Title: Fixture Quest day 3\nChannel: Fixture Ch',
-        glossary: [{ source: 'Fixturo', target: 'Fixturo' }],
-      }),
-    );
+    expect(bodies[0]?.messages[1]?.content).toContain(PAGE_PART);
     // Another YouTube tab has reported no page: neither.
     expect(await ask(translate('Okay chat.'), topFrame(other))).toMatchObject({ ok: true });
     expect(bodies[1]?.messages[1]?.content).toContain(
@@ -255,6 +265,55 @@ describe('caption translation routes', () => {
     }
     expect(bodies).toHaveLength(2);
     stop();
+  });
+
+  it('keeps the tab page across a service worker restart and forgets it when the tab closes or shows another video', async () => {
+    const bodies = stubChat();
+    await saveGlossary();
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    // The listener of the service worker started last.
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => {
+        add.mock.calls.at(-1)?.[0]?.(message, sender, resolve);
+      });
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const closing = await fakeBrowser.tabs.create({ url: youtube });
+    if (watch.id === undefined || closing.id === undefined) throw new Error('no tab id');
+    /** What a service worker started now would find for the tab. */
+    const stored = (tabId: number) => tabPagesStore(fakeBrowser.storage.session).get(tabId);
+
+    const first = startBackground();
+    expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
+    expect(await ask(page, topFrame(closing))).toEqual(Ok({}));
+    first();
+    // A new service worker has nothing in memory: the page comes from storage.session.
+    const second = startBackground();
+    expect(await ask(translate('Fixturo is here.'), topFrame(watch))).toEqual(
+      Ok({ lines: [{ id: '0:a', ja: '訳:一行', state: 'done' }] }),
+    );
+    expect(bodies[0]?.messages[1]?.content).toContain(PAGE_PART);
+
+    // The same video at another time keeps the page; another video forgets it.
+    await fakeBrowser.tabs.update(watch.id, { url: `${youtube}&t=30s` });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await stored(watch.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
+    await fakeBrowser.tabs.update(watch.id, { url: 'https://www.youtube.com/watch?v=zyxwvutsrqp' });
+    await vi.waitFor(async () => {
+      expect(await stored(watch.id ?? -1)).toEqual(Ok(undefined));
+    });
+    // A closed tab is forgotten.
+    expect(await stored(closing.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
+    // The fake's tabs.remove looks the tab id up as a window id; the event is what Chrome sends.
+    await fakeBrowser.tabs.onRemoved.trigger(closing.id, {
+      isWindowClosing: false,
+      windowId: closing.windowId,
+    });
+    await vi.waitFor(async () => {
+      expect(await stored(closing.id ?? -1)).toEqual(Ok(undefined));
+    });
+    second();
+    expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(false);
+    expect(fakeBrowser.tabs.onUpdated.hasListeners()).toBe(false);
   });
 });
 
