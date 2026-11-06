@@ -1,13 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
-import { sidePanelPort, startBackground, type PanelApi } from '../../src/runtime.ts';
+import { claimPage } from '../../src/content/claim.ts';
+import { injectPage, PAGE_SCRIPT, type ScriptingApi } from '../../src/control.ts';
+import { optionsPort, senderKind, startBackground, type PanelApi } from '../../src/runtime.ts';
 
 afterEach(() => {
   fakeBrowser.reset();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+/** The options page, an extension page; opened in its own tab it also has a tab. */
+const options: Browser.runtime.MessageSender = {
+  url: 'chrome-extension://test-extension-id/options.html',
+  origin: 'chrome-extension://test-extension-id',
+};
+/** The background's message listener and a way to ask it as a given sender. */
+function background(): {
+  ask: (message: unknown, sender: Browser.runtime.MessageSender) => Promise<unknown>;
+  stop: () => void;
+} {
+  const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+  const stop = startBackground();
+  const listener = add.mock.calls[0]?.[0];
+  return {
+    ask: (message, sender) => new Promise((resolve) => listener?.(message, sender, resolve)),
+    stop,
+  };
+}
+const start = { type: 'page/start', payload: { tabId: 3, url: 'https://wiki.fixture.test/a' } };
 
 describe('extension runtime wiring', () => {
   it('answers status messages from the background and removes its listener on cleanup', async () => {
@@ -37,11 +60,11 @@ describe('extension runtime wiring', () => {
     expect(fakeBrowser.runtime.onMessage.hasListeners()).toBe(false);
   });
 
-  it('saves the side panel URL in extension storage before asking the background', async () => {
+  it('saves the options page URL in extension storage before asking the background', async () => {
     const send = vi.fn<PanelApi['runtime']['sendMessage']>(async () =>
       Ok({ models: ['stub-model'] }),
     );
-    const port = sidePanelPort({
+    const port = optionsPort({
       storage: fakeBrowser.storage,
       permissions: { contains: async () => true, request: async () => false },
       runtime: { sendMessage: send },
@@ -58,5 +81,111 @@ describe('extension runtime wiring', () => {
         models: { translate: 'gemma4-e4b', clef: 'clef-flash', asr: 'gemma4-e4b' },
       },
     });
+  });
+
+  it.each([
+    { name: '設定ページ', sender: options, kind: 'page' },
+    {
+      name: 'タブで開いた設定ページ',
+      sender: { ...options, tab: { id: 5 }, frameId: 0 },
+      kind: 'page',
+    },
+    {
+      name: 'トップフレーム',
+      sender: { tab: { id: 3 }, frameId: 0, url: 'https://wiki.fixture.test/a' },
+      kind: 'content',
+    },
+    { name: 'iframe', sender: { tab: { id: 3 }, frameId: 7 }, kind: 'other' },
+    {
+      name: 'サンドボックス',
+      sender: { url: 'chrome-extension://test-extension-id/x.html', origin: 'null' },
+      kind: 'other',
+    },
+    {
+      name: 'ほかの拡張のページ',
+      sender: { url: 'chrome-extension://other-extension-id/options.html' },
+      kind: 'other',
+    },
+    {
+      name: '似た名前のホスト',
+      sender: { url: 'chrome-extension://test-extension-id.fixture.test/options.html' },
+      kind: 'other',
+    },
+    { name: 'タブもページもない', sender: {}, kind: 'other' },
+  ])('senderKind: $name', ({ sender, kind }) => {
+    expect(senderKind(sender)).toBe(kind);
+  });
+
+  it('answers page/start only from extension pages', async () => {
+    const execute = vi.spyOn(fakeBrowser.scripting, 'executeScript').mockResolvedValue(undefined);
+    const deliver = vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+    const { ask, stop } = background();
+    const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
+    const senders: Browser.runtime.MessageSender[] = [
+      // The page script in the tab's top frame, and a script in one of its frames.
+      { tab, frameId: 0, url: 'https://wiki.fixture.test/a' },
+      { tab, frameId: 7, url: 'https://ads.fixture.test/frame' },
+      // A sandboxed page of this extension, and another extension's page.
+      { ...options, origin: 'null' },
+      { url: 'chrome-extension://other-extension-id/popup.html' },
+    ];
+    for (const sender of senders)
+      expect(await ask(start, sender)).toMatchObject({
+        ok: false,
+        error: { internalCode: 'sender_forbidden' },
+      });
+    expect(execute).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+
+    expect(await ask(start, options)).toEqual(Ok({}));
+    expect(execute.mock.calls).toEqual([
+      [{ target: { tabId: 3, frameIds: [0] }, files: [PAGE_SCRIPT] }],
+    ]);
+    expect(deliver.mock.calls).toEqual([
+      [3, { type: 'page/command', payload: { action: 'translate' } }, { frameId: 0 }],
+    ]);
+    // The command follows the injection: the script must be there to receive it.
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(
+      deliver.mock.invocationCallOrder[0] ?? 0,
+    );
+    // The popup sends no URL when the tab has none it may read.
+    expect(await ask({ type: 'page/start', payload: { tabId: 4 } }, options)).toEqual(Ok({}));
+    stop();
+  });
+
+  it('maps a refused injection to page_restricted', async () => {
+    const execute = vi
+      .spyOn(fakeBrowser.scripting, 'executeScript')
+      .mockRejectedValue(new Error('Cannot access a chrome:// URL'));
+    const deliver = vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+    const { ask, stop } = background();
+    expect(
+      await ask({ type: 'page/start', payload: { tabId: 3, url: 'chrome://settings/' } }, options),
+    ).toMatchObject({ ok: false, error: { internalCode: 'page_restricted' } });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(deliver).not.toHaveBeenCalled();
+    stop();
+
+    // The Web Store, a page without the tab's activeTab grant and a closed tab are refused alike.
+    for (const reason of [
+      'The extensions gallery cannot be scripted.',
+      'Cannot access contents of the page. Extension manifest must request permission to access the respective host.',
+      'No tab with id: 3',
+    ]) {
+      const api: ScriptingApi = { executeScript: () => Promise.reject(new Error(reason)) };
+      expect(await injectPage(api, 3)).toMatchObject({
+        ok: false,
+        error: { internalCode: 'page_restricted' },
+      });
+    }
+  });
+
+  it('claims a page once per isolated world', () => {
+    const world = {};
+    expect(claimPage(world)).toBe(true);
+    expect(claimPage(world)).toBe(false);
+    expect(claimPage({})).toBe(true);
+    // The mark is the shared symbol, so a script bundled apart finds it too.
+    expect(Reflect.has(world, Symbol.for('chrome-toolbox.page-translator'))).toBe(true);
   });
 });
