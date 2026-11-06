@@ -25,7 +25,14 @@ it.each(presets)(
   'renders a %s project whose README, root manifest and documents refer only to what it contains',
   (preset) => {
     const name = `generated-${preset}`;
-    const files = projectFiles(source, projectOptions({ name, scope: '@generated', preset }));
+    // Formatting changes none of what is checked here, and its many formatter processes would
+    // slow the other generator tests that run beside this one (on Windows, past their timeouts).
+    const files = projectFiles(
+      source,
+      projectOptions({ name, scope: '@generated', preset }),
+      'project',
+      false,
+    );
 
     // The README blueprint, named for the project: the source's own README describes the source.
     expect(files.get('README.md')?.toString()).toBe(

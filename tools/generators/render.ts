@@ -261,6 +261,7 @@ export function projectFiles(
   source: string,
   options: ProjectOptions,
   kind: TemplateState['kind'] = 'project',
+  format = true,
 ): Files {
   const files = infrastructureFiles(source);
   // The source's README describes the source project (a downstream project's own packages, for
@@ -280,7 +281,7 @@ export function projectFiles(
     if (command.startsWith('dev:')) delete root.scripts[command];
   const packages = selectedPackages(options);
   for (const app of packages) {
-    for (const [relative, contents] of appFiles(source, options, app))
+    for (const [relative, contents] of appFiles(source, options, app, app, format))
       files.set(relative, contents);
     if (['web', 'api', 'desktop'].includes(app))
       root.scripts[`dev:${app}`] = `node tools/dev-environment/dev.ts ${app}`;
@@ -288,9 +289,10 @@ export function projectFiles(
   files.set('package.json', Buffer.from(`${JSON.stringify(root, null, 2)}\n`));
   // Each formatted non-script file costs a formatter process; the README blueprint is kept
   // formatted instead (render.test.ts), and only its heading changes here.
-  formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
-    (contents, filename) => files.set(filename, contents),
-  );
+  if (format)
+    formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
+      (contents, filename) => files.set(filename, contents),
+    );
   const state: TemplateState = {
     version: root.version as string,
     kind,
@@ -311,7 +313,8 @@ export function projectFiles(
       ),
     };
   }
-  const key = formatterKey(source);
+  // An unformatted render records no formatter key, so finalizing it formats the managed files.
+  const key = format ? formatterKey(source) : undefined;
   if (key) state.formatKey = key;
   files.set('.template.json', Buffer.from(`${JSON.stringify(state, null, 2)}\n`));
   return files;
