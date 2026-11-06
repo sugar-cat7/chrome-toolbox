@@ -1,6 +1,12 @@
 import * as z from 'zod/mini';
 import type { ChatMessage } from './llm.ts';
-import { commentReplyBudget, DATA_NOT_INSTRUCTIONS, translationLimit } from './prompts.ts';
+import {
+  codePoints,
+  commentReplyBudget,
+  DATA_NOT_INSTRUCTIONS,
+  translationLimit,
+  translationRule,
+} from './prompts.ts';
 
 /**
  * One piece of a page paragraph, in document order: a text node to translate, a text node of
@@ -28,7 +34,15 @@ const PAGE_TITLE_CHARS = 200;
  */
 export const PAGE_PLAMO_MAX_TOKENS = 2 * PAGE_UNIT_CHARS + 16;
 
-const characters = (text: string): number => Array.from(text).length;
+/**
+ * Page text goes out with `<` and `>` written as the lookalikes `‹` and `›`, so a text can never
+ * spell a marker; a text of no letters holding one is kept as written in the translation.
+ */
+const escaped = (text: string): string => text.replaceAll('<', '‹').replaceAll('>', '›');
+const hasAngle = (text: string): boolean => /[<>]/u.test(text);
+const hasLetter = (text: string): boolean => /\p{L}/u.test(text);
+/** A text node whose translation is its own text: no letters and an angle bracket. */
+const isLiteral = (text: string): boolean => hasAngle(text) && !hasLetter(text);
 
 /**
  * Whether `tokens` make a unit that can be translated and written back: a text node at least,
@@ -49,7 +63,7 @@ export function pageTokensValid(tokens: PageUnit): boolean {
       case 'space':
         break;
       case 'text': {
-        const length = characters(token.text);
+        const length = codePoints(token.text);
         chars += length;
         if (length < 1 || length > PAGE_UNIT_CHARS || chars > PAGE_UNIT_CHARS || afterText)
           return false;
@@ -69,7 +83,7 @@ export function pageTokensValid(tokens: PageUnit): boolean {
         break;
       case 'keep':
         kept += 1;
-        if (token.n !== kept || characters(token.text) > PAGE_KEEP_CHARS) return false;
+        if (token.n !== kept || codePoints(token.text) > PAGE_KEEP_CHARS) return false;
         afterText = false;
         break;
     }
@@ -87,7 +101,7 @@ export function pageUnitSource(tokens: PageUnit): { text: string; keep?: Record<
     .map((token): string => {
       switch (token.t) {
         case 'text':
-          return token.text;
+          return escaped(token.text);
         case 'space':
           return ' ';
         case 'open':
@@ -168,12 +182,12 @@ function pageBatchGrammar(units: readonly PageUnit[]): string {
       switch (token.t) {
         case 'text': {
           pieces += 1;
+          if (isLiteral(token.text)) return [JSON.stringify(escaped(token.text))];
           const name = `ja${n}-${pieces}`;
-          const limit = translationLimit(token.text);
           rules.push(
-            /\p{L}/u.test(token.text)
-              ? `${name} ::= [^ \\t\\n<>] [^\\t\\n<>]{0,${limit - 1}}`
-              : `${name} ::= [^\\t\\n<>]{0,${limit}}`,
+            hasLetter(token.text)
+              ? translationRule(name, token.text)
+              : `${name} ::= [^\\t\\n<>]{0,${translationLimit(token.text)}}`,
           );
           return [name];
         }
@@ -252,11 +266,16 @@ export function readPagePieces(text: string, tokens: PageUnit): string[] | undef
       if (piece !== '') return undefined;
       continue;
     }
-    if (characters(written) >= translationLimit(source)) return undefined;
-    if (piece === '' && /\p{L}/u.test(source)) return undefined;
+    if (isLiteral(source)) {
+      if (piece !== escaped(source)) return undefined;
+      pieces.push(source);
+      continue;
+    }
+    if (codePoints(written) >= translationLimit(source)) return undefined;
+    if (piece === '' && hasLetter(source)) return undefined;
     pieces.push(piece);
   }
-  return pieces;
+  return pieces.length === tokens.filter((token) => token.t === 'text').length ? pieces : undefined;
 }
 
 /**
@@ -274,7 +293,7 @@ export function parsePageBatch(
   return units.map((tokens, i): string[] | undefined => {
     const line = lines[i];
     const tab = line?.indexOf('\t') ?? -1;
-    if (line === undefined || line.slice(0, tab) !== String(i + 1)) return undefined;
+    if (line === undefined || tab < 0 || line.slice(0, tab) !== String(i + 1)) return undefined;
     const translation = line.slice(tab + 1);
     return translation.includes('\t') ? undefined : readPagePieces(translation, tokens);
   });

@@ -399,8 +399,8 @@ export function defaultResponder(request: StubRequest): StubReply {
       if (system === COMMENT_SYSTEM) return chatCompletion(commentBatchReply(user));
       if (system === SUMMARY_SYSTEM) return chatCompletion(summaryReply(user));
       if (system === GENRE_SYSTEM) return chatCompletion(STUB_GENRE);
-      // Audio chats were answered above: this system turn without audio is a translation.
       if (system === PAGE_SYSTEM) return chatCompletion(pageBatchReply(user));
+      // Audio chats were answered above: this system turn without audio is a translation.
       if (system === SUBTITLE_SYSTEM) return chatCompletion(subtitleReply(user));
       return NOT_FOUND;
     }

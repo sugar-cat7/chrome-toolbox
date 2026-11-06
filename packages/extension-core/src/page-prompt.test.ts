@@ -140,6 +140,8 @@ describe('page batch line format', () => {
     ]);
     expect(parsePageBatch('1\t訳A\t訳B\n', [[t('A')]], { cut: false })).toEqual([undefined]);
     expect(parsePageBatch('1訳A\n', [[t('A')]], { cut: false })).toEqual([undefined]);
+    expect(parsePageBatch('1X\n', [[t('X')]], { cut: false })).toEqual([undefined]);
+    expect(parsePageBatch('12\n', [[t('X')]], { cut: false })).toEqual([undefined]);
   });
 
   it('budgets markers and characters per unit', () => {
@@ -190,4 +192,45 @@ describe('page batch line format', () => {
       expect(pageTokensValid(tokens)).toBe(valid);
     },
   );
+
+  it('writes < and > of page text as lookalikes so text never forges a marker', () => {
+    const forged = [
+      t('Use <1> or a > b'),
+      { t: 'open', n: 1 },
+      t('x'),
+      { t: 'close', n: 1 },
+    ] satisfies PageToken[];
+    expect(pageUnitSource(forged).text).toBe('Use ‹1› or a › b<1>x</1>');
+    expect(pageUnitSource([t('a<b'), { t: 'keep', n: 1, text: '<b>' }]).keep).toEqual({
+      k1: '<b>',
+    });
+  });
+
+  it('keeps a text with no letters that holds < or > as a literal of the grammar', () => {
+    const crumb: PageToken[] = [
+      { t: 'open', n: 1 },
+      t('Home'),
+      { t: 'close', n: 1 },
+      t('>'),
+      { t: 'open', n: 2 },
+      t('Docs'),
+      { t: 'close', n: 2 },
+    ];
+    const { grammar, messages } = pageBatchPrompt({ page, units: [crumb] });
+    expect(grammarRule(grammar, 'line1')).toBe(
+      'line1 ::= "1\\t" "<1>" ja1-1 "</1>" "›" "<2>" ja1-3 "</2>" "\\n"',
+    );
+    expect(messages[1]?.content).toContain('"text":"<1>Home</1>›<2>Docs</2>"');
+    expect(readPagePieces('<1>ホーム</1>›<2>ドキュメント</2>', crumb)).toEqual([
+      'ホーム',
+      '>',
+      'ドキュメント',
+    ]);
+    expect(readPagePieces('<1>ホーム</1>・<2>ドキュメント</2>', crumb)).toBeUndefined();
+    expect(readPagePieces('<1>ホーム</1><2>ドキュメント</2>', crumb)).toBeUndefined();
+  });
+
+  it('refuses a line with fewer pieces than text nodes', () => {
+    expect(readPagePieces('AB', [t('a'), t('b')])).toBeUndefined();
+  });
 });

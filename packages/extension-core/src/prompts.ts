@@ -57,7 +57,7 @@ export type CommentBatchItem = Readonly<{ category: CommentCategory; ja?: string
 export type CommentCorrection = Readonly<{ text: string; category: CommentCategory }>;
 
 /** Unicode code points: the characters a GBNF character class counts. */
-function codePoints(text: string): number {
+export function codePoints(text: string): number {
   let count = 0;
   for (const _point of text) count += 1;
   return count;
@@ -69,6 +69,13 @@ function codePoints(text: string): number {
  * llama.cpp turns `x{0,n}` into n rules and treats n above 2000 as unbounded, hence the cap.
  */
 export const translationLimit = (text: string): number => Math.min(2 * codePoints(text) + 16, 2000);
+
+/**
+ * The GBNF rule `name` for the translation of `text` that has a letter: one line of at most
+ * `translationLimit(text)` characters that does not start with a space and has no `<` or `>`.
+ */
+export const translationRule = (name: string, text: string): string =>
+  `${name} ::= [^ \\t\\n<>] [^\\t\\n<>]{0,${translationLimit(text) - 1}}`;
 
 /**
  * One line per comment, `<n>\t<code>[\t<ja>]\n`: the number is fixed, and the translation
@@ -84,9 +91,8 @@ const commentBatchGrammar = (
 ): string => {
   const line = (comment: BatchComment, n: number): string =>
     `"${n}\\t" code ${comment.translate ? `"\\t" ja${n} ` : ''}"\\n"`;
-  // One line of text that does not start with a space and has no markup.
   const translation = (comment: BatchComment, n: number): string =>
-    `ja${n} ::= [^ \\t\\n<>] [^\\t\\n<>]{0,${translationLimit(comment.text) - 1}}`;
+    translationRule(`ja${n}`, comment.text);
   const allowed = COMMENT_CATEGORIES.filter(
     (category) => !isStreamCategory(category) || categories.includes(category),
   );
