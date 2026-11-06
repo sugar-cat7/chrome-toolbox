@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASR_SAMPLE_RATE,
   commentBatchPrompt,
   createLlamaClient,
+  encodeWav,
   subtitleMaxTokens,
   subtitlePrompt,
 } from '@chrome-toolbox/extension-core';
+import type { AudioSample } from './datasets.ts';
 import { runSlotBench, type Stats } from './slots.ts';
 
 const SUBTITLE_INPUT = {
@@ -321,5 +324,190 @@ describe('runSlotBench', () => {
         client: createLlamaClient({ baseUrl: 'http://127.0.0.1:1', fetch: down }),
       }),
     ).rejects.toThrow(/not ready/);
+  });
+});
+
+describe('runSlotBench with --audio', () => {
+  const WAV = encodeWav(new Int16Array(ASR_SAMPLE_RATE), ASR_SAMPLE_RATE);
+  const sample = (id: string, lang: AudioSample['lang']): AudioSample => ({
+    id,
+    lang,
+    voice: 'synthetic',
+    transcript: 'made up',
+  });
+  type Call = { kind: 'asr' | 'translate'; slot: unknown; model: unknown; at: number };
+
+  /** A server that answers audio chats with `asrLine` and translations with a made-up line. */
+  function audioServer(options: {
+    asrLine?: string;
+    asrMs?: number;
+    translateMs?: (n: number) => number;
+    promptMs?: { asr: number; translate: number };
+  }) {
+    const clock = fakeClock();
+    const calls: Call[] = [];
+    let translations = 0;
+    const fetchFn = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.endsWith('/health')) return Response.json({ status: 'ok' });
+      if (url.includes('/props')) return Response.json({ total_slots: 2 });
+      const text = typeof init?.body === 'string' ? init.body : '{}';
+      const body = JSON.parse(text) as {
+        id_slot?: number;
+        model?: string;
+        messages: { content: unknown }[];
+      };
+      if (body.messages[0]?.content === COMMENT_SYSTEM)
+        return Response.json({
+          choices: [{ message: { content: commentReply(String(body.messages[1]?.content)) } }],
+        });
+      const asr = text.includes('input_audio');
+      calls.push({
+        kind: asr ? 'asr' : 'translate',
+        slot: body.id_slot,
+        model: body.model,
+        at: clock.now(),
+      });
+      if (asr) clock.advance(options.asrMs ?? 0);
+      else {
+        translations += 1;
+        clock.advance(options.translateMs?.(translations) ?? 0);
+      }
+      return Response.json({
+        choices: [
+          {
+            message: { content: asr ? (options.asrLine ?? 'en\tHello there\n') : 'こんにちは\n' },
+            finish_reason: 'stop',
+          },
+        ],
+        timings: {
+          prompt_ms: asr ? (options.promptMs?.asr ?? 1) : (options.promptMs?.translate ?? 1),
+          predicted_ms: 1,
+          predicted_n: 1,
+        },
+      });
+    };
+    const make = (): ReturnType<typeof createLlamaClient> =>
+      createLlamaClient({ baseUrl: 'http://127.0.0.1:1', fetch: fetchFn as typeof fetch });
+    const base = {
+      client: make(),
+      commentClients: [make()],
+      seconds: 6,
+      subtitleEveryMs: 1500,
+      commentBatchSize: 20,
+      pinSlots: true,
+      now: clock.now,
+      sleep: clock.sleep,
+    };
+    return { calls, base };
+  }
+  const audio = (...samples: AudioSample[]) => ({ samples, loadWav: () => WAV });
+
+  it('sends ASR then the translation on slot 0 and measures both from the tick schedule', async () => {
+    const server = audioServer({
+      asrMs: 300,
+      translateMs: () => 500,
+      promptMs: { asr: 40, translate: 7 },
+    });
+    const report = await runSlotBench({
+      ...server.base,
+      model: 'gemma4-e4b',
+      audio: audio(sample('a', 'en')),
+    });
+    const idle = server.calls.slice(0, 8);
+    expect(idle.map((c) => c.kind)).toEqual([
+      'asr',
+      'translate',
+      'asr',
+      'translate',
+      'asr',
+      'translate',
+      'asr',
+      'translate',
+    ]);
+    expect(server.calls.slice(0, 8).every((c) => c.slot === 0 && c.model === 'gemma4-e4b')).toBe(
+      true,
+    );
+    expect(report.idle).toMatchObject({
+      expected: 4,
+      sent: 4,
+      count: 4,
+      failed: 0,
+      sourceP50Ms: 300,
+      sourceP95Ms: 300,
+      p50Ms: 800,
+      p95Ms: 800,
+      asrPromptP50Ms: 40,
+      translatePromptP50Ms: 7,
+      pass: true,
+    });
+  });
+
+  it('skips the translation for Japanese speech', async () => {
+    const server = audioServer({ asrLine: 'ja\tこんにちは\n', asrMs: 300 });
+    const report = await runSlotBench({
+      ...server.base,
+      audio: audio(sample('a', 'ja')),
+    });
+    expect(server.calls.slice(0, 4).map((c) => c.kind)).toEqual(['asr', 'asr', 'asr', 'asr']);
+    expect(report.idle).toMatchObject({ sent: 4, failed: 0, sourceP50Ms: 300, count: 0 });
+    expect(report.idle.translatePromptP50Ms).toBeUndefined();
+  });
+
+  it('skips the translation of silence but still measures the ASR', async () => {
+    const server = audioServer({ asrLine: 'en\t\n', asrMs: 200 });
+    const report = await runSlotBench({ ...server.base, audio: audio(sample('a', 'en')) });
+    expect(server.calls.slice(0, 4).every((c) => c.kind === 'asr')).toBe(true);
+    expect(report.idle).toMatchObject({ sent: 4, failed: 0, sourceP50Ms: 200, count: 0 });
+  });
+
+  it('cycles through the manifest samples in order', async () => {
+    const seen: string[] = [];
+    const server = audioServer({});
+    await runSlotBench({
+      ...server.base,
+      audio: {
+        samples: [sample('a', 'en'), sample('b', 'en')],
+        loadWav: (id) => {
+          seen.push(id);
+          return WAV;
+        },
+      },
+    });
+    expect(seen).toEqual(['a', 'b']);
+  });
+
+  it('fails the target when ja p95 exceeds 3000 ms', async () => {
+    // Three ticks of 700 ms and one of 3100 ms: p50 is fine, p95 is not.
+    const server = audioServer({
+      asrMs: 200,
+      translateMs: (n) => (n === 4 ? 2900 : n > 4 ? 100 : 500),
+    });
+    const report = await runSlotBench({ ...server.base, audio: audio(sample('a', 'en')) });
+    expect(report.idle).toMatchObject({ sent: 4, failed: 0, p50Ms: 700, p95Ms: 3100, pass: false });
+  });
+
+  it.each([
+    { name: 'source p50 over 1000 ms', asrMs: 1100, translateMs: 100, pass: false },
+    { name: 'ja p50 over 2000 ms', asrMs: 900, translateMs: 1200, pass: false },
+    { name: 'within every target', asrMs: 900, translateMs: 800, pass: true },
+  ])('marks a phase PASS only when $name is not hit', async ({ asrMs, translateMs, pass }) => {
+    const server = audioServer({ asrMs, translateMs: () => translateMs });
+    const report = await runSlotBench({
+      ...server.base,
+      seconds: 1.5,
+      audio: audio(sample('a', 'en')),
+    });
+    expect(report.idle.pass).toBe(pass);
+  });
+
+  it('throws before measuring when no sample has a WAV file', async () => {
+    const server = audioServer({});
+    await expect(
+      runSlotBench({
+        ...server.base,
+        audio: { samples: [sample('a', 'en')], loadWav: () => undefined },
+      }),
+    ).rejects.toThrow(/no WAV file/);
+    expect(server.calls).toEqual([]);
   });
 });

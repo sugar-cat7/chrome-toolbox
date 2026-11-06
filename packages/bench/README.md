@@ -6,14 +6,14 @@ Node command-line benchmarks that measure models on a real llama.cpp server with
 
 Run a bench from anywhere in the repository with `pnpm --filter @chrome-toolbox/bench bench:<name> -- <options>`:
 
-| Script             | What it does                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------------ |
-| `bench:make-audio` | Synthesizes the test audio with macOS `say` into `bench-data/audio` (WAV files only)             |
-| `bench:translate`  | Measures subtitle and chat translation latency, and quality with `--judge-server`                |
-| `bench:asr`        | Measures speech recognition error rate, language accuracy and latency (`--repeat`, `--chunk-ms`) |
-| `bench:clef`       | Measures Clef's abuse judgment accuracy; its last line is `CLEF_MODE=<mode>`                     |
-| `bench:slots`      | Measures subtitle latency under comment load, with and without slot pinning                      |
-| `bench:genre`      | Measures the comment assistant's genre categories against the self-written sets (R62)            |
+| Script             | What it does                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `bench:make-audio` | Synthesizes the test audio with macOS `say` into `bench-data/audio` (WAV files only)                           |
+| `bench:translate`  | Measures subtitle and chat translation latency, and quality with `--judge-server`                              |
+| `bench:asr`        | Measures speech recognition error rate, language accuracy and latency (`--repeat`, `--chunk-ms`)               |
+| `bench:clef`       | Measures Clef's abuse judgment accuracy; its last line is `CLEF_MODE=<mode>`                                   |
+| `bench:slots`      | Measures subtitle latency under comment load, with and without slot pinning; `--audio` adds speech recognition |
+| `bench:genre`      | Measures the comment assistant's genre categories against the self-written sets (R62)                          |
 
 The options, data formats and report columns are in [adoption](../../docs/adoption.md), and the server setup in [llama-server](../../docs/llama-server.md).
 
