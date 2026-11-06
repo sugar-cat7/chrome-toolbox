@@ -90,6 +90,21 @@ describe('sender routing', () => {
       kind: 'offscreen',
     },
     {
+      sender: 'offscreen with a query',
+      given: { url: `${fakeBrowser.runtime.getURL('/')}offscreen.html?x` },
+      kind: 'offscreen',
+    },
+    {
+      sender: 'offscreen with a hash',
+      given: { url: `${fakeBrowser.runtime.getURL('/')}offscreen.html#y` },
+      kind: 'offscreen',
+    },
+    {
+      sender: 'a page named like offscreen',
+      given: { url: `${fakeBrowser.runtime.getURL('/')}offscreen.html.evil.html` },
+      kind: 'page',
+    },
+    {
       sender: 'youtube top frame',
       given: { url: youtube, tab: { id: 3 }, frameId: 0 },
       kind: 'content',
@@ -121,20 +136,24 @@ describe('sender routing', () => {
     { sender: 'youtube top frame', url: youtube, frameId: 0 },
     { sender: 'a web page', url: 'https://example.com/', frameId: 0 },
   ])(
-    'answers sender_forbidden to $sender for a message not in its table',
+    'answers sender_forbidden to $sender, also for a malformed message',
     async ({ url, frameId }) => {
       const tab = await fakeBrowser.tabs.create({ url });
       const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
       const stop = startBackground();
       const listener = add.mock.calls[0]?.[0];
-      const reply = await new Promise((resolve) => {
-        listener?.(
-          { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
-          { url, frameId, tab },
-          resolve,
-        );
-      });
-      expect(reply).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
+      const messages = [
+        { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
+        { type: 'llm/status', payload: { baseUrl: 1 } },
+        { type: 'nonsense' },
+        'text',
+      ];
+      for (const message of messages) {
+        const reply = await new Promise((resolve) => {
+          listener?.(message, { url, frameId, tab }, resolve);
+        });
+        expect(reply).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
+      }
       stop();
     },
   );

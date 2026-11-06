@@ -81,7 +81,7 @@ export const defaultSubtitleSettings: SubtitleSettings = {
 
 export type SubtitleSettingsStore = {
   load(this: void): Promise<Result<SubtitleSettings>>;
-  save(this: void, settings: SubtitleSettings): Promise<Result<SubtitleSettings>>;
+  save(this: void, settings: unknown): Promise<Result<SubtitleSettings>>;
 };
 
 /** The viewer's subtitle choices; the server URL and models stay in extension-core's settings. */
@@ -95,7 +95,7 @@ export function subtitleSettingsStore(area: StorageArea, key = 'subtitles'): Sub
         ? Ok(defaultSubtitleSettings)
         : decode(subtitleSettingsSchema, value);
     },
-    save: async (settings): Promise<Result<SubtitleSettings>> => {
+    save: async (settings: unknown): Promise<Result<SubtitleSettings>> => {
       const parsed = subtitleSettingsSchema.safeParse(settings);
       if (!parsed.success) return Err(failure('input_invalid'));
       const written = await capture(() => area.set({ [key]: parsed.data }), 'storage_failed');

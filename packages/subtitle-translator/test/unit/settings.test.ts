@@ -8,6 +8,7 @@ import {
   SOURCE_LANGUAGES,
   SOURCE_LANGUAGE_CODES,
   SUBTITLE_TRANSLATORS,
+  subtitleSettingsSchema,
   subtitleSettingsStore,
   TRANSLATOR_LABELS,
 } from '../../src/settings.ts';
@@ -44,7 +45,9 @@ describe('subtitle settings', () => {
 
   it('rejects an unknown source language with input_invalid', async () => {
     const store = subtitleSettingsStore(fakeBrowser.storage.local);
-    const result = await store.save({ ...defaultSubtitleSettings, sourceLang: 'xx' } as never);
+    const input: unknown = { ...defaultSubtitleSettings, sourceLang: 'xx' };
+    expect(subtitleSettingsSchema.safeParse(input).success).toBe(false);
+    const result = await store.save(input);
     expect(result).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
     expect(await store.load()).toEqual(Ok(defaultSubtitleSettings));
   });

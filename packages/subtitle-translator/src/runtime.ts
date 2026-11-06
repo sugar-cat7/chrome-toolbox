@@ -8,10 +8,8 @@ import {
   settingsStore,
   type ConnectionPort,
   type HostPermissions,
-  type ProtocolHandlers,
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
-import { subtitleProtocolSpec } from './protocol.ts';
 
 /** The extension APIs a side panel uses; tests pass a fake with this shape. */
 export type PanelApi = {
@@ -39,6 +37,9 @@ export type Sender = Readonly<{
 }>;
 export type SenderKind = 'page' | 'content' | 'offscreen' | 'other';
 
+/** `offscreen.html`, alone or followed by a query or a hash (not by more path). */
+const isOffscreenPath = (path: string): boolean => /^offscreen\.html(?:[?#]|$)/u.test(path);
+
 const YOUTUBE_ORIGIN = 'https://www.youtube.com/';
 
 /**
@@ -49,38 +50,25 @@ const YOUTUBE_ORIGIN = 'https://www.youtube.com/';
 export function senderKind(sender: Sender): SenderKind {
   const url = sender.url ?? '';
   if (sender.origin !== 'null' && url.startsWith(browser.runtime.getURL('/'))) {
-    return url === `${browser.runtime.getURL('/')}offscreen.html` ? 'offscreen' : 'page';
+    return isOffscreenPath(url.slice(browser.runtime.getURL('/').length)) ? 'offscreen' : 'page';
   }
   const topFrame = sender.frameId === 0 && sender.tab?.id !== undefined;
   return topFrame && url.startsWith(YOUTUBE_ORIGIN) ? 'content' : 'other';
 }
 
-type Handlers = ProtocolHandlers<typeof subtitleProtocolSpec>;
+/**
+ * Only the side panel and other extension pages may send messages for now. Every other kind gets
+ * `sender_forbidden` before its message is validated; later tasks add routes for content and
+ * offscreen.
+ */
 const forbidden = (): Promise<Result<never>> => Promise.resolve(Err(failure('sender_forbidden')));
-
-/** The messages each kind of sender may send; a message not in its table is `sender_forbidden`. */
-function routesFor(kind: SenderKind, handlers: Handlers): Handlers {
-  const nothing: Handlers = { 'llm/status': forbidden };
-  const tables: Record<SenderKind, Handlers> = {
-    page: handlers,
-    content: nothing,
-    offscreen: nothing,
-    other: nothing,
-  };
-  return tables[kind];
-}
 
 /** Registers the service worker's message router and returns its cleanup. */
 export function startBackground(): () => void {
   // One inference at a time; a full queue answers queue_full instead of growing.
   const queue = createQueue({ concurrency: 1, maxPending: 16 });
   const handlers = llmHandlers({ fetch: (input, init) => fetch(input, init), queue });
-  const routes = {
-    page: llmProtocol.route(routesFor('page', handlers)),
-    content: llmProtocol.route(routesFor('content', handlers)),
-    offscreen: llmProtocol.route(routesFor('offscreen', handlers)),
-    other: llmProtocol.route(routesFor('other', handlers)),
-  } satisfies Record<SenderKind, unknown>;
+  const pageRoute = llmProtocol.route(handlers);
   function onMessage(
     message: unknown,
     sender: Sender,
@@ -88,7 +76,7 @@ export function startBackground(): () => void {
   ): true {
     launch(
       async () => {
-        sendResponse(await routes[senderKind(sender)](message));
+        sendResponse(senderKind(sender) === 'page' ? await pageRoute(message) : await forbidden());
       },
       (error) => sendResponse(Err(error)),
     );
