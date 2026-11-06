@@ -223,6 +223,17 @@ describe('llama.cpp stub', () => {
       tellRefusal: true,
     });
     expect(codeOf(audio)).toBe('audio_unsupported');
+    // The rejected audio chat took serial number 1: the next one answered is 2.
+    stub.respond = defaultResponder;
+    const next = await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } }],
+        },
+      ],
+    });
+    expect(next.ok && next.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
     const text = await client.chat(genrePrompt({}));
     expect(text.ok && parseGenre(text.value.text)).toBe(STUB_GENRE);
   });

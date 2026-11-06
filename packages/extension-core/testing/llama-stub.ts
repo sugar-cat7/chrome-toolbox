@@ -40,7 +40,10 @@ export type StubRequest = Readonly<{
   body: unknown;
   /** The body of a chat completion request. */
   chat?: StubChat | undefined;
-  /** The stub's serial number (from 1) of this `input_audio` chat; undefined for any other request. */
+  /**
+   * The stub's serial number (from 1) of this `input_audio` chat; undefined for any other
+   * request. Every audio chat takes a number, also one `withoutAudio` then rejects.
+   */
   audioNumber?: number | undefined;
 }>;
 export type StubReply = Readonly<{ status?: number; body: unknown }>;
@@ -101,18 +104,22 @@ const isPartsMessage = (value: unknown): value is ChatPartsMessage =>
  */
 function chatOf(body: unknown): StubChat | undefined {
   if (!isRecord(body) || !Array.isArray(body.messages)) return undefined;
-  const given: unknown[] = body.messages;
-  if (!given.every((message) => isMessage(message) || isPartsMessage(message))) return undefined;
-  const messages = given.map((message): ChatMessage => {
-    if (isMessage(message)) return message;
-    return {
-      role: 'user',
-      content: (message as ChatPartsMessage).content
-        .filter(isTextPart)
-        .map((part) => part.text)
-        .join('\n'),
-    };
-  });
+  const given = body.messages.filter(
+    (message): message is ChatMessage | ChatPartsMessage =>
+      isMessage(message) || isPartsMessage(message),
+  );
+  if (given.length !== body.messages.length) return undefined;
+  const messages = given.map((message): ChatMessage =>
+    isPartsMessage(message)
+      ? {
+          role: 'user',
+          content: message.content
+            .filter(isTextPart)
+            .map((part) => part.text)
+            .join('\n'),
+        }
+      : message,
+  );
   const audio = given.reduce<number>(
     (sum, message) =>
       sum +

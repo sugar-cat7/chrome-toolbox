@@ -174,6 +174,7 @@ export function createLlamaClient({
         const parsed = text.ok
           ? captureSync((): unknown => JSON.parse(text.value), 'response_invalid')
           : text;
+        if (signal?.aborted) return Err(failure('operation_cancelled'));
         if (parsed.ok && decode(audioUnsupportedSchema, parsed.value).ok)
           return Err(failure('audio_unsupported'));
       }

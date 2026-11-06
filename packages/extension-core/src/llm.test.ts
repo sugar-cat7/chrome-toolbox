@@ -391,6 +391,44 @@ describe('llama.cpp client', () => {
   });
 
   it.each([
+    { name: 'a non-JSON body', body: 'Bad Request' },
+    { name: 'JSON without error.message', body: JSON.stringify({ error: { code: 400 } }) },
+    {
+      name: 'a message without the audio phrase',
+      body: JSON.stringify({ error: { code: 400, message: 'image input is not supported' } }),
+    },
+  ])('a 400 with $name is not audio_unsupported', async ({ body }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => new Response(body, { status: 400 }),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: false }))).toBe('network_failed');
+    expect(code(await client.chat({ messages: [], tellRefusal: true }))).toBe('model_refused');
+  });
+
+  it('reports operation_cancelled when the caller aborts while the 400 body is read', async () => {
+    const controller = new AbortController();
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => {
+        const response = json({ error: { code: 400, message: 'Invalid slot ID' } }, 400);
+        const read = response.text.bind(response);
+        response.text = async () => {
+          controller.abort();
+          return read();
+        };
+        return response;
+      },
+    });
+    const result = await client.chat({
+      messages: [],
+      tellRefusal: true,
+      signal: controller.signal,
+    });
+    expect(code(result)).toBe('operation_cancelled');
+  });
+
+  it.each([
     { tellRefusal: false, expected: 'network_failed' },
     { tellRefusal: true, expected: 'model_refused' },
   ])(
