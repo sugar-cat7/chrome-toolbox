@@ -32,15 +32,18 @@ The release page of the same tag also has prebuilt archives (`llama-b11669-bin-m
 
 All three repositories are public on Hugging Face. The revisions below are the ones measured. `gemma4-e4b` and `clef-flash` are the extension defaults; `gemma4-e2b` is an optional, smaller translation candidate.
 
-| Preset name        | Repository and revision                                                                                                                      | File                           | Size    | SHA-256                                                            |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------- | ------------------------------------------------------------------ |
-| `gemma4-e4b`       | [google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf) `4b4a2c1d584be7264f87aac328a1bc739ce81b6c` | `gemma-4-E4B_q4_0-it.gguf`     | 5.15 GB | `676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee` |
-| `gemma4-e4b`       | same                                                                                                                                         | `gemma-4-E4B-it-mmproj.gguf`   | 0.99 GB | `7498a37cb619e55f2fcf87eb931f56e99389ed6d432e4c5c66110694c0d65578` |
-| `gemma4-e4b` draft | [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) `a69f018d7678a2b9f5e705f8903d6fb29b9b25dc`               | `mtp-gemma-4-E4B-it-Q4_0.gguf` | 0.06 GB | `d19a11e4fd5019967d9296f77f4d3e139c8903909f70c3a9cf009c9af4b9b88d` |
-| `gemma4-e2b`       | [google/gemma-4-E2B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf) `675cff42a74c774d6cb76f76d8eacb49b48c9b93` | `gemma-4-E2B_q4_0-it.gguf`     | 3.35 GB | `fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634` |
-| `clef-flash`       | [ggml-org/Clef-Flash-GGUF](https://huggingface.co/ggml-org/Clef-Flash-GGUF) `6e2a164d70aae2af7fce86005da3f91805565b1d`                       | `Clef-Flash-Q4_K_M.gguf`       | 6.73 GB | `eef2968c238a80d49d340430f22410ea3db9934ad1c6fdb233a503cbf9a9b54e` |
+| Preset name                       | Repository and revision                                                                                                                      | File                               | Size    | SHA-256                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------- | ------------------------------------------------------------------ |
+| `gemma4-e4b`                      | [google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf) `4b4a2c1d584be7264f87aac328a1bc739ce81b6c` | `gemma-4-E4B_q4_0-it.gguf`         | 5.15 GB | `676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee` |
+| `gemma4-e4b`                      | same                                                                                                                                         | `gemma-4-E4B-it-mmproj.gguf`       | 0.99 GB | `7498a37cb619e55f2fcf87eb931f56e99389ed6d432e4c5c66110694c0d65578` |
+| `gemma4-e4b` draft                | [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) `a69f018d7678a2b9f5e705f8903d6fb29b9b25dc`               | `mtp-gemma-4-E4B-it-Q4_0.gguf`     | 0.06 GB | `d19a11e4fd5019967d9296f77f4d3e139c8903909f70c3a9cf009c9af4b9b88d` |
+| `gemma4-e2b`                      | [google/gemma-4-E2B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf) `675cff42a74c774d6cb76f76d8eacb49b48c9b93` | `gemma-4-E2B_q4_0-it.gguf`         | 3.35 GB | `fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634` |
+| `clef-flash`                      | [ggml-org/Clef-Flash-GGUF](https://huggingface.co/ggml-org/Clef-Flash-GGUF) `6e2a164d70aae2af7fce86005da3f91805565b1d`                       | `Clef-Flash-Q4_K_M.gguf`           | 6.73 GB | `eef2968c238a80d49d340430f22410ea3db9934ad1c6fdb233a503cbf9a9b54e` |
+| `plamo-3-translate-2b` (optional) | [pfnet/plamo-3-translate-2b-GGUF](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF) `232fbd7916519edecddfdae0beae7e76fe70453f`         | `plamo-3-translate-2b-Q4_K_M.gguf` | 1.81 GB | `f36d0813dd95573a852ab5d76e374c543632d9e292929e922bcdbf7e53b494e0` |
 
 The Gemma projector (`mmproj`) is needed only for audio and image input, which the subtitle extension will use for speech recognition. Text-only use, including Clef's text judgments, needs no projector. The draft file is Google's multi-token-prediction drafter for the QAT E4B model (`google/gemma-4-E4B-it-qat-q4_0-unquantized-assistant`), converted to GGUF by ggml-org; a QAT target needs the drafter of the same precision. Check each model card for its license.
+
+PLaMo 3 Translate 2B (Preferred Networks, released 2026-11-05) is an optional translation-only model, measured as a faster subtitle translator; Gemma stays the default for everything (see [PLaMo 3 Translate](#plamo-3-translate) below). It is under the [PLaMo Community License](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF/blob/232fbd7916519edecddfdae0beae7e76fe70453f/LICENSE/en): personal and non-commercial use is free without registration; commercial use needs prior registration and annual revenue of at most 1 billion yen; anyone who gives its translations to others must state "Built with PLaMo" and mark them as PLaMo output. Download it only if those terms suit you. This repository contains no PLaMo outputs. Use the pinned revision: the first upload of 2026-11-04 embeds an older chat template.
 
 ```console
 mkdir -p models && cd models
@@ -49,6 +52,8 @@ curl -fLO https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/4b4
 curl -fLO https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/a69f018d7678a2b9f5e705f8903d6fb29b9b25dc/mtp-gemma-4-E4B-it-Q4_0.gguf
 curl -fLO https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf
 curl -fLO https://huggingface.co/ggml-org/Clef-Flash-GGUF/resolve/6e2a164d70aae2af7fce86005da3f91805565b1d/Clef-Flash-Q4_K_M.gguf
+# Optional: PLaMo 3 Translate 2B
+curl -fLO https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF/resolve/232fbd7916519edecddfdae0beae7e76fe70453f/plamo-3-translate-2b-Q4_K_M.gguf
 shasum -a 256 *.gguf
 ```
 
@@ -87,6 +92,13 @@ batch-size = 2048
 ubatch-size = 2048
 threads = 1
 poll = 0
+
+; Optional: PLaMo 3 Translate 2B (translation only)
+[plamo-3-translate-2b]
+model = /path/to/models/plamo-3-translate-2b-Q4_K_M.gguf
+no-prefill-assistant = true
+threads = 2
+poll = 0
 ```
 
 Why these values:
@@ -105,7 +117,7 @@ Why these values:
 ```console
 /path/to/llama.cpp/build/bin/llama-server \
   --host 127.0.0.1 --port 18083 \
-  --models-preset /path/to/models.ini --models-max 2 \
+  --models-preset /path/to/models.ini --models-max 3 \
   --parallel 3 \
   --gpu-layers all \
   --reasoning off \
@@ -118,7 +130,7 @@ Why these values:
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--host 127.0.0.1`         | Reachable only from this machine. The extensions can reach `localhost` and `127.0.0.1` without a permission prompt.                                                                                                                                                                                                                                                             |
 | `--port 18083`             | The extensions' default URL is `http://127.0.0.1:18083`.                                                                                                                                                                                                                                                                                                                        |
-| `--models-max 2`           | At most two models in memory (the translation model and Clef); loading a third unloads the least recently used one.                                                                                                                                                                                                                                                             |
+| `--models-max 3`           | At most three models in memory (Gemma, Clef and PLaMo); loading another unloads the least recently used one. Only the router's command line sets it: presets drop `models-*` keys. Use 2 without PLaMo.                                                                                                                                                                         |
 | `--parallel 3`             | Three slots per model. Subtitles use slot 0. The comment extension runs one batch per spare slot, so slots 1 and 2 carry two comment batches at once; with `--parallel 2` it runs one at a time. On a busy English chat one batch at a time could not keep up (see [adoption](adoption.md)). Two batches decoding together reach about 1.55 times the tokens per second of one. |
 | `--gpu-layers all`         | Puts every layer that can be offloaded on the GPU (Metal).                                                                                                                                                                                                                                                                                                                      |
 | `--reasoning off`          | No thinking tokens. The extensions also send `chat_template_kwargs: {"enable_thinking": false}`.                                                                                                                                                                                                                                                                                |
@@ -154,7 +166,7 @@ Save as `~/Library/LaunchAgents/local.llama-server.plist`, with the same argumen
     <string>--host</string><string>127.0.0.1</string>
     <string>--port</string><string>18083</string>
     <string>--models-preset</string><string>/path/to/models.ini</string>
-    <string>--models-max</string><string>2</string>
+    <string>--models-max</string><string>3</string>
     <string>--parallel</string><string>3</string>
     <string>--gpu-layers</string><string>all</string>
     <string>--reasoning</string><string>off</string>
@@ -197,6 +209,36 @@ The side panel edits the URL. The comment extension's "設定" tab also edits th
 A failed Clef request never fails a comment batch: when Clef is unreachable, times out or answers an HTTP error for that request (such as a 503 while the router loads the model), those comments keep the translation model's category and "設定" shows the error. When Clef is not there (HTTP 501 for a model that is not a decision model, 404, or the router's 400 "model '<name>' not found"), the comment extension classifies abuse with the translation model from then on, until its settings change.
 
 A server on another machine: start it with `--host` set to an address in your LAN, enter `http://<address>:18083` in the side panel, and allow the host permission that Chrome then asks for. The extensions send no API key, so expose such a server only on a network you trust.
+
+## PLaMo 3 Translate
+
+The extensions do not send requests to PLaMo yet. The subtitle extension's plan adds it as an optional translator. Measured on 2026-11-06 on this server (llama.cpp 620d222 runs it; the minimum is [b11455](https://github.com/ggml-org/llama.cpp/releases/tag/b11455), [#30045](https://github.com/ggml-org/llama.cpp/pull/30045)), with 40 made-up spoken sentences in English, Korean, Spanish, Indonesian and Chinese, and 40 English chat lines:
+
+| Model                    | Subtitle sentence p50 / p95 | Under two comment streams (p50 / p95) | Peak RSS    | Subtitles against Gemma (better / same / worse) |
+| ------------------------ | --------------------------- | ------------------------------------- | ----------- | ----------------------------------------------- |
+| `gemma4-e4b` (MTP)       | 329 / 443 ms                | 854 / 1,118 ms                        | 4.92 GB     | –                                               |
+| PLaMo 3 Translate 0.8B   | 46 / 66 ms                  | 109 / 167 ms                          | 0.88 GB     | 3 / 19 / 18                                     |
+| **PLaMo 3 Translate 2B** | **121 / 163 ms**            | **179 / 249 ms**                      | **2.47 GB** | **5 / 25 / 10**                                 |
+| PLaMo 3 Translate 8B     | 352 / 450 ms                | –                                     | 5.89 GB     | 4 / 29 / 7                                      |
+
+- The quality grading was blind A/B by Claude, without a human check.
+- The 2B returned the translation alone every time and kept glossary names (9 of 9).
+- It was about as good as Gemma on English, Chinese and Indonesian, and worse on Korean and Spanish gaming slang (`궁`, an ultimate, became 宮).
+- The 0.8B produced nonsense lines. The 8B is no faster than Gemma.
+- On chat, every size translated slang literally (`she's cooking` → 料理してる). PLaMo cannot classify comments, so the comment extension stays on Gemma.
+- With Gemma, Clef and the 2B resident, the router's processes used 12.4 GB in total.
+
+A client must:
+
+- send the line as the only user message
+- send `chat_template_kwargs` with `target_lang: "ja"`, an optional lowercase `source_lang` (`zh-hans`, not `zh-CN`, which is a 400), optional `context` (earlier lines) and optional `glossary` (`[{"source", "target"}]`)
+- send `stop: ["<|plamo:tag|>", "<|plamo:bos|>"]`
+
+A client must not send `response_format` or a JSON schema (the reply breaks), a `grammar`, or an instruction system turn (it is read as context). An empty line, or one containing `<|plamo:`, is a 400.
+
+The model embeds its chat template at the pinned revision; `no-prefill-assistant` is required by its card.
+
+Retest when [#30337](https://github.com/ggml-org/llama.cpp/pull/30337) merges: the GGUF asks for YaRN `truncate=false`, which no build applies to PLaMo yet, and Metal treats that rope as unsupported since [#30206](https://github.com/ggml-org/llama.cpp/pull/30206).
 
 ## Measurements
 
