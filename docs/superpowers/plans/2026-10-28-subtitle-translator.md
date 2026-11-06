@@ -1002,9 +1002,12 @@ it.each([
 - YouTube の timedtext は、多くのクライアントで PO トークン（`pot`）を求める。プレイヤーの外から `baseUrl` を直接 fetch すると、空か拒否が返ると見込まれる。
 - 字幕を読む拡張では、プレイヤー自身の timedtext の応答を読む方式が一般的。
 
+結果（2026-11-06、`docs/adoption.md` の「YouTube caption tracks」）: 既定の方針のとおり。プレイヤーは CC がオンのときだけ、XHR で json3 を取得する（`pot` 付き）。`pot` のない直接の fetch は空の本文が返る。ライブには字幕トラックがない。インターフェースに、`cues` の `kind`、isolated 側の `ready`、ブリッジが持つ最後の `cues` を足した（下の「Step 0 の結果による追加」）。自動操作のブラウザでは、プレイヤー自身の応答も本文が空だったので、json3 の本文の形は Task 16 で確かめる。
+
 **Files:**
 
 - Create: `packages/subtitle-translator/src/captions/tracks.ts`
+- Create: `packages/subtitle-translator/src/captions/messages.ts`（ブリッジのメッセージ、isolated 側の受け口）、`src/captions/bridge.ts`（MAIN world の本体）
 - Create: `packages/subtitle-translator/src/entrypoints/player-bridge.content.ts`
   - `world: 'MAIN'`、`runAt: 'document_start'`、`matches: ['https://www.youtube.com/*']`
 - Create: `packages/subtitle-translator/test/fixtures/player-response.json`、`timedtext.json3.json`（どちらも自作の値）
@@ -1040,6 +1043,18 @@ it.each([
     - `{ source: 'st-bridge', type: 'cues', videoId, languageCode, cues }`: プレイヤーが選んだトラックを取得したとき。1 本の動画につき 1 回。
   - isolated world からの `{ source: 'st-content', type: 'load-track', languageCode }` を受けたら、プレイヤーにそのトラックを取得させる（方式は Step 0 で決める）。
   - isolated world の側は、`event.source === window` と `source` を確かめ、すべてを Zod と上限で検証する。ページのスクリプトも同じメッセージを送れるので、中身はページのデータとして扱う（最悪でも字幕が間違うだけで、拡張の権限には届かない）。
+- Step 0 の結果による追加:
+  - `cues` に `kind: 'asr' | 'manual'` を足す。同じ言語に manual と asr があり、プレイヤーはどちらも取得しうるため。
+  - 送るのは 1 本の動画の 1 つのトラックにつき 1 回。訳（`tlang`）と、`fmt` が `json3` でない応答は読まない。CC がオンの視聴者では、プレイヤーが話されている言語でないトラックや訳を取得することがあり、SPA の遷移では同じ URL を 2 回取得することもあった。
+  - isolated 側からの `{ source: 'st-content', type: 'ready' }` を足す。content script（`document_idle`）は、プレイヤーの最初の取得（読み込みから 1.3〜2.2 s）や最初の `yt-navigate-finish`（1.1〜2.8 s）より後に動き出しうるため。受けたブリッジは `video` と、持っている `cues` を送り直す。
+  - ブリッジは最後に送った `cues` を 1 組だけ持つ。`load-track` がそのトラックなら、プレイヤーに取得させずに送り直す。
+  - `load-track` の方式:
+    - 今のトラック（`getOption('captions', 'track')`）と、localStorage の `yt-player-caption-sticky-language`・`yt-player-caption-persistence` を控える。
+    - `#movie_player[data-st-loading]` で YouTube の字幕を隠し、`setOption('captions', 'track', { languageCode })` を呼ぶ（asr は `kind: 'asr'` を付ける）。プレイヤーは数 ms で取得する。
+    - そのトラックの応答の後（来なければ `LOAD_TIMEOUT_MS` = 10,000 ms 後、または `yt-navigate-start`）に、CC がオンだったら元のトラックに、オフだったら `{}` に戻し、2 つのキーを元の値（なければ削除）に書き戻す。
+    - `unloadModule('captions')` は戻す方法にならない（persistence が true のまま残り、次の動画で CC がオンになる）。
+    - 視聴者が別のトラックで CC をオンにしていたときは、元のトラックに戻すとプレイヤーがそれをもう一度取得する（その動画で 1 回）。
+  - isolated 側の受け口は `readBridgeMessage(event, window)`、送り口は `postToPage(window, message)`（`src/captions/messages.ts`）。Task 9 の content script は、受け始めたら `ready` を送る。
 
 - [ ] **Step 0: スパイク（使い捨て。実サイトで確かめる）**
   - headed の Chromium で、ログインせずに確かめる。chrome-devtools MCP の `evaluate_script` を使ってよい。
@@ -1384,6 +1399,7 @@ it('keys the cache by the translator that produced the line', async () => {
     - 一時停止、終了、広告の間は止める。
   - `youtube.content.ts`:
     - `/watch` と `/live/` で、`#movie_player video` があるときだけ動く。`yt-navigate-finish` のたびに判定し直す。
+    - ブリッジのメッセージは `readBridgeMessage` で読む。受け始めたら `ready` を送り、`video` の `tracks` から `pickSourceTrack` で選んだトラックの `cues` がなければ `load-track` を送る（Task 6）。
     - 遷移したら、timeline、live view、feeder を作り直し、`subs/page` を送る。
     - `pickSource` が `none` のときは、ピルに `NO_SOURCE_MESSAGE`（または `AUDIO_HINT_MESSAGE`）を出し、feeder を作らない。翻訳の依頼は何も送らない（`subs/page` は送る）。
     - 後片付けは、すべて `ctx.onInvalidated` に登録する。

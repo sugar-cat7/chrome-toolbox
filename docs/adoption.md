@@ -14,6 +14,49 @@ Agent loop: [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devto
 
 Not verified: installing the dev build through chrome-devtools-mcp end to end, how `--filesystemRoot=.` resolves for each MCP client, an official statement that extensions with host permissions are exempt from Chrome's Local Network Access prompt, and whether an agent-triggered action satisfies `tabCapture`'s user-invocation requirement.
 
+## YouTube caption tracks (subtitle-translator Task 6), 2026-11-06
+
+Spike on www.youtube.com, 2026-11-06: Playwright 1.64 drove a headed Chromium (build 1248, Chrome for Testing 156) with a fresh profile per run, a Japanese UI and no login. Three public videos: an English archive with manual captions in several languages and English auto-generated ones, a Spanish archive with only auto-generated captions, and a live stream; five more live streams were checked for tracks only. Only structure, field names, request kinds and timings were recorded.
+
+Player response (`ytInitialPlayerResponse` and `#movie_player.getPlayerResponse()`, the same shape):
+
+- `captions.playerCaptionsTracklistRenderer` has `captionTracks`, `audioTracks`, `translationLanguages` and `defaultAudioTrackIndex`. A track has `baseUrl`, `languageCode`, `name.simpleText` (in the UI language), `vssId`, `isTranslatable` and `trackName`. `kind: 'asr'` is present only on the auto-generated track. `vssId` is `.<lang>` for a manual track and `a.<lang>` for an auto-generated one.
+- `baseUrl` is `https://www.youtube.com/api/timedtext?…` with `v`, `lang`, `kind` (auto-generated only) and signature, expiry and IP parameters. It has no `fmt` and no `pot`.
+- `videoDetails` has `videoId` (11 characters), `channelId` (`UC` and 22 characters), `author`, `title`, `lengthSeconds` (a string) and `isLiveContent`. `isLive: true` appears only on a live stream; archives have no `isLive` key.
+- After an in-app (SPA) navigation, `window.ytInitialPlayerResponse` still holds the first video. `#movie_player.getPlayerResponse()` and `yt-navigate-finish`'s `detail.response.playerResponse` hold the new one. `yt-navigate-finish` also fires on a full load, 1.1–2.8 s after navigation start, and `getPlayerResponse()` is already the current video when it fires.
+- Live streams: none of the six had `captions` in the player response, and the player had not loaded its captions module (`getOptions()` lacked `captions`).
+
+The player's own timedtext request:
+
+- One `XMLHttpRequest` per track, with `responseType` `''`, so `responseText` is readable after `load`. No `fetch` and no worker.
+- The URL is `/api/timedtext` with the `baseUrl` parameters plus `fmt=json3`, `pot` (a PO token of 120–128 characters), `potc=1`, `c=WEB` and client parameters (`cver`, `cplayer`, `cbr`, `cbrver`, `cbrand`, `cos`, `cosver`, `cplatform`, `xorb`, `xobt`, `xovt`). `lang` names the track, `kind=asr` the auto-generated one, and `tlang=<code>` an auto-translation.
+- With CC off (`yt-player-caption-persistence` false in localStorage) the player requested nothing, on full loads and on SPA navigations. With CC on, it requested the track on a full load before `yt-navigate-finish` (1.3–2.2 s after navigation start), and on an SPA navigation about 120 ms after `yt-navigate-start`, sometimes a second time with the same URL after `yt-navigate-finish`.
+- The track it chooses is not always the spoken one. The fresh Japanese-UI profile turned CC on by itself for both archives (writing persistence true) and took the first listed track, which was in neither the spoken language nor Japanese. Once the remembered language (`yt-player-caption-sticky-language`) was English, the Spanish-only video was requested as an auto-translation into English (`tlang`).
+- Bodies: in this automated browser every timedtext response was HTTP 200 with an empty body, the player's own requests with `pot` included, and YouTube showed no captions. The json3 body was therefore not observed. The parser and the fixtures follow the published json3 shape (`events[]` with `tStartMs`, `dDurationMs`, `segs[].utf8`, `aAppend`, and window events without `segs`). Subtitle Task 16 checks it in a normal Chrome profile.
+
+Player API (`#movie_player`):
+
+- It has `getPlayerResponse`, `getOption`, `setOption`, `getOptions`, `loadModule`, `unloadModule`, `isSubtitlesOn` and `toggleSubtitles`.
+- `setOption('captions', 'track', { languageCode })` turns CC on, and the player requests that track within a few milliseconds. This also works when CC has been off since the page loaded, without `loadModule`. With a manual and an auto-generated track in one language, it takes the manual one; `{ languageCode, kind: 'asr' }` takes the auto-generated one. Setting the track that is already on requests nothing.
+- It changes the viewer's setting: persistence becomes true and the sticky language becomes that language, in localStorage and for the next videos.
+- `setOption('captions', 'track', {})` turns CC off and writes persistence false, but keeps the new sticky language. `unloadModule('captions')` hides the captions but leaves persistence true, so the next video turns CC on again; it does not undo the change.
+- Switching back to the viewer's earlier track (the object from `getOption('captions', 'track')`) makes the player request it again; nothing is cached.
+
+Direct fetch: `baseUrl + '&fmt=json3'` fetched from the page without `pot` returned HTTP 200, `text/html` and an empty body, for both the manual and the auto-generated track.
+
+Decision (the plan's default policy holds):
+
+- The MAIN-world bridge reads only the player's own responses: `/api/timedtext` on the page's origin with `fmt=json3`, never a `tlang` translation. XHR is read from `responseText` after `load`, and `fetch` is wrapped too, reading `response.clone()`. It posts one `cues` message per video and track, with `kind`.
+- With CC off, which is the usual case, the isolated content script asks for its source track with `load-track`. The bridge then:
+  - saves the current track and the two localStorage keys;
+  - hides YouTube's caption window (`#movie_player[data-st-loading]`) and calls `setOption`;
+  - after that track's response, or after 10 s or `yt-navigate-start`, sets the saved track again (or `{}` if CC was off) and writes both keys back as they were.
+- No direct fetch. Live streams use only the audio path.
+- Additions to the brief: a `ready` message from the content script, because it starts at `document_idle` and can miss the first posts; `kind` in `cues`; and the bridge keeps the last cues it posted and sends them again on `ready` or `load-track`.
+- Cost: when the viewer had CC on with another track, restoring it makes the player request that track a second time (one extra player request for that video).
+- A smoke run of the built extension in the same kind of browser posted `video` on load, after an SPA navigation and on `ready`. `load-track` made the player request the asked track. CC was off again afterwards, both localStorage keys equalled their earlier values exactly, and playback went on.
+- E2E (subtitle Task 15): the fake player script requests timedtext with an `XMLHttpRequest` of `responseType` `''`, like the real player.
+
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 
 Status: **PARTIAL (updated 2026-10-28).** The benchmark tools are implemented and unit-tested (`packages/bench/`), and the procedure was first run on 2026-10-28 against a llama.cpp router server ([setup](llama-server.md)) with synthetic data only (see "Real-server results" below). Cells in the sections that follow remain `PENDING` unless that section lists a number. Still PENDING: measurements on real stream data (100 lines per language), the user's 20-sentence translation check, and the Qwen-family comparison. The decisions below are provisional (R8 / R10) until those close.
