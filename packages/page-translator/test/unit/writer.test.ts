@@ -1,0 +1,479 @@
+// @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { afterEach, assert, describe, expect, it } from 'vitest';
+import type { Timers } from '@chrome-toolbox/extension-core';
+import { createScanner, segmentsOf, type Segment } from '../../src/content/segment.ts';
+import { createWriter, mapOffset, PAIR_TAG } from '../../src/content/writer.ts';
+import { DISPLAY_MODES } from '../../src/protocol.ts';
+import { fingerprint } from './fingerprint.ts';
+
+const article = readFileSync(path.join(import.meta.dirname, 'fixtures/article.html'), 'utf8');
+
+afterEach(() => {
+  document.getSelection()?.removeAllRanges();
+  document.body.replaceChildren();
+});
+
+/** `value`, failing the test when it is missing. */
+function must<T>(value: T | null | undefined): T {
+  assert.exists(value);
+  return value;
+}
+
+const ids = (): (() => number) => {
+  let id = 0;
+  return () => ++id;
+};
+
+/** `html` in a fresh container on the test page. */
+function mount(html: string): HTMLElement {
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  document.body.append(container);
+  return container;
+}
+
+/** Timers whose callbacks run only when the test says so. */
+function manualTimers(): { timers: Timers; delays: number[]; runNext(): boolean } {
+  let next = 1;
+  const pending = new Map<number, () => void>();
+  const delays: number[] = [];
+  return {
+    timers: {
+      set: (fn, ms) => {
+        delays.push(ms);
+        pending.set(next, fn);
+        return next++;
+      },
+      clear: (id) => void pending.delete(id),
+    },
+    delays,
+    runNext() {
+      const first = pending.entries().next();
+      if (first.done === true) return false;
+      const [id, fn] = first.value;
+      pending.delete(id);
+      fn();
+      return true;
+    },
+  };
+}
+
+/** The segments under `root` and its open shadow roots, as the scanner finds them. */
+function scanAll(root: Element): Segment[] {
+  const clock = manualTimers();
+  const segments: Segment[] = [];
+  createScanner({
+    root,
+    hint: undefined,
+    nextId: ids(),
+    timers: clock.timers,
+    now: () => 0,
+    onSegments: (found) => segments.push(...found),
+    onShadowRoot: () => undefined,
+    onDone: () => undefined,
+  });
+  while (clock.runNext());
+  return segments;
+}
+
+/** The only segment of `block`. */
+function only(block: Element): Segment {
+  const segments = segmentsOf(block, undefined, ids());
+  expect(segments).toHaveLength(1);
+  return must(segments[0]);
+}
+
+/** A made-up translation of each text token of `segment`. */
+const translated = (segment: Segment): string[] =>
+  segment.tokens.flatMap((token) => (token.t === 'text' ? [`訳:${token.text}`] : []));
+
+const data = (segment: Segment): string[] => segment.nodes.map((node) => node.data);
+
+/** Every text node under `root` in its light tree, in document order. */
+function textNodes(root: Node): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
+    if (node instanceof Text) nodes.push(node);
+  return nodes;
+}
+
+/** The side-by-side boxes under `root`, in document order. */
+const boxesIn = (root: ParentNode): Element[] => [...root.querySelectorAll(PAIR_TAG)];
+
+/** The translation a side-by-side box shows: the text of its shadow root, its style aside. */
+const shown = (box: Element): string =>
+  [...must(box.shadowRoot).childNodes]
+    .filter((node) => node.nodeName !== 'STYLE')
+    .map((node) => node.textContent)
+    .join('');
+
+/** The article fixture as the test page's body, with a widget in an open shadow root. */
+function loadArticle(): ShadowRoot {
+  const parsed = new DOMParser().parseFromString(article, 'text/html');
+  document.body.replaceWith(document.adoptNode(parsed.body));
+  const host = document.createElement('div');
+  host.id = 'widget';
+  const shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<p>Rate this <a href="#rate">guide</a> today\n</p>';
+  must(document.querySelector('main')).append(host);
+  return shadow;
+}
+
+describe('createWriter', () => {
+  it.each(DISPLAY_MODES)('restores the exact DOM after %s', (mode) => {
+    const shadow = loadArticle();
+    const before = fingerprint(document.body);
+    const texts = textNodes(document.body);
+    const links = [...document.body.querySelectorAll('a')];
+    const segments = scanAll(document.body);
+    expect(segments.length).toBeGreaterThan(20);
+    const writer = createWriter(document);
+    for (const segment of segments)
+      expect(writer.write(segment, translated(segment), mode)).toBe(true);
+    expect(fingerprint(document.body)).not.toBe(before);
+    expect(boxesIn(document.body).length + boxesIn(shadow).length).toBe(
+      mode === 'pair' ? segments.length : 0,
+    );
+
+    writer.restore({ sliced: false });
+    expect(fingerprint(document.body)).toBe(before);
+    const after = textNodes(document.body);
+    expect(after).toHaveLength(texts.length);
+    for (const [i, node] of after.entries()) expect(node).toBe(texts[i]);
+    for (const [i, link] of [...document.body.querySelectorAll('a')].entries())
+      expect(link).toBe(links[i]);
+  });
+
+  it('writes pieces into the text nodes in order and keeps their outer spaces', () => {
+    const segment = only(
+      must(mount('<p>Click <a href="#go">here</a> to <kbd>R2</kbd>.</p>').firstElementChild),
+    );
+    expect(data(segment)).toEqual(['Click ', 'here', ' to ', '.']);
+    const writer = createWriter(document);
+    expect(writer.write(segment, ['ここ', 'を', 'クリックして', '。'], 'replace')).toBe(true);
+    expect(data(segment)).toEqual(['ここ ', 'を', ' クリックして ', '。']);
+  });
+
+  it('writes a run of text nodes into its first node and keeps the outer spaces of the others', () => {
+    const p = must(
+      mount('<p>Feather<wbr>step <img src="/boots.png" alt=""> boots <a href="#b">here</a></p>')
+        .firstElementChild,
+    );
+    const segment = only(p);
+    expect(data(segment)).toEqual(['Feather', 'step ', ' boots ', 'here']);
+    expect(segment.pieceOf).toEqual([0, 0, 0, 1]);
+    const writer = createWriter(document);
+    expect(writer.write(segment, ['フェザーステップのブーツ', 'ここ'], 'replace')).toBe(true);
+    expect(data(segment)).toEqual(['フェザーステップのブーツ', ' ', '  ', 'ここ']);
+    writer.restore({ sliced: false });
+    expect(data(segment)).toEqual(['Feather', 'step ', ' boots ', 'here']);
+  });
+
+  it.each(DISPLAY_MODES)('never empties a link and never moves an element (%s)', (mode) => {
+    const p = must(
+      mount('<p>Read <a href="/guide">the guide</a> before <em>the fight</em>.</p>')
+        .firstElementChild,
+    );
+    const elements = [...p.children];
+    const places = elements.map((element) => [...p.childNodes].indexOf(element));
+    const writer = createWriter(document);
+    expect(
+      writer.write(only(p), ['先に', '手引き', 'を読んでから', '戦い', 'に挑む。'], mode),
+    ).toBe(true);
+    for (const [i, element] of elements.entries()) {
+      expect(element.parentNode).toBe(p);
+      expect([...p.childNodes].indexOf(element)).toBe(places[i]);
+      expect(element.textContent).not.toBe('');
+    }
+  });
+
+  it('keeps the text of a node whose translation came back empty', () => {
+    const p = must(mount('<p>Phase <a href="#phase-2">2</a> begins now</p>').firstElementChild);
+    const writer = createWriter(document);
+    expect(writer.write(only(p), ['フェーズ', '', 'が今始まる'], 'replace')).toBe(true);
+    expect(must(p.querySelector('a')).textContent).toBe('2');
+  });
+
+  it.each(DISPLAY_MODES)(
+    'refuses to write when the page changed a node since the scan (%s)',
+    (mode) => {
+      const p = must(mount('<p>Open the <a href="#map">map</a> now</p>').firstElementChild);
+      const segment = only(p);
+      const writer = createWriter(document);
+      // Pieces that do not match the text tokens are refused too.
+      expect(writer.write(segment, ['開く'], mode)).toBe(false);
+      must(segment.nodes[1]).data = 'chart';
+      expect(writer.write(segment, ['開く', '地図', '今すぐ'], mode)).toBe(false);
+      expect(data(segment)).toEqual(['Open the ', 'chart', ' now']);
+      expect(boxesIn(p)).toEqual([]);
+      expect(writer.size()).toBe(0);
+      expect(writer.changed(must(segment.nodes[0]))).toBe('unknown');
+    },
+  );
+
+  it('keeps the page value on restore when the page rewrote a translated node', () => {
+    const root = mount('<p>3 comments</p><p>Reply to the thread</p>');
+    const [first, second] = [...root.querySelectorAll('p')].map(only);
+    const writer = createWriter(document);
+    expect(writer.write(must(first), ['3 件のコメント'], 'replace')).toBe(true);
+    expect(writer.write(must(second), ['スレッドに返信'], 'replace')).toBe(true);
+    const counted = must(must(first).nodes[0]);
+    const replied = must(must(second).nodes[0]);
+    counted.data = '4 comments';
+    expect(writer.changed(counted)).toBe('page');
+    // The record is dropped: the node is the page's from now on.
+    expect(writer.changed(counted)).toBe('unknown');
+    // A rewrite nobody asked about is kept too.
+    replied.data = 'Reply now';
+    writer.restore({ sliced: false });
+    expect(counted.data).toBe('4 comments');
+    expect(replied.data).toBe('Reply now');
+  });
+
+  it('drops the box of a paragraph whose every node the page rewrote', () => {
+    const p = must(mount('<p>3 comments</p>').firstElementChild);
+    const segment = only(p);
+    const writer = createWriter(document);
+    expect(writer.write(segment, ['3 件のコメント'], 'pair')).toBe(true);
+    must(segment.nodes[0]).data = '4 comments';
+    expect(writer.changed(must(segment.nodes[0]))).toBe('page');
+    expect(boxesIn(p)).toEqual([]);
+    expect(writer.size()).toBe(0);
+  });
+
+  it.each(DISPLAY_MODES)('reports its own writes as ours (%s)', (mode) => {
+    const root = mount('<p>Save the file</p><p>Close the window</p>');
+    const [saved, other] = [...root.querySelectorAll('p')].map(only);
+    const writer = createWriter(document);
+    expect(writer.write(must(saved), ['ファイルを保存'], mode)).toBe(true);
+    expect(writer.changed(must(must(saved).nodes[0]))).toBe('ours');
+    expect(writer.changed(must(must(other).nodes[0]))).toBe('unknown');
+  });
+
+  it('shows the translation below the original in pair mode without changing the text', () => {
+    const p = must(mount('<p>Follow the <a href="/river">river</a></p>').firstElementChild);
+    const link = must(p.querySelector('a'));
+    const text = p.textContent;
+    const writer = createWriter(document);
+    expect(writer.write(only(p), ['川に沿って', '進む'], 'pair')).toBe(true);
+    expect(p.textContent).toBe(text);
+    const [box] = boxesIn(p);
+    // After the link the paragraph ends with, never inside it.
+    expect(p.lastChild).toBe(must(box));
+    expect(must(box).previousSibling).toBe(link);
+    expect(shown(must(box))).toBe('川に沿って進む');
+  });
+
+  it('keeps the boxes of one paragraph in document order after its last node', () => {
+    const links = Array.from(
+      { length: 14 },
+      (_, i) => `<a href="#chapter-${i}">Chapter ${i} notes</a>`,
+    ).join(' ');
+    const p = must(mount(`<p>${links}\n</p>`).firstElementChild);
+    // More markers than one unit takes: one text-only segment per link, all ending at the '\n'.
+    const segments = segmentsOf(p, undefined, ids());
+    expect(segments).toHaveLength(14);
+    const last = must(p.lastChild);
+    for (const segment of segments) expect(segment.last).toBe(last);
+    const writer = createWriter(document);
+    // Out of order: 0, 5, 10, 1, 6, 11, …
+    for (let i = 0; i < segments.length; i += 1) {
+      const segment = must(segments[(i * 5) % segments.length]);
+      expect(writer.write(segment, translated(segment), 'pair')).toBe(true);
+    }
+    expect(boxesIn(p).map(shown)).toEqual(segments.map((segment) => translated(segment).join('')));
+    expect(must(boxesIn(p)[0]).previousSibling).toBe(last);
+  });
+
+  it('switches replace → pair → replace and still restores the exact DOM', () => {
+    const shadow = loadArticle();
+    const before = fingerprint(document.body);
+    const segments = scanAll(document.body);
+    const clock = manualTimers();
+    const writer = createWriter(document, { timers: clock.timers, sliceNodes: 10 });
+    for (const segment of segments)
+      expect(writer.write(segment, translated(segment), 'replace')).toBe(true);
+    const replaced = fingerprint(document.body);
+    const boxes = (): number => boxesIn(document.body).length + boxesIn(shadow).length;
+
+    writer.setMode('pair');
+    // In slices: the first one runs at once, the rest after the page had its turn.
+    expect(boxes()).toBeGreaterThan(0);
+    expect(boxes()).toBeLessThan(segments.length);
+    while (clock.runNext());
+    expect(boxes()).toBe(segments.length);
+    for (const segment of segments) expect(data(segment)).toEqual(segment.originals);
+
+    writer.setMode('replace');
+    while (clock.runNext());
+    expect(boxes()).toBe(0);
+    expect(fingerprint(document.body)).toBe(replaced);
+    expect(clock.delays.length).toBeGreaterThan(2);
+    expect(clock.delays.every((ms) => ms === 0)).toBe(true);
+
+    writer.restore({ sliced: false });
+    expect(fingerprint(document.body)).toBe(before);
+  });
+
+  it('keeps a selection inside the same nodes across write and restore', () => {
+    const root = mount('<p>Click <a href="#go">here</a> to start</p><p>Nothing else</p>');
+    const [p, other] = root.querySelectorAll('p');
+    const segment = only(must(p));
+    const here = must(segment.nodes[1]);
+    const rest = must(textNodes(must(other))[0]);
+    const selection = must(document.getSelection());
+    const writer = createWriter(document);
+
+    selection.setBaseAndExtent(here, 1, rest, 3);
+    expect(writer.write(segment, ['クリック', 'ここを押して', '始める'], 'replace')).toBe(true);
+    expect([selection.anchorNode, selection.anchorOffset]).toEqual([here, mapOffset(1, 4, 6)]);
+    expect([selection.focusNode, selection.focusOffset]).toEqual([rest, 3]);
+
+    writer.restore({ sliced: false });
+    expect([selection.anchorNode, selection.anchorOffset]).toEqual([here, mapOffset(2, 6, 4)]);
+    expect([selection.focusNode, selection.focusOffset]).toEqual([rest, 3]);
+
+    // Backwards, inside one node.
+    selection.setBaseAndExtent(here, 3, here, 1);
+    expect(writer.write(segment, ['クリック', 'ここを押して', '始める'], 'replace')).toBe(true);
+    expect([selection.anchorNode, selection.anchorOffset]).toEqual([here, mapOffset(3, 4, 6)]);
+    expect([selection.focusNode, selection.focusOffset]).toEqual([here, mapOffset(1, 4, 6)]);
+  });
+
+  it('restores detached nodes too, in slices of sliceNodes', () => {
+    const line = (i: number): string => `Line ${i} of the log`;
+    const root = mount(Array.from({ length: 1200 }, (_, i) => `<p>${line(i)}</p>`).join(''));
+    const paragraphs = [...root.querySelectorAll('p')];
+    const segments = paragraphs.map(only);
+    const clock = manualTimers();
+    // The default slice: 500 nodes.
+    const writer = createWriter(document, { timers: clock.timers });
+    for (const segment of segments)
+      expect(writer.write(segment, translated(segment), 'replace')).toBe(true);
+    for (const p of paragraphs.slice(0, 100)) p.remove();
+    const nodes = segments.map((segment) => must(segment.nodes[0]));
+    const restored = (): number => nodes.filter((node, i) => node.data === line(i)).length;
+    let done = 0;
+
+    writer.restore({ sliced: true, done: () => (done += 1) });
+    expect(restored()).toBe(500);
+    expect(done).toBe(0);
+    expect(writer.size()).toBe(0);
+    expect(clock.runNext()).toBe(true);
+    expect(restored()).toBe(1000);
+    expect(clock.runNext()).toBe(true);
+    expect(restored()).toBe(1200);
+    expect(done).toBe(1);
+    expect(clock.runNext()).toBe(false);
+    expect(clock.delays).toEqual([0, 0]);
+    expect(paragraphs.slice(0, 100).some((p) => p.isConnected)).toBe(false);
+  });
+
+  it('restores everything at once without slices, finishing a sliced restore first', () => {
+    const line = (i: number): string => `Entry ${i} of the list`;
+    const root = mount(Array.from({ length: 5 }, (_, i) => `<p>${line(i)}</p>`).join(''));
+    const segments = [...root.querySelectorAll('p')].map(only);
+    const clock = manualTimers();
+    const writer = createWriter(document, { timers: clock.timers, sliceNodes: 2 });
+    for (const segment of segments) writer.write(segment, translated(segment), 'pair');
+    for (const segment of segments) writer.write(segment, translated(segment), 'replace');
+    const finished: string[] = [];
+
+    writer.restore({ sliced: true, done: () => finished.push('sliced') });
+    expect(finished).toEqual([]);
+    // `pagehide` into the bfcache: everything now, in this task.
+    writer.restore({ sliced: false, done: () => finished.push('now') });
+    expect(finished).toEqual(['sliced', 'now']);
+    expect(segments.map((segment) => must(segment.nodes[0]).data)).toEqual(
+      segments.map((_, i) => line(i)),
+    );
+    expect(clock.runNext()).toBe(false);
+  });
+
+  it('writes a paragraph again over its own translation', () => {
+    const p = must(mount('<p>Open the <a href="#door">door</a></p>').firstElementChild);
+    const segment = only(p);
+    const writer = createWriter(document);
+    expect(writer.write(segment, ['開ける', '扉を'], 'replace')).toBe(true);
+    expect(writer.write(segment, ['開ける', '扉を'], 'pair')).toBe(true);
+    expect(data(segment)).toEqual(['Open the ', 'door']);
+    expect(boxesIn(p)).toHaveLength(1);
+    expect(writer.write(segment, ['開ける', '扉を'], 'replace')).toBe(true);
+    expect(data(segment)).toEqual(['開ける ', '扉を']);
+    expect(boxesIn(p)).toEqual([]);
+    expect(writer.size()).toBe(1);
+    writer.restore({ sliced: false });
+    expect(data(segment)).toEqual(['Open the ', 'door']);
+  });
+
+  it('replaces the box of a paragraph the page re-rendered', () => {
+    const p = must(mount('<p>Loading the next page</p>').firstElementChild);
+    const writer = createWriter(document);
+    expect(writer.write(only(p), ['次のページを読み込み中'], 'pair')).toBe(true);
+    // The page swaps the text node and leaves the box.
+    must(p.firstChild).replaceWith('Loaded the next page');
+    expect(boxesIn(p)).toHaveLength(1);
+    expect(writer.write(only(p), ['次のページを読み込みました'], 'pair')).toBe(true);
+    expect(boxesIn(p).map(shown)).toEqual(['次のページを読み込みました']);
+    expect(writer.size()).toBe(1);
+  });
+
+  it('finds the translated paragraph of a node and the original text of its block', () => {
+    const root = mount(
+      '<div id="note">Patch notes:<br>Version 1.3 lowered her health.</div>' +
+        '<p id="tip">Roll <a href="#roll">backward</a>, then press <kbd>R2</kbd>.</p>' +
+        '<p id="other">Nothing here was written.</p>',
+    );
+    const note = must(root.querySelector('#note'));
+    const tip = must(root.querySelector('#tip'));
+    const other = must(root.querySelector('#other'));
+    const notes = segmentsOf(note, undefined, ids());
+    expect(notes).toHaveLength(2);
+    const roll = only(tip);
+    const writer = createWriter(document);
+    for (const segment of [...notes, roll])
+      expect(writer.write(segment, translated(segment), 'replace')).toBe(true);
+    expect(writer.size()).toBe(3);
+
+    const link = must(tip.querySelector('a'));
+    const kept = must(tip.querySelector('kbd'));
+    for (const node of [must(roll.nodes[0]), link, must(link.firstChild), kept, tip])
+      expect(writer.segmentOf(node)).toBe(roll);
+    expect(writer.segmentOf(note)).toBe(notes[0]);
+    expect(writer.segmentOf(must(must(notes[1]).nodes[0]))).toBe(notes[1]);
+    expect(writer.segmentOf(other)).toBeUndefined();
+    expect(writer.segmentOf(must(other.firstChild))).toBeUndefined();
+    expect(writer.originalText(tip)).toBe('Roll backward, then press R2.');
+    expect(writer.originalText(note)).toBe('Patch notes:\nVersion 1.3 lowered her health.');
+    expect(writer.originalText(other)).toBeUndefined();
+
+    writer.restore({ sliced: false });
+    expect(writer.size()).toBe(0);
+    expect(writer.segmentOf(tip)).toBeUndefined();
+    expect(writer.originalText(tip)).toBeUndefined();
+  });
+
+  it('cuts the original text of a block at 300 characters', () => {
+    const p = must(mount(`<p>${'Long words go on. '.repeat(30)}</p>`).firstElementChild);
+    const segment = only(p);
+    const writer = createWriter(document);
+    expect(writer.write(segment, translated(segment), 'replace')).toBe(true);
+    const text = must(writer.originalText(p));
+    expect(Array.from(text)).toHaveLength(300);
+    expect(text.startsWith('Long words go on. Long')).toBe(true);
+    expect(text.endsWith('…')).toBe(true);
+  });
+});
+
+describe('mapOffset', () => {
+  it.each([
+    { name: '先頭', offset: 0, oldLength: 10, newLength: 4, expected: 0 },
+    { name: '末尾', offset: 10, oldLength: 10, newLength: 4, expected: 4 },
+    { name: '途中', offset: 5, oldLength: 10, newLength: 4, expected: 2 },
+  ])('mapOffset: $name', ({ offset, oldLength, newLength, expected }) => {
+    expect(mapOffset(offset, oldLength, newLength)).toBe(expected);
+  });
+});

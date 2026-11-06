@@ -5,6 +5,13 @@ import {
   type ProtocolHandlers,
 } from '@chrome-toolbox/extension-core';
 
+/**
+ * How a translated page shows the translation: `replace` writes it into the text nodes (the
+ * default), `pair` keeps the text and shows the translation under each paragraph.
+ */
+export const DISPLAY_MODES = ['replace', 'pair'] as const;
+export type DisplayMode = (typeof DISPLAY_MODES)[number];
+
 /** Longest selected text a `selection` command carries (spec §8); a longer one is cut. */
 export const MAX_SELECTION = 2000;
 
