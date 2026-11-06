@@ -28,7 +28,7 @@ const builders = {
       source: 'hi',
       sourceLang: 'en',
       previous: ['a'],
-      glossary: [{ source: 'Kiara', target: 'キアラ' }],
+      glossary: [{ source: 'Fixture Ch', target: 'フィクスチャ' }],
       withEnglish: false,
     }),
   comments: () =>
@@ -71,12 +71,12 @@ describe('subtitlePrompt', () => {
       source: 'hi',
       sourceLang: 'id',
       previous: ['earlier line'],
-      glossary: [{ source: 'Kiara', target: 'キアラ' }],
+      glossary: [{ source: 'Fixture Ch', target: 'フィクスチャ' }],
       withEnglish: true,
     });
-    expect(system(p)).not.toContain('Kiara');
+    expect(system(p)).not.toContain('Fixture Ch');
     expect(system(p)).not.toContain('earlier line');
-    expect(user(p)).toContain('Kiara');
+    expect(user(p)).toContain('Fixture Ch');
     expect(user(p)).toContain('"earlier line"');
     expect(user(p)).toContain('"id"');
     expect(p.jsonSchema).toMatchObject({ required: ['ja', 'en'] });

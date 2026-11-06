@@ -87,7 +87,7 @@ describe('normalizeComment', () => {
     { input: '٣٣٣٣٣', expected: '٣٣٣٣٣' },
     { input: '草草草草草', expected: '草草草' },
     { input: '🔥🔥🔥🔥', expected: '🔥🔥🔥' },
-    { input: 'Kiara!!!!!', expected: 'kiara!!!' },
+    { input: 'Fixture!!!!!', expected: 'fixture!!!' },
     { input: '  gg \t\n  wp  ', expected: 'gg wp' },
     { input: 'ｈｅｌｌｏ　ｗｏｒｌｄ', expected: 'hello world' },
     { input: 'nice play', expected: 'nice play' },

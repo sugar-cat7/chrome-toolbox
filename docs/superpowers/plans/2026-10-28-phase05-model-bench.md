@@ -153,7 +153,7 @@ it.each([
         source: 'hi',
         sourceLang: 'en',
         previous: ['a'],
-        glossary: [{ source: 'Kiara', target: 'キアラ' }],
+        glossary: [{ source: 'Fixture Ch', target: 'フィクスチャ' }],
         withEnglish: false,
       }),
   ],
@@ -183,11 +183,11 @@ it('subtitle prompt puts glossary and previous lines in the user turn, after the
     source: 'hi',
     sourceLang: 'id',
     previous: ['x'],
-    glossary: [{ source: 'Kiara', target: 'キアラ' }],
+    glossary: [{ source: 'Fixture Ch', target: 'フィクスチャ' }],
     withEnglish: true,
   });
-  expect(p.messages[0]?.content).not.toContain('Kiara');
-  expect(p.messages.at(-1)?.content).toContain('Kiara');
+  expect(p.messages[0]?.content).not.toContain('Fixture Ch');
+  expect(p.messages.at(-1)?.content).toContain('Fixture Ch');
   expect(p.messages.at(-1)?.content).toContain('id');
   expect(p.jsonSchema).toMatchObject({ required: ['ja', 'en'] });
 });
