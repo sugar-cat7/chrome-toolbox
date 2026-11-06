@@ -4,10 +4,22 @@ import path from 'node:path';
 import { expect, it } from 'vitest';
 import { documentation } from '../quality/documentation.ts';
 import { applyFiles } from './files.ts';
+import { formatFiles } from './format.ts';
 import { presets, projectOptions } from './options.ts';
 import { projectFiles, rootReadme } from './render.ts';
 
 const source = path.resolve(import.meta.dirname, '../..');
+
+it('keeps the README blueprint formatted, since rendering only names its heading', () => {
+  // The placeholder itself reads as emphasis to the formatter, so check a named README.
+  const readme = Buffer.from(
+    readFileSync(path.join(source, rootReadme), 'utf8').replace(
+      /^# __PROJECT__\n/u,
+      '# generated-web\n',
+    ),
+  );
+  expect(formatFiles(source, new Map([['README.md', readme]])).get('README.md')).toEqual(readme);
+});
 
 it.each(presets)(
   'renders a %s project whose README, root manifest and documents refer only to what it contains',

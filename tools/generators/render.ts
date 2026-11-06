@@ -286,10 +286,11 @@ export function projectFiles(
       root.scripts[`dev:${app}`] = `node tools/dev-environment/dev.ts ${app}`;
   }
   files.set('package.json', Buffer.from(`${JSON.stringify(root, null, 2)}\n`));
-  formatFiles(
-    source,
-    new Map(['package.json', 'README.md'].map((filename) => [filename, files.get(filename)!])),
-  ).forEach((contents, filename) => files.set(filename, contents));
+  // Each formatted non-script file costs a formatter process; the README blueprint is kept
+  // formatted instead (render.test.ts), and only its heading changes here.
+  formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
+    (contents, filename) => files.set(filename, contents),
+  );
   const state: TemplateState = {
     version: root.version as string,
     kind,
