@@ -11,15 +11,19 @@ export type RequestUnit = Readonly<{ key: string; tokens: readonly PageToken[] }
 
 /**
  * A paragraph to translate: the text and inline elements of `block` between two of its
- * boundaries (a block element or `<br>`).
+ * boundaries (a block element, `<br>` or an editable element).
  * - `tokens` are its text tokens, markers and spaces in document order.
  * - `nodes` are the text nodes it rewrites, in document order, with their `data` at the scan in
  *   `originals`. Text nodes of only whitespace are never rewritten, so they are not here.
  * - `nodes[i]` belongs to the text token `pieceOf[i]` (0-based among the `text` tokens, as
  *   `readPagePieces` returns their translations). Text nodes with no marker between them (an
  *   `<img>`, a `<wbr>`, a comment or a framework's adjacent text nodes) make one text token, so
- *   one index can hold several nodes: its translation goes into the first of them, and the rest
- *   are written `''`.
+ *   one index can hold several nodes: its translation goes into the first of them, and each
+ *   later one is written only its own leading and trailing whitespace (P23).
+ * - `last` is the paragraph's last node among the children of its parent (`block`, or the shadow
+ *   root whose host is `block`), whatever it is: a text node, a link, a `<code>`, an `<img>` or
+ *   an inline element without words. A side-by-side translation goes right after it. The
+ *   segments a paragraph falls back to share it.
  * - `units` is normally `[tokens]`. A text-only paragraph longer than `PAGE_UNIT_CHARS` is sent
  *   as text-only units cut at sentence ends; their translations are joined back into one.
  */
@@ -29,6 +33,7 @@ export type Segment = Readonly<{
   nodes: readonly Text[];
   originals: readonly string[];
   pieceOf: readonly number[];
+  last: ChildNode;
   tokens: readonly PageToken[];
   units: readonly RequestUnit[];
 }>;
@@ -63,9 +68,12 @@ export const INLINE_TAGS: ReadonlySet<string> = new Set([
 ]);
 /** Elements a paragraph keeps as they are, in place (`<kN/>`). */
 const KEEP_TAGS: ReadonlySet<string> = new Set(['code', 'kbd', 'samp', 'var', 'tt']);
+/** This extension's own elements: the side-by-side translation and the overlay. */
+const OWN_TAGS: ReadonlySet<string> = new Set(['pt-ja', 'pt-overlay']);
 /**
- * Elements a paragraph steps over: images and the word break (no words), and inline icons and
- * the elements a page never shows. The text on both sides of one stays one text token.
+ * Elements a paragraph steps over: images and the word break (no words), inline icons, the
+ * elements a page never shows, and this extension's own. The text on both sides of one stays
+ * one text token.
  */
 const IGNORED_TAGS: ReadonlySet<string> = new Set([
   'img',
@@ -76,6 +84,7 @@ const IGNORED_TAGS: ReadonlySet<string> = new Set([
   'style',
   'noscript',
   'template',
+  ...OWN_TAGS,
 ]);
 /** Elements whose whole subtree is never translated. */
 const SKIPPED_TAGS: ReadonlySet<string> = new Set([
@@ -145,6 +154,12 @@ const editable = (element: Element): boolean => {
   const value = element.getAttribute('contenteditable');
   return value !== null && EDITABLE_VALUES.has(value.trim().toLowerCase());
 };
+/** Whether an element under `element` is editable (one query: the subtree of a kept element). */
+const holdsEditable = (element: Element): boolean => {
+  for (const inner of element.querySelectorAll('[contenteditable]'))
+    if (editable(inner)) return true;
+  return false;
+};
 const notranslate = (element: Element): boolean => element.classList.contains('notranslate');
 
 /** Whether `element` closes its whole subtree to translation, by itself. */
@@ -190,12 +205,7 @@ export function isSkipped(element: Element): boolean {
 
 /** Whether a child of `element` ends a paragraph inside it, so it cannot be one marker. */
 function holdsBoundary(element: Element): boolean {
-  for (const child of element.children) {
-    const tag = child.localName;
-    if (tag === 'br') return true;
-    if (IGNORED_TAGS.has(tag) || KEEP_TAGS.has(tag)) continue;
-    if (!INLINE_TAGS.has(tag) || holdsBoundary(child)) return true;
-  }
+  for (const child of element.children) if (roleOf(child) === 'boundary') return true;
   return false;
 }
 
@@ -204,21 +214,24 @@ type Role = 'boundary' | 'ignore' | 'keep' | 'inline';
 /**
  * What an element is inside a paragraph, by its tag (the CSS `display` is never read: it would
  * force a layout):
- * - `boundary`: `<br>`, a block (any tag not listed above), or an inline element holding one,
- *   which is then a block of its own that the scanner enters;
- * - `ignore`: stepped over (`IGNORED_TAGS`, inline icon fonts, editable inline elements);
+ * - `boundary`: `<br>`, an editable element (P24: its text is never read, and the words on each
+ *   side keep their order), a block (any tag not listed above), or an inline element holding
+ *   one of those, which is then a block of its own that the scanner enters;
+ * - `ignore`: stepped over (`IGNORED_TAGS`, inline icon fonts);
  * - `keep`: kept in place (`KEEP_TAGS`, and inline elements marked `notranslate` or
- *   `translate="no"`: "a name that stays as it is");
+ *   `translate="no"`: "a name that stays as it is"), unless something editable is inside: its
+ *   text would go out with the request, so it is a boundary like an editable element;
  * - `inline`: a marker around its words.
  */
 function roleOf(element: Element): Role {
   const tag = element.localName;
-  if (tag === 'br') return 'boundary';
+  if (tag === 'br' || editable(element)) return 'boundary';
   if (IGNORED_TAGS.has(tag)) return 'ignore';
-  if (KEEP_TAGS.has(tag)) return 'keep';
+  if (KEEP_TAGS.has(tag)) return holdsEditable(element) ? 'boundary' : 'keep';
   if (!INLINE_TAGS.has(tag) || holdsBoundary(element)) return 'boundary';
-  if (iconFont(element) || editable(element)) return 'ignore';
-  if (notranslate(element) || translateSays(element) === false) return 'keep';
+  if (iconFont(element)) return 'ignore';
+  if (notranslate(element) || translateSays(element) === false)
+    return holdsEditable(element) ? 'boundary' : 'keep';
   return 'inline';
 }
 
@@ -230,8 +243,7 @@ type Piece =
   | Readonly<{ t: 'text'; node: Text }>
   | Readonly<{ t: 'open' }>
   | Readonly<{ t: 'close' }>
-  | Readonly<{ t: 'keep'; text: string }>
-  | Readonly<{ t: 'boundary' }>;
+  | Readonly<{ t: 'keep'; text: string }>;
 
 const WORD = /\S/u;
 const squash = (text: string): string => text.replace(/\s+/gu, ' ').trim();
@@ -244,33 +256,33 @@ const holdsWords = (pieces: readonly Piece[]): boolean =>
       (piece.t === 'text' && WORD.test(piece.node.data)),
   );
 
-/** The pieces of `parent`'s children, in document order, with a `boundary` between paragraphs. */
-function piecesOf(parent: ParentNode, out: Piece[]): void {
-  for (const child of parent.childNodes) {
-    if (isText(child)) {
-      out.push({ t: 'text', node: child });
-      continue;
-    }
-    // Comments and the like hold no words: the text around them stays one.
-    if (!isElement(child)) continue;
-    switch (roleOf(child)) {
-      case 'boundary':
-        out.push({ t: 'boundary' });
-        break;
-      case 'ignore':
-        break;
-      case 'keep':
-        out.push({ t: 'keep', text: squash(child.textContent ?? '') });
-        break;
-      case 'inline': {
-        const inner: Piece[] = [];
-        piecesOf(child, inner);
-        const marked = holdsWords(inner);
-        if (marked) out.push({ t: 'open' });
-        for (const piece of inner) out.push(piece);
-        if (marked) out.push({ t: 'close' });
-        break;
-      }
+/**
+ * Adds the pieces of `node` to `out`, in document order; false when `node` is a boundary, which
+ * adds nothing. Comments and the like hold no words: the text around them stays one.
+ */
+function addPieces(node: ChildNode, out: Piece[]): boolean {
+  if (isText(node)) {
+    out.push({ t: 'text', node });
+    return true;
+  }
+  if (!isElement(node)) return true;
+  switch (roleOf(node)) {
+    case 'boundary':
+      return false;
+    case 'ignore':
+      return true;
+    case 'keep':
+      out.push({ t: 'keep', text: squash(node.textContent ?? '') });
+      return true;
+    case 'inline': {
+      // An inline element holds no boundary (`roleOf`), so every child adds its pieces.
+      const inner: Piece[] = [];
+      for (const child of node.childNodes) addPieces(child, inner);
+      const marked = holdsWords(inner);
+      if (marked) out.push({ t: 'open' });
+      for (const piece of inner) out.push(piece);
+      if (marked) out.push({ t: 'close' });
+      return true;
     }
   }
 }
@@ -331,8 +343,6 @@ function tokensOf(pieces: readonly Piece[]): { tokens: PageToken[]; runs: Run[] 
         kept += 1;
         tokens.push({ t: 'keep', n: kept, text: piece.text });
         break;
-      case 'boundary':
-        break;
     }
   }
   endRun();
@@ -349,18 +359,25 @@ function codePoints(text: string): number {
 /** Where a sentence ends: `.`, `!`, `?` or `…` and a space, or `。`, `！`, `？`. */
 const SENTENCE_END = /[.!?…]+["'”’)\]]*\s+|[。！？]+[」』”’)\]]*\s*/gu;
 
-/** A sentence longer than a unit, cut at the last space that fits, or at the limit. */
+/**
+ * A sentence longer than a unit, cut at the last space that fits, or at the limit. Its code
+ * points are split once and the cuts move forward, so a long text costs linear time.
+ */
 function cutLong(sentence: string): string[] {
+  const points = Array.from(sentence);
+  // The trailing whitespace does not count: it is trimmed from the unit.
+  let length = points.length;
+  while (length > 0 && /\s/u.test(points[length - 1] ?? '')) length -= 1;
   const parts: string[] = [];
-  let rest = sentence;
-  while (codePoints(rest.trim()) > PAGE_UNIT_CHARS) {
-    const head = Array.from(rest).slice(0, PAGE_UNIT_CHARS).join('');
-    const space = head.lastIndexOf(' ');
-    const cut = space > 0 ? space + 1 : head.length;
-    parts.push(rest.slice(0, cut));
-    rest = rest.slice(cut);
+  let start = 0;
+  while (length - start > PAGE_UNIT_CHARS) {
+    let space = start + PAGE_UNIT_CHARS - 1;
+    while (space > start && points[space] !== ' ') space -= 1;
+    const cut = space > start ? space + 1 : start + PAGE_UNIT_CHARS;
+    parts.push(points.slice(start, cut).join(''));
+    start = cut;
   }
-  parts.push(rest);
+  parts.push(points.slice(start).join(''));
   return parts;
 }
 
@@ -376,12 +393,16 @@ function sentenceUnits(text: string): string[] {
   if (start < text.length) sentences.push(text.slice(start));
   const units: string[] = [];
   let current = '';
-  for (const sentence of sentences.flatMap(cutLong)) {
-    if (current.trim() !== '' && codePoints((current + sentence).trim()) > PAGE_UNIT_CHARS) {
+  // Code points of `current`, its trailing space included.
+  let size = 0;
+  for (const piece of sentences.flatMap(cutLong)) {
+    if (size > 0 && size + codePoints(piece.trimEnd()) > PAGE_UNIT_CHARS) {
       units.push(current.trim());
       current = '';
+      size = 0;
     }
-    current += sentence;
+    current += piece;
+    size += codePoints(piece);
   }
   if (current.trim() !== '') units.push(current.trim());
   return units;
@@ -399,9 +420,12 @@ function unitsOf(tokens: readonly PageToken[]): RequestUnit[] {
   return sentenceUnits(only.text).map((text) => unitOf([{ t: 'text', text }]));
 }
 
+/** A paragraph's pieces, its block and its last node (`Segment.last`). */
+type Paragraph = Readonly<{ pieces: readonly Piece[]; block: Element; last: ChildNode }>;
+
 /** The segment of `tokens`, or `undefined` when its words need no translating. */
 function segmentOf(
-  block: Element,
+  paragraph: Paragraph,
   tokens: readonly PageToken[],
   runs: readonly Run[],
   hint: string | undefined,
@@ -417,10 +441,11 @@ function segmentOf(
     }
   return {
     id: nextId(),
-    block,
+    block: paragraph.block,
     nodes,
     originals: nodes.map((node) => node.data),
     pieceOf,
+    last: paragraph.last,
     tokens,
     units: unitsOf(tokens),
   };
@@ -432,19 +457,18 @@ function segmentOf(
  * element too long), one text-only segment per text token.
  */
 function paragraphSegments(
-  pieces: readonly Piece[],
-  block: Element,
+  paragraph: Paragraph,
   hint: string | undefined,
   nextId: () => number,
 ): Segment[] {
-  const { tokens, runs } = tokensOf(pieces);
+  const { tokens, runs } = tokensOf(paragraph.pieces);
   if (runs.length === 0) return [];
   if (pageTokensValid(tokens)) {
-    const segment = segmentOf(block, tokens, runs, hint, nextId);
+    const segment = segmentOf(paragraph, tokens, runs, hint, nextId);
     return segment === undefined ? [] : [segment];
   }
   return runs.flatMap(
-    (run) => segmentOf(block, [{ t: 'text', text: run.text }], [run], hint, nextId) ?? [],
+    (run) => segmentOf(paragraph, [{ t: 'text', text: run.text }], [run], hint, nextId) ?? [],
   );
 }
 
@@ -455,16 +479,25 @@ function segmentsIn(
   hint: string | undefined,
   nextId: () => number,
 ): Segment[] {
-  const pieces: Piece[] = [];
-  piecesOf(parent, pieces);
   const segments: Segment[] = [];
-  let start = 0;
-  for (const [i, piece] of [...pieces, { t: 'boundary' } satisfies Piece].entries()) {
-    if (piece.t !== 'boundary') continue;
-    for (const segment of paragraphSegments(pieces.slice(start, i), block, hint, nextId))
-      segments.push(segment);
-    start = i + 1;
+  let pieces: Piece[] = [];
+  let last: ChildNode | undefined;
+  const end = (): void => {
+    if (last !== undefined)
+      for (const segment of paragraphSegments({ pieces, block, last }, hint, nextId))
+        segments.push(segment);
+    pieces = [];
+    last = undefined;
+  };
+  for (const child of parent.childNodes) {
+    if (!addPieces(child, pieces)) {
+      end();
+      continue;
+    }
+    // A side-by-side translation already there is not the paragraph's.
+    if (!isElement(child) || !OWN_TAGS.has(child.localName)) last = child;
   }
+  end();
   return segments;
 }
 

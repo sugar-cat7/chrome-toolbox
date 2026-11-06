@@ -119,6 +119,13 @@ function expectWellFormed(segment: Segment): void {
     expect(pageTokensValid(unit.tokens)).toBe(true);
     expect(unit.key).toBe(JSON.stringify(unit.tokens));
   }
+  // `last` is a child of the block (or of its shadow root), at or after the last rewritten node.
+  expect([segment.block, segment.block.shadowRoot]).toContain(segment.last.parentNode);
+  const lastText = must(segment.nodes.at(-1));
+  const atOrAfter =
+    segment.last.contains(lastText) ||
+    (segment.last.compareDocumentPosition(lastText) & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
+  expect(atOrAfter).toBe(true);
 }
 
 describe('segmentsOf and the scanner', () => {
@@ -272,6 +279,21 @@ describe('segmentsOf and the scanner', () => {
       data: ['Equip the ', ' first.'],
       pieceOf: [0, 1],
     },
+    {
+      name: 'a notranslate name',
+      html: '<p>Use the <span class="notranslate">Moonblade</span> now.</p>',
+      source: 'Use the <k1/> now.',
+      data: ['Use the ', ' now.'],
+      pieceOf: [0, 1],
+    },
+    // P25: this extension's own elements are stepped over, never a boundary.
+    {
+      name: 'a side-by-side translation inside the paragraph',
+      html: '<p>Before <pt-ja></pt-ja>after the pair.</p>',
+      source: 'Before after the pair.',
+      data: ['Before ', 'after the pair.'],
+      pieceOf: [0, 0],
+    },
   ])('tokens of a paragraph: $name', ({ html, source: text, data: texts, pieceOf }) => {
     const segments = scan(mount(html)).segments;
     expect(segments).toHaveLength(1);
@@ -291,6 +313,96 @@ describe('segmentsOf and the scanner', () => {
     expect(segment.tokens).toEqual([{ t: 'text', text: 'Collect three shards to open the gate.' }]);
     expect(segment.pieceOf).toEqual([0, 0, 0]);
     expectWellFormed(segment);
+  });
+
+  // P24: editable text is never read or sent; an editable element ends the paragraph on each
+  // side, so the words around it keep their order.
+  it.each([
+    {
+      name: 'an editable inline element',
+      html: '<p>Use the <span contenteditable="true">typed text</span> field now.</p>',
+      sources: ['Use the', 'field now.'],
+    },
+    {
+      name: 'editable code',
+      html: '<p>Run <code contenteditable="true">typed text</code> now.</p>',
+      sources: ['Run', 'now.'],
+    },
+    {
+      name: 'kept code holding an editable element',
+      html: '<p>Press <kbd><span contenteditable="">typed text</span></kbd> now.</p>',
+      sources: ['Press', 'now.'],
+    },
+    {
+      name: 'a translate="no" name holding an editable element',
+      html: '<p>Equip the <span translate="no">Moon <b contenteditable="true">typed text</b></span> now.</p>',
+      sources: ['Equip the', 'now.'],
+    },
+    {
+      name: 'a notranslate name holding an editable element',
+      html: '<p>Equip the <span class="notranslate">Moon <b contenteditable="true">typed text</b></span> now.</p>',
+      sources: ['Equip the', 'now.'],
+    },
+    {
+      name: 'a translate="no" name with an editable element under an icon',
+      html: '<p>Equip the <span translate="no">Moon<svg><foreignObject><div contenteditable="true">typed text</div></foreignObject></svg></span> now.</p>',
+      sources: ['Equip the', 'now.'],
+    },
+  ])('never reads editable text: $name', ({ html, sources }) => {
+    const segments = scan(mount(html)).segments;
+    expect(segments.map(source)).toEqual(sources);
+    for (const segment of segments) {
+      expectWellFormed(segment);
+      for (const unit of segment.units) expect(unit.key).not.toContain('typed');
+    }
+  });
+
+  // P25: Task 5 puts the side-by-side translation after `last`, a child of the paragraph's parent.
+  it.each([
+    {
+      name: 'text',
+      html: '<p>Roll <a href="/r">backward</a> to dodge.</p>',
+      last: (p: Element) => p.lastChild,
+    },
+    {
+      name: 'a link',
+      html: '<p>Read the <a href="/g">full guide</a></p>',
+      last: (p: Element) => p.querySelector('a'),
+    },
+    {
+      name: 'code',
+      html: '<p>Run <code>start()</code></p>',
+      last: (p: Element) => p.querySelector('code'),
+    },
+    {
+      name: 'an image',
+      html: '<p>Lightning damage <img src="/bolt.png" alt=""></p>',
+      last: (p: Element) => p.querySelector('img'),
+    },
+    {
+      name: 'an inline element without words',
+      html: '<p>Open the map <i class="icon-map"></i></p>',
+      last: (p: Element) => p.querySelector('i'),
+    },
+    {
+      name: 'a side-by-side translation already there',
+      html: '<p>Open the map<pt-ja></pt-ja></p>',
+      last: (p: Element) => p.firstChild,
+    },
+  ])('ends a paragraph at its last node: $name', ({ html, last }) => {
+    const paragraph = must(mount(html).querySelector('p'));
+    const segments = scan(paragraph).segments;
+    expect(segments).toHaveLength(1);
+    expect(must(segments[0]).last).toBe(must(last(paragraph)));
+  });
+
+  it('ends each paragraph of a block before its line break', () => {
+    const paragraph = must(mount('<p>Line one<br>Line two <b>here</b><br></p>').querySelector('p'));
+    const segments = scan(paragraph).segments;
+    expect(segments.map((segment) => segment.last)).toEqual([
+      paragraph.firstChild,
+      paragraph.querySelector('b'),
+    ]);
   });
 
   it('splits a paragraph at br and keeps a nested inline element', () => {
@@ -376,6 +488,22 @@ describe('segmentsOf and the scanner', () => {
     expectWellFormed(segment);
   });
 
+  it.each([
+    { name: 'words', text: 'word '.repeat(20_000).trim() },
+    { name: 'no spaces', text: 'x'.repeat(100_000) },
+  ])('cuts 100,000 characters without a sentence end in linear time ($name)', ({ text }) => {
+    const paragraph = must(mount('<p></p>').querySelector('p'));
+    paragraph.append(text);
+    const started = performance.now();
+    const segments = segmentsOf(paragraph, undefined, ids());
+    const elapsed = performance.now() - started;
+    expect(segments).toHaveLength(1);
+    const segment = must(segments[0]);
+    expect(segment.units).toHaveLength(250);
+    expect(segment.units.map(unitText).join(text.includes(' ') ? ' ' : '')).toBe(text);
+    expect(elapsed).toBeLessThan(50);
+  });
+
   it('treats an inline element holding a block as a container', () => {
     const root = mount('<a href="/c"><div>Card title</div><div>Card body text</div></a>');
     const segments = scan(root).segments;
@@ -416,6 +544,7 @@ describe('segmentsOf and the scanner', () => {
     const segments = scan(root).segments;
     expect(segments.map(source)).toEqual(['Rendered <1>inside</1> the shadow']);
     expect(must(segments[0]).block).toBe(host);
+    expect(must(segments[0]).last).toBe(shadow.lastChild);
   });
 
   it('scans 2,000 paragraphs in slices of at most sliceMs', () => {
