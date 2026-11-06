@@ -8,7 +8,10 @@ import {
   type GlossaryEntry,
 } from './prompts.ts';
 
-const SAMPLE_RATE = 16000;
+/** The sample rate of the PCM a transcription takes. */
+export const ASR_SAMPLE_RATE = 16000;
+/** The timeout of the client a transcription goes through: a late clip is dropped. */
+export const ASR_TIMEOUT_MS = 8_000;
 const HEADER_BYTES = 44;
 /** A multiple of 3, so that the base64 of each chunk joins the next without padding. */
 const BASE64_CHUNK = 8190;
@@ -64,7 +67,7 @@ export type AsrClient = {
   ): Promise<Result<AsrLine & { ms: number }>>;
 };
 
-/** `client` is made with `timeoutMs: 8_000`: a clip that cannot be read in time is dropped. */
+/** `client` is made with `timeoutMs: ASR_TIMEOUT_MS`: a clip that cannot be read in time is dropped. */
 export function createAsrClient({
   client,
   model,
@@ -81,9 +84,9 @@ export function createAsrClient({
       signal?: AbortSignal;
     },
   ): Promise<Result<AsrLine & { ms: number }>> {
-    const durationMs = (pcm.length / SAMPLE_RATE) * 1000;
+    const durationMs = (pcm.length / ASR_SAMPLE_RATE) * 1000;
     const { messages, grammar } = asrPrompt({
-      wavBase64: wavBase64(encodeWav(pcm, SAMPLE_RATE)),
+      wavBase64: wavBase64(encodeWav(pcm, ASR_SAMPLE_RATE)),
       durationMs,
       sourceLang: options.sourceLang,
       context: options.context,

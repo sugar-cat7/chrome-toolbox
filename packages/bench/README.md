@@ -1,6 +1,6 @@
 # bench
 
-Node command-line benchmarks that measure models on a real llama.cpp (or whisper.cpp) server with the same client, prompts and parsers as the extensions (`@chrome-toolbox/extension-core`). Their results chose the models and settings recorded in [adoption](../../docs/adoption.md).
+Node command-line benchmarks that measure models on a real llama.cpp server with the same client, prompts and parsers as the extensions (`@chrome-toolbox/extension-core`). Their results chose the models and settings recorded in [adoption](../../docs/adoption.md).
 
 ## Commands
 

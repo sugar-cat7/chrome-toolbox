@@ -286,6 +286,30 @@ describe('parseAsrLine', () => {
       expected: { lang: 'en', text: 'Okay chat, we are going in.' },
     },
     { name: '無音', text: 'en\t\n', finish: 'stop', expected: { lang: 'en', text: '' } },
+    {
+      name: '空白だけは無音',
+      text: 'en\t \u3000\n',
+      finish: 'stop',
+      expected: { lang: 'en', text: '' },
+    },
+    {
+      name: '前後の空白は削る',
+      text: 'en\t hello \n',
+      finish: 'stop',
+      expected: { lang: 'en', text: 'hello' },
+    },
+    {
+      name: '上限の 1 つ手前',
+      text: `en\t${'h'.repeat(75)}\n`,
+      finish: 'stop',
+      expected: { lang: 'en', text: 'h'.repeat(75) },
+    },
+    {
+      name: '上限',
+      text: `en\t${'h'.repeat(76)}\n`,
+      finish: 'stop',
+      expected: 'response_invalid',
+    },
     { name: '途中で切れた', text: 'ko\t안녕', finish: 'length', expected: 'response_invalid' },
     { name: '改行がない', text: 'ko\t안녕', finish: 'stop', expected: 'response_invalid' },
     {

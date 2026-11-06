@@ -1,15 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { createAsrClient, createLlamaClient, type Fetch } from '@chrome-toolbox/extension-core';
+import {
+  ASR_SAMPLE_RATE,
+  ASR_TIMEOUT_MS,
+  createAsrClient,
+  createLlamaClient,
+  type Fetch,
+} from '@chrome-toolbox/extension-core';
 import { loadAudioSamples, type AudioSample } from './datasets.ts';
 import { errorRate, percentile } from './metrics.ts';
 import { fromRoot } from './paths.ts';
 import { benchMeta, writeResults } from './results.ts';
-
-const SAMPLE_RATE = 16000;
-/** The client's own timeout: a clip the extension would drop is a failure here too. */
-const REQUEST_TIMEOUT_MS = 8_000;
 
 export type AsrRow = {
   id: string;
@@ -21,10 +23,12 @@ export type AsrRow = {
   langOk?: boolean;
   /** The transcript is empty: the model heard no speech. */
   silent?: boolean;
+  /** 1-based pass of `--repeat` the row belongs to. */
+  pass: number;
   /** Sum of the row's request times. */
   ms: number;
-  /** Time of each request of the row: one, or one per chunk with `chunkMs`. */
-  chunkMs?: number[];
+  /** Time of each request of the row: one, or one per chunk with `--chunk-ms`. */
+  requestMs?: number[];
   error?: string;
   /** The sample's WAV file does not exist: a dataset gap, not an engine failure. */
   missing?: true;
@@ -43,16 +47,27 @@ export type AsrLangStats = {
 };
 export type AsrReport = { rows: AsrRow[]; byLang: Record<string, AsrLangStats> };
 
-/** The samples of a PCM16 mono WAV file, found by its `data` chunk; undefined if it has none. */
+/**
+ * The samples of a WAV file the extension could have sent: PCM, 1 channel, 16 kHz, 16 bits, with
+ * a `fmt ` chunk before the `data` chunk. Undefined for anything else.
+ */
 export function decodeWav(wav: Uint8Array): Int16Array | undefined {
   const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
   const tag = (at: number): string =>
     String.fromCharCode(...[0, 1, 2, 3].map((i) => view.getUint8(at + i)));
   if (wav.length < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return undefined;
+  let pcm16k = false;
   let at = 12;
   while (at + 8 <= wav.length) {
     const size = view.getUint32(at + 4, true);
+    if (tag(at) === 'fmt ' && size >= 16 && at + 8 + 16 <= wav.length)
+      pcm16k =
+        view.getUint16(at + 8, true) === 1 &&
+        view.getUint16(at + 10, true) === 1 &&
+        view.getUint32(at + 12, true) === ASR_SAMPLE_RATE &&
+        view.getUint16(at + 22, true) === 16;
     if (tag(at) === 'data') {
+      if (!pcm16k) return undefined;
       const count = Math.floor(Math.min(size, wav.length - at - 8) / 2);
       return Int16Array.from({ length: count }, (_, i) => view.getInt16(at + 8 + 2 * i, true));
     }
@@ -80,19 +95,25 @@ export async function runAsrBench(options: {
     client: createLlamaClient({
       baseUrl: options.server,
       fetch: options.fetch ?? ((input, init) => fetch(input, init)),
-      timeoutMs: REQUEST_TIMEOUT_MS,
+      timeoutMs: ASR_TIMEOUT_MS,
     }),
     model: () => options.model,
   });
   const chunkSamples =
     options.chunkMs === undefined
       ? Number.POSITIVE_INFINITY
-      : Math.max(1, Math.floor((options.chunkMs * SAMPLE_RATE) / 1000));
+      : Math.max(1, Math.floor((options.chunkMs * ASR_SAMPLE_RATE) / 1000));
   const rows: AsrRow[] = [];
   // Sequential on purpose: concurrent requests would pollute the latency measurement.
   for (let pass = 0; pass < (options.repeat ?? 1); pass += 1) {
     for (const sample of options.samples) {
-      const row: AsrRow = { id: sample.id, lang: sample.lang, reference: sample.transcript, ms: 0 };
+      const row: AsrRow = {
+        id: sample.id,
+        lang: sample.lang,
+        reference: sample.transcript,
+        pass: pass + 1,
+        ms: 0,
+      };
       const wav = options.loadWav(sample.id);
       if (wav === undefined) {
         // A dataset gap is reported once, not once per pass.
@@ -110,7 +131,7 @@ export async function runAsrBench(options: {
         continue;
       }
       const transcripts: string[] = [];
-      const chunkMs: number[] = [];
+      const requestMs: number[] = [];
       let silentSoFar = true;
       for (let at = 0; at < Math.max(pcm.length, 1); at += chunkSamples) {
         const result = await asr.transcribe(pcm.subarray(at, at + chunkSamples), {
@@ -122,15 +143,15 @@ export async function runAsrBench(options: {
           row.error = result.error.internalCode;
           break;
         }
-        chunkMs.push(result.value.ms);
+        requestMs.push(result.value.ms);
         if (result.value.text !== '') transcripts.push(result.value.text);
         // The language of the first chunk that has speech; of the first chunk when all are silent.
         if (row.detectedLang === undefined || (silentSoFar && result.value.text !== ''))
           row.detectedLang = result.value.lang;
         silentSoFar &&= result.value.text === '';
       }
-      row.chunkMs = chunkMs;
-      row.ms = chunkMs.reduce((sum, value) => sum + value, 0);
+      row.requestMs = requestMs;
+      row.ms = requestMs.reduce((sum, value) => sum + value, 0);
       if (row.error === undefined) {
         row.hypothesis = transcripts.join(' ');
         row.silent = row.hypothesis === '';
@@ -140,7 +161,8 @@ export async function runAsrBench(options: {
           sample.lang === 'zh' || sample.lang === 'ja' ? 'char' : 'word',
         );
       }
-      if (sample.lang !== 'mixed')
+      // Mixed samples are never judged, and a silent one says nothing about the language.
+      if (sample.lang !== 'mixed' && row.silent !== true)
         row.langOk = row.error === undefined && row.detectedLang === sample.lang;
       rows.push(row);
     }
@@ -160,7 +182,7 @@ export async function runAsrBench(options: {
     const rates = group.flatMap((row) => (row.errorRate === undefined ? [] : [row.errorRate]));
     const latencies = group
       .filter((row) => row.error === undefined)
-      .flatMap((row) => row.chunkMs ?? [row.ms]);
+      .flatMap((row) => row.requestMs ?? [row.ms]);
     // A failed sample counts as a language miss; mixed samples are never judged.
     const judged = group.flatMap((row) => (row.langOk === undefined ? [] : [row.langOk]));
     byLang[lang] = {

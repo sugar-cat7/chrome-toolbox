@@ -468,7 +468,7 @@ export const asrPrompt = (
  * The line of a transcription reply. A reply that is cut, lacks its newline or tab, has a
  * language that is not two lowercase letters, or whose text reached the length bound fails: a
  * transcript that runs to its bound is mostly speech made up of silence, repeated, so it is
- * not shown. An empty `text` is silence.
+ * not shown. `text` is trimmed; an empty one is silence.
  */
 export function parseAsrLine(
   reply: ChatReply,
@@ -481,7 +481,7 @@ export function parseAsrLine(
   const [, lang, text] = match ?? [];
   if (lang === undefined || text === undefined || codePoints(text) >= asrTextLimit(durationMs))
     return Err(failure('response_invalid'));
-  return Ok({ lang, text });
+  return Ok({ lang, text: text.trim() });
 }
 
 /**

@@ -38,6 +38,28 @@ describe('decodeWav', () => {
     expect([...(decodeWav(padded) ?? [])]).toEqual([5, -6, 7]);
     expect(decodeWav(new Uint8Array(10))).toBeUndefined();
   });
+
+  it.each([
+    { name: 'stereo', channels: 2, rate: 16000, bits: 16, format: 1 },
+    { name: '48 kHz', channels: 1, rate: 48000, bits: 16, format: 1 },
+    { name: '8-bit', channels: 1, rate: 16000, bits: 8, format: 1 },
+    { name: 'float', channels: 1, rate: 16000, bits: 16, format: 3 },
+  ])('rejects a $name file: the extension sends 16 kHz mono 16-bit PCM', (fmt) => {
+    const wav = encodeWav(Int16Array.from([1, 2, 3, 4]), 16000);
+    const view = new DataView(wav.buffer);
+    view.setUint16(20, fmt.format, true);
+    view.setUint16(22, fmt.channels, true);
+    view.setUint32(24, fmt.rate, true);
+    view.setUint16(34, fmt.bits, true);
+    expect(decodeWav(wav)).toBeUndefined();
+  });
+
+  it('rejects a file whose fmt chunk is missing', () => {
+    const wav = encodeWav(Int16Array.from([1, 2]), 16000);
+    expect(
+      decodeWav(new Uint8Array([...wav.subarray(0, 12), ...wav.subarray(36)])),
+    ).toBeUndefined();
+  });
 });
 
 describe('runAsrBench', () => {
@@ -102,12 +124,14 @@ describe('runAsrBench', () => {
       loadWav: () => wavOf(16_000),
       fetch: async () => replies.shift() ?? new Response('', { status: 500 }),
     });
-    expect(report.byLang['en']).toMatchObject({ silent: 1, failed: 0, langAccuracy: 2 / 3 });
+    expect(report.byLang['en']).toMatchObject({ silent: 1, failed: 0, langAccuracy: 1 / 2 });
     expect(report.rows.find((row) => row.id === 'c')).toMatchObject({
       silent: true,
       hypothesis: '',
       detectedLang: 'en',
     });
+    // A silent row says nothing about the language: it is in neither count of the accuracy.
+    expect(report.rows.find((row) => row.id === 'c')?.langOk).toBeUndefined();
     expect(report.byLang['ko']).toMatchObject({ silent: 0, failed: 1, langAccuracy: 0 });
     expect(report.rows.find((row) => row.id === 'd')?.error).toBe('response_invalid');
   });
@@ -131,8 +155,26 @@ describe('runAsrBench', () => {
       errorRate: 0,
       detectedLang: 'en',
     });
-    expect(report.rows[0]?.chunkMs).toHaveLength(2);
+    const times = report.rows[0]?.requestMs ?? [];
+    expect(times).toHaveLength(2);
+    expect(report.rows[0]?.ms).toBe(times[0]! + times[1]!);
     expect(report.byLang['en']?.p50Ms).toBeDefined();
+  });
+
+  it('takes the language of the first chunk that has speech', async () => {
+    const chunkReplies = ['en\t\n', 'ko\t안녕\n', 'ko\t하세요\n'];
+    const report = await runAsrBench({
+      ...base,
+      samples: [sample('a', 'ko', '안녕 하세요')],
+      loadWav: () => wavOf(60_000),
+      chunkMs: 1500,
+      fetch: async () => chatReply(chunkReplies.shift() ?? 'en\t\n'),
+    });
+    expect(report.rows[0]).toMatchObject({
+      detectedLang: 'ko',
+      hypothesis: '안녕 하세요',
+      langOk: true,
+    });
   });
 
   it('runs the samples in order n times with repeat', async () => {
@@ -148,7 +190,7 @@ describe('runAsrBench', () => {
       },
     });
     expect(order).toEqual(['a', 'b', 'a', 'b']);
-    expect(report.rows).toHaveLength(4);
+    expect(report.rows.map((row) => `${row.id}${row.pass}`)).toEqual(['a1', 'b1', 'a2', 'b2']);
   });
 
   it('keeps going after a failure and counts a failed row as a language miss', async () => {

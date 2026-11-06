@@ -1,4 +1,11 @@
-export { createAsrClient, encodeWav, wavBase64, type AsrClient } from './asr.ts';
+export {
+  ASR_SAMPLE_RATE,
+  ASR_TIMEOUT_MS,
+  createAsrClient,
+  encodeWav,
+  wavBase64,
+  type AsrClient,
+} from './asr.ts';
 export { createQueue, type Queue, type Task } from './queue.ts';
 export {
   createLlamaClient,

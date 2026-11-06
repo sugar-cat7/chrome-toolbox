@@ -8,7 +8,7 @@ import {
   type LlamaStub,
 } from '../testing/llama-stub.ts';
 import { asrMaxTokens, asrPrompt } from './prompts.ts';
-import { createAsrClient, encodeWav, wavBase64 } from './asr.ts';
+import { ASR_SAMPLE_RATE, ASR_TIMEOUT_MS, createAsrClient, encodeWav, wavBase64 } from './asr.ts';
 import { createLlamaClient, type Fetch } from './llm.ts';
 
 const text = (view: DataView, at: number): string =>
@@ -100,6 +100,18 @@ describe('createAsrClient', () => {
     stub.respond = withoutAudio(defaultResponder);
     const result = await clientOf().transcribe(pcm, options);
     expect(result.ok ? 'ok' : result.error.internalCode).toBe('audio_unsupported');
+  });
+
+  it('forwards the signal: an aborted one cancels the request', async () => {
+    const result = await clientOf().transcribe(pcm, {
+      ...options,
+      signal: AbortSignal.abort(),
+    });
+    expect(result.ok ? 'ok' : result.error.internalCode).toBe('operation_cancelled');
+  });
+
+  it('names the sample rate and the request timeout the bench shares', () => {
+    expect([ASR_SAMPLE_RATE, ASR_TIMEOUT_MS]).toEqual([16000, 8_000]);
   });
 
   it('fails with response_invalid when the transcript fills its bound', async () => {
