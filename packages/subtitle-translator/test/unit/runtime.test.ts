@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
+import { subtitleStreamPart } from '@chrome-toolbox/extension-core';
+import { glossaryStore } from '../../src/glossary.ts';
 import {
   senderKind,
   type Sender,
@@ -157,6 +160,102 @@ describe('sender routing', () => {
       stop();
     },
   );
+});
+
+describe('caption translation routes', () => {
+  it('answers subs/translate only for a YouTube top frame and uses that tab page context', async () => {
+    const bodies: { model: string; id_slot: number; messages: { content: string }[] }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        return Response.json({
+          choices: [{ message: { content: '訳:一行\n' }, finish_reason: 'stop' }],
+        });
+      }),
+    );
+    expect(
+      await glossaryStore(fakeBrowser.storage.local).save('UC-fixture', [
+        { source: 'Fixturo', target: '' },
+      ]),
+    ).toMatchObject({ ok: true });
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => {
+        listener?.(message, sender, resolve);
+      });
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const other = await fakeBrowser.tabs.create({ url: youtube });
+    const topFrame = (tab: Browser.tabs.Tab): Browser.runtime.MessageSender => ({
+      url: youtube,
+      tab,
+      frameId: 0,
+    });
+    const page = {
+      type: 'subs/page',
+      payload: {
+        info: {
+          videoId: 'abcdefghijk',
+          streamer: 'UC-fixture',
+          title: 'Fixture Quest day 3',
+          author: 'Fixture Ch',
+          live: false,
+          tracks: 2,
+        },
+      },
+    };
+    const translate = (source: string) => ({
+      type: 'subs/translate',
+      payload: {
+        videoId: 'abcdefghijk',
+        sourceLang: 'en',
+        previous: [],
+        sentences: [{ id: '0:a', source }],
+      },
+    });
+
+    expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
+    expect(await ask(translate('Fixturo is here.'), topFrame(watch))).toEqual(
+      Ok({ lines: [{ id: '0:a', ja: '訳:一行', state: 'done' }] }),
+    );
+    // The tab that reported its page gets that page's context and its streamer's glossary.
+    expect(bodies[0]).toMatchObject({ model: 'gemma4-e4b', id_slot: 0 });
+    expect(bodies[0]?.messages[1]?.content).toContain(
+      subtitleStreamPart({
+        context: 'Title: Fixture Quest day 3\nChannel: Fixture Ch',
+        glossary: [{ source: 'Fixturo', target: 'Fixturo' }],
+      }),
+    );
+    // Another YouTube tab has reported no page: neither.
+    expect(await ask(translate('Okay chat.'), topFrame(other))).toMatchObject({ ok: true });
+    expect(bodies[1]?.messages[1]?.content).toContain(
+      subtitleStreamPart({ context: '', glossary: [] }),
+    );
+    expect(
+      await ask(
+        { ...translate('Okay chat.'), payload: { ...translate('x').payload, sentences: [] } },
+        topFrame(watch),
+      ),
+    ).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
+
+    for (const sender of [
+      { url: 'https://example.com/', tab: watch, frameId: 0 },
+      { url: youtube, tab: watch, frameId: 2 },
+      { url: fakeBrowser.runtime.getURL('/sidepanel.html') },
+      { url: fakeBrowser.runtime.getURL('/offscreen.html') },
+    ] satisfies Browser.runtime.MessageSender[]) {
+      for (const message of [page, translate('Fixturo is here.'), { type: 'subs/translate' }]) {
+        expect(await ask(message, sender)).toMatchObject({
+          ok: false,
+          error: { internalCode: 'sender_forbidden' },
+        });
+      }
+    }
+    expect(bodies).toHaveLength(2);
+    stop();
+  });
 });
 
 describe('addressed messages', () => {

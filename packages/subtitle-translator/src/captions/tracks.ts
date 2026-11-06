@@ -150,6 +150,9 @@ export function readVideo(playerResponse: unknown): Result<VideoInfo> {
 const primary = (languageCode: string): string =>
   (languageCode.split('-')[0] ?? languageCode).toLowerCase();
 
+/** Whether a caption language is Japanese (`ja`, `ja-JP`): such a track is shown as it is. */
+export const isJapanese = (languageCode: string): boolean => primary(languageCode) === 'ja';
+
 /**
  * The track to translate. The spoken language is the auto-generated track's, because YouTube
  * generates captions in the language it hears. In order: a manual track in that language (the

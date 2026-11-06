@@ -1,15 +1,32 @@
 import { browser } from 'wxt/browser';
-import { Err, failure, launch, type Result } from '@chrome-toolbox/contracts';
+import { Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
 import {
   connectionPort,
+  createLlamaClient,
+  createLruCache,
   createQueue,
   llmHandlers,
-  llmProtocol,
   settingsStore,
   type ConnectionPort,
+  type Fetch,
   type HostPermissions,
+  type SettingsStore,
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
+import { glossaryStore, type GlossaryStore } from './glossary.ts';
+import { createTabPages, type PageInfo } from './page-context.ts';
+import {
+  subtitleProtocol,
+  type SubtitleMessageType,
+  type SubtitleProtocolHandlers,
+  type TranslateRequest,
+  type TranslateResponse,
+} from './protocol.ts';
+import {
+  CAPTION_CACHE_ENTRIES,
+  createSubtitleTranslator,
+  type CaptionTranslator,
+} from './translate.ts';
 
 /** The extension APIs a side panel uses; tests pass a fake with this shape. */
 export type PanelApi = {
@@ -57,18 +74,110 @@ export function senderKind(sender: Sender): SenderKind {
 }
 
 /**
- * Only the side panel and other extension pages may send messages for now. Every other kind gets
- * `sender_forbidden` before its message is validated; later tasks add routes for content and
- * offscreen.
+ * The messages each kind of sender may send. Any other message, valid or not, gets
+ * `sender_forbidden` before it is validated.
  */
+const ROUTES = {
+  page: ['llm/status'],
+  content: ['subs/page', 'subs/translate'],
+  offscreen: [],
+  other: [],
+} as const satisfies Record<SenderKind, readonly SubtitleMessageType[]>;
+
+/** Whether `message` names one of `types`; reads nothing else, so it runs before validation. */
+function names(message: unknown, types: readonly string[]): boolean {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    typeof message.type === 'string' &&
+    types.includes(message.type)
+  );
+}
+
 const forbidden = (): Promise<Result<never>> => Promise.resolve(Err(failure('sender_forbidden')));
+
+/**
+ * A caption request may wait out a router that reloads the model (13 s measured): prefetch is
+ * not in a hurry.
+ */
+const CAPTION_TIMEOUT_MS = 15_000;
+
+/**
+ * Translates caption sentences with the saved settings. The translator is made again when the
+ * server changes; the cache and the queue (one request at a time, at most 4 waiting) stay.
+ */
+function captionTranslation({
+  settings,
+  glossary,
+  fetch,
+}: {
+  settings: SettingsStore;
+  glossary: GlossaryStore;
+  fetch: Fetch;
+}): {
+  translate(
+    this: void,
+    request: TranslateRequest,
+    page: PageInfo | undefined,
+  ): Promise<Result<TranslateResponse>>;
+  /** Cancels the waiting requests. */
+  dispose(this: void): void;
+} {
+  const queue = createQueue({ concurrency: 1, maxPending: 4 });
+  const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+  let active: { baseUrl: string; translator: CaptionTranslator } | undefined;
+  async function translate(
+    request: TranslateRequest,
+    page: PageInfo | undefined,
+  ): Promise<Result<TranslateResponse>> {
+    const loaded = await settings.load();
+    if (!loaded.ok) return loaded;
+    const baseUrl = loaded.value.llamaBaseUrl;
+    if (active?.baseUrl !== baseUrl) {
+      const client = createLlamaClient({ baseUrl, fetch, queue, timeoutMs: CAPTION_TIMEOUT_MS });
+      active = {
+        baseUrl,
+        translator: createSubtitleTranslator({
+          client,
+          settings: settings.load,
+          glossary: glossary.load,
+          cache,
+        }),
+      };
+    }
+    return active.translator.translate(request, page);
+  }
+  return { translate, dispose: () => queue.clear() };
+}
 
 /** Registers the service worker's message router and returns its cleanup. */
 export function startBackground(): () => void {
   // One inference at a time; a full queue answers queue_full instead of growing.
   const queue = createQueue({ concurrency: 1, maxPending: 16 });
-  const handlers = llmHandlers({ fetch: (input, init) => fetch(input, init), queue });
-  const pageRoute = llmProtocol.route(handlers);
+  const fetcher: Fetch = (input, init) => fetch(input, init);
+  const llm = llmHandlers({ fetch: fetcher, queue });
+  // What each watch page last reported (16 tabs): the context and glossary of its captions.
+  const pages = createTabPages();
+  const captions = captionTranslation({
+    settings: settingsStore(browser.storage.local),
+    glossary: glossaryStore(browser.storage.local),
+    fetch: fetcher,
+  });
+  /** The handlers for one message; the content routes answer for the sender's tab. */
+  function handlersFor(sender: Sender): SubtitleProtocolHandlers {
+    const tabId = sender.tab?.id;
+    return {
+      ...llm,
+      'subs/page': async ({ info }): Promise<Result<Record<string, never>>> => {
+        if (tabId === undefined) return forbidden();
+        pages.report(tabId, info);
+        return Ok({});
+      },
+      'subs/translate': (request) =>
+        tabId === undefined ? forbidden() : captions.translate(request, pages.get(tabId)),
+    };
+  }
   function onMessage(
     message: unknown,
     sender: Sender,
@@ -76,7 +185,11 @@ export function startBackground(): () => void {
   ): true {
     launch(
       async () => {
-        sendResponse(senderKind(sender) === 'page' ? await pageRoute(message) : await forbidden());
+        sendResponse(
+          names(message, ROUTES[senderKind(sender)])
+            ? await subtitleProtocol.route(handlersFor(sender))(message)
+            : await forbidden(),
+        );
       },
       (error) => sendResponse(Err(error)),
     );
@@ -87,5 +200,6 @@ export function startBackground(): () => void {
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
     queue.clear();
+    captions.dispose();
   };
 }
