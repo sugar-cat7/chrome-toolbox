@@ -14,10 +14,16 @@ export const GENERATION = {
   templateKwargs: { enable_thinking: false },
   /**
    * Token budgets; a reply cut by the budget fails to decode and is counted as a failure. A
-   * comment batch gets `commentBatchMaxTokens`: a compact line per comment plus, for a
-   * translated one, 3 tokens per character its grammar allows the translation (R46).
+   * subtitle gets `subtitleMaxTokens`: 8 plus 3 tokens per character its grammar allows the
+   * translation (2 × source characters + 16, at most 2,000). A comment batch gets
+   * `commentBatchMaxTokens`: a compact line per comment plus, for a translated one, the same
+   * 3 tokens per character (R46).
    */
-  maxTokens: { subtitle: 256, comment: commentReplyBudget, judge: 16 },
+  maxTokens: {
+    subtitle: { base: 8, perTranslationCharacter: 3 },
+    comment: commentReplyBudget,
+    judge: 16,
+  },
 } as const;
 
 /**

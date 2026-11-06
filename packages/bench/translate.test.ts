@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLlamaClient } from '@chrome-toolbox/extension-core';
+import { createLlamaClient, subtitleMaxTokens } from '@chrome-toolbox/extension-core';
 import { loadTextSamples, type TextSample } from './datasets.ts';
 import { parseIntegerOption, runTranslationBench } from './translate.ts';
 
@@ -37,7 +37,7 @@ function fakeServer(contents: string[], options: { ms?: number[]; timings?: unkn
       sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Sent);
       t += delays.shift() ?? 0;
       return Response.json({
-        choices: [{ message: { content: queue.shift() ?? '{}' } }],
+        choices: [{ message: { content: queue.shift() ?? '{}' }, finish_reason: 'stop' }],
         ...(options.timings === undefined ? {} : { timings: options.timings }),
       });
     },
@@ -61,7 +61,7 @@ describe('runTranslationBench', () => {
   });
 
   it('stops before measuring when the judge server is not ready', async () => {
-    const server = fakeServer(['{"ja":"やあ"}']);
+    const server = fakeServer(['やあ\n']);
     const judge = createLlamaClient({
       baseUrl: 'http://127.0.0.1:2',
       fetch: async () => new Response('', { status: 503 }),
@@ -72,8 +72,8 @@ describe('runTranslationBench', () => {
     expect(server.sent).toEqual([]);
   });
 
-  it('records invalid JSON as a counted failure and keeps going', async () => {
-    const server = fakeServer(['{"ja":', '{"ja":"こんにちは"}']);
+  it('records a reply without its newline as a counted failure and keeps going', async () => {
+    const server = fakeServer(['こん', 'こんにちは\n']);
     const report = await runTranslationBench({
       client: server.client,
       samples: [sample('en'), sample('ko')],
@@ -84,7 +84,7 @@ describe('runTranslationBench', () => {
   });
 
   it('reports success-only and all-attempt latency per lang × kind and overall', async () => {
-    const server = fakeServer(['{"ja":', '{"ja":"a"}', '{"ja":"b"}', '1\tc\n'], {
+    const server = fakeServer(['こん', 'a\n', 'b\n', '1\tc\n'], {
       ms: [900, 100, 300, 50],
     });
     const report = await runTranslationBench({
@@ -119,8 +119,15 @@ describe('runTranslationBench', () => {
     expect(report.failures).toEqual({ response_invalid: 2 });
   });
 
+  it('sends a speech line under its grammar and its token budget', async () => {
+    const server = fakeServer(['やあ\n']);
+    await runTranslationBench({ client: server.client, samples: [sample('en')] });
+    expect(server.sent[0]?.grammar).toBe('root ::= [^\\n<>]{1,40} "\\n"');
+    expect(server.sent[0]?.max_tokens).toBe(subtitleMaxTokens('text of en-1'));
+  });
+
   it('keeps one speech history per language and source file', async () => {
-    const server = fakeServer(['{"ja":"1"}', '{"ja":"2"}', '{"ja":"3"}', '{"ja":"4"}']);
+    const server = fakeServer(['1\n', '2\n', '3\n', '4\n']);
     await runTranslationBench({
       client: server.client,
       samples: [
@@ -156,7 +163,7 @@ describe('runTranslationBench', () => {
   });
 
   it('pins generation settings on every request and keeps each row timing', async () => {
-    const server = fakeServer(['{"ja":"a"}', '1\tc\tb\n'], {
+    const server = fakeServer(['a\n', '1\tc\tb\n'], {
       timings: { prompt_ms: 5, predicted_ms: 7, predicted_n: 3 },
     });
     const report = await runTranslationBench({
@@ -175,7 +182,7 @@ describe('runTranslationBench', () => {
   });
 
   it('asks the judge for a 1-5 score per translated row', async () => {
-    const server = fakeServer(['{"ja":"やあ"}']);
+    const server = fakeServer(['やあ\n']);
     const judge = fakeServer(['{"score":4}']);
     const report = await runTranslationBench({
       client: server.client,
@@ -188,7 +195,7 @@ describe('runTranslationBench', () => {
   });
 
   it('keeps a judge failure apart from the translation result', async () => {
-    const server = fakeServer(['{"ja":"やあ"}']);
+    const server = fakeServer(['やあ\n']);
     const judge = fakeServer(['{"score":9}']);
     const report = await runTranslationBench({
       client: server.client,

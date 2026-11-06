@@ -7,7 +7,8 @@ import {
   createQueue,
   cutByMaxTokens,
   parseCommentBatch,
-  subtitleOutputSchema,
+  parseSubtitleLine,
+  subtitleMaxTokens,
   subtitlePrompt,
   type LlamaClient,
 } from '@chrome-toolbox/extension-core';
@@ -205,25 +206,24 @@ export async function runSlotBench(options: SlotBenchOptions): Promise<SlotRepor
       if (previousEnd > scheduled) late += 1;
       sent += 1;
       const sample = speech[i % speech.length] as TextSample;
+      const maxTokens = subtitleMaxTokens(sample.text);
       const prompt = subtitlePrompt({
         source: sample.text,
         sourceLang: sample.lang,
         previous: [],
+        context: '',
         glossary: [],
-        withEnglish: false,
       });
-      const result = await client.chatJson(
-        {
-          ...prompt,
-          ...slot(SUBTITLE_SLOT),
-          ...modelOption,
-          ...pinned,
-          maxTokens: GENERATION.maxTokens.subtitle,
-        },
-        subtitleOutputSchema,
-      );
+      const result = await client.chat({
+        ...prompt,
+        ...slot(SUBTITLE_SLOT),
+        ...modelOption,
+        ...pinned,
+        maxTokens,
+      });
       previousEnd = now();
-      if (result.ok) latencies.push(previousEnd - scheduled);
+      const line = result.ok ? parseSubtitleLine(result.value, maxTokens, sample.text) : result;
+      if (line.ok) latencies.push(previousEnd - scheduled);
       else failed += 1;
     }
     running = false;

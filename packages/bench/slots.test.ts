@@ -11,7 +11,7 @@ const SUBTITLE_SYSTEM = subtitlePrompt({
   sourceLang: 'en',
   previous: [],
   glossary: [],
-  withEnglish: false,
+  context: '',
 }).messages[0]?.content;
 const COMMENT_SYSTEM = commentBatchPrompt({
   comments: [{ text: 'x', lang: 'en', translate: true }],
@@ -102,7 +102,9 @@ function fakeServer(
               choices: [{ message: { content: commentReply(body.messages[1]?.content ?? '') } }],
             });
       clock.advance(options.subtitleMs ?? 0);
-      return Response.json({ choices: [{ message: { content: '{"ja":"こんにちは"}' } }] });
+      return Response.json({
+        choices: [{ message: { content: 'こんにちは\n' }, finish_reason: 'stop' }],
+      });
     };
   return { seen, propsUrls, fetchFor, clock };
 }

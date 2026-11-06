@@ -12,6 +12,7 @@ import {
   PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
   plamoTranslateRequest,
+  subtitlePrompt,
   summaryPrompt,
   type LlamaClient,
   type SummaryInput,
@@ -180,6 +181,31 @@ describe('llama.cpp stub', () => {
     expect(first.ok && first.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
     expect(second.ok && second.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
     expect(STUB_TRANSCRIPT).toBe('Stub speech');
+  });
+
+  test('answers a subtitle translation chat, and the same system turn with audio as speech', async () => {
+    const prompt = subtitlePrompt({
+      source: 'Okay chat',
+      sourceLang: 'en',
+      previous: [],
+      context: '',
+      glossary: [],
+    });
+    const translated = await client.chat(prompt);
+    expect(translated.ok && translated.value.text).toBe('訳:Okay chat\n');
+    const spoken = await client.chat({
+      messages: [
+        { role: 'system', content: prompt.messages[0]?.content ?? '' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Task: transcribe' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+          ],
+        },
+      ],
+    });
+    expect(spoken.ok && spoken.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
   });
 
   test('records audio parts: the count, and the text parts joined by a newline', async () => {

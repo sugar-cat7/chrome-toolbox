@@ -11,6 +11,7 @@ import {
   PLAMO_LANGUAGES,
   PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
+  subtitlePrompt,
   summaryPrompt,
   type ChatMessage,
   type ChatPartsMessage,
@@ -67,6 +68,14 @@ const COMMENT_SYSTEM = commentBatchPrompt({ comments: [], context: '' }).message
 const SUMMARY_SYSTEM = summaryPrompt({ windowMinutes: 5, questions: [], peaks: [], others: [] })
   .messages[0]?.content;
 const GENRE_SYSTEM = genrePrompt({}).messages[0]?.content;
+/** The shared system turn of speech recognition and subtitle translation. */
+const SUBTITLE_SYSTEM = subtitlePrompt({
+  source: '',
+  sourceLang: 'en',
+  previous: [],
+  context: '',
+  glossary: [],
+}).messages[0]?.content;
 /** The genre the stub guesses for every stream. */
 export const STUB_GENRE: StreamGenre = 'story';
 /**
@@ -206,6 +215,15 @@ export const chatCompletion = (content: string): StubReply => ({
 export const STUB_TRANSCRIPT = 'Stub speech';
 /** The ASR reply `<lang>\t<text>\n` to the `n`th audio chat; made up, not a transcript. */
 export const asrReply = (n: number): string => `en\t${STUB_TRANSCRIPT} ${n}.\n`;
+/**
+ * The translation `訳:<line>\n` of a subtitle translation user turn; made up, not a model output.
+ * `line` is its `Line to translate (JSON string)`.
+ */
+export const subtitleReply = (user: string): string => {
+  const encoded = /^Line to translate \(JSON string\): (.*)$/mu.exec(user)?.[1] ?? '""';
+  const line: unknown = JSON.parse(encoded);
+  return `訳:${typeof line === 'string' ? line : ''}\n`;
+};
 const NOT_FOUND: StubReply = { status: 404, body: { error: { code: 404 } } };
 
 /** The translation prefix of a PLaMo reply from `withPlamo`: made up, not a PLaMo output. */
@@ -318,6 +336,8 @@ export function defaultResponder(request: StubRequest): StubReply {
       if (system === COMMENT_SYSTEM) return chatCompletion(commentBatchReply(user));
       if (system === SUMMARY_SYSTEM) return chatCompletion(summaryReply(user));
       if (system === GENRE_SYSTEM) return chatCompletion(STUB_GENRE);
+      // Audio chats were answered above: this system turn without audio is a translation.
+      if (system === SUBTITLE_SYSTEM) return chatCompletion(subtitleReply(user));
       return NOT_FOUND;
     }
     default:
