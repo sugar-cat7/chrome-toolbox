@@ -6,6 +6,8 @@
 
 **改訂（2026-11-06）:** 着手前の確認（pre-flight）で、Task 8（PLaMo 3 Translate 2B を字幕の翻訳に選べるようにする。任意）を足し、旧 Task 8〜15 を Task 9〜16 に繰り下げた。あわせて、今のコード（comment-assistant の G1・G2 の後）と食い違う型や手順を直した。判断の記録（Ruling S1〜）は SDD のワークスペースの ledger にある。
 
+**改訂（2026-11-06、③ page-translator との調整）:** ③ page-translator の計画（ブランチ `feat/page-translator`）も、extension-core に同じもの（止める文字列、モデルがないときのエラー、PLaMo の要求の組み立て、スタブ）を別の名前で足そうとしていた。共有する部分を 1 つの形にそろえ、Task 8 から新しい **Task 0** に分けた。Task 0 は Task 1 より前に行い、Task 1〜7 には依らない。③ のブランチは Task 0 が入った後にこのブランチの上に積み、③ の PR はこの計画の PR の上に積む。Task 1〜16 の番号は変えていない。Task 8 には字幕の側の使い方（1 行の翻訳、Gemma への切り替え、キャッシュのキー、文書）だけが残る。判断は Ruling S24〜。
+
 **Goal:** YouTube の動画と配信で、話されている言語にかかわらず、日本語の字幕を映像の上に出す。表示は「日本語のみ／原語と日本語／原語のみ／オフ」の 4 つで、プレイヤーの上のボタン、ショートカット、サイドパネルからすぐ切り替えられる。字幕トラックのあるアーカイブは、そのトラックを先読みして訳す。ないとき（ライブを含む）は、タブの音声を llama.cpp の音声入力で文字起こしし、音声の終わりから p50 2 秒以内に日本語を出す。訳すモデルは Gemma（既定）で、サイドパネルで PLaMo 3 Translate 2B も選べる。
 
 **Architecture:**
@@ -91,7 +93,8 @@
 - 推論の枠と遅延:
   - 字幕は ASR も翻訳も枠 0 を使う。コメントは枠 1 と 2 を使う（R39、`--parallel 3`）。
   - ASR と翻訳は、同じシステム文と、同じ配信ごとの前置き（配信の文脈と用語集）を使う（判断）。枠 0 に交互に流れても、プロンプトキャッシュの先頭を共有できるようにするため。
-    - これは Gemma で訳すときの話。PLaMo で訳すときは別の形式（Task 8）で、PLaMo の枠 0 に送るので、Gemma の枠 0 は ASR だけになる。
+    - これは Gemma で訳すときの話。PLaMo で訳すときは別の形式（Task 0 で組み立て、Task 8 で使う）で、PLaMo の枠 0 に送るので、Gemma の枠 0 は ASR だけになる。
+    - PLaMo の枠 1 と 2 は、③ page-translator が使う。字幕は PLaMo の枠 0 だけを使う。
   - 遅延の目標（基準機、§9。①と②を同時に動かした状態）:
     - 音声の終わりから原語の表示まで p50 ≤ 1.0 s
     - 音声の終わりから日本語の表示まで p50 ≤ 2.0 s、p95 ≤ 3.0 s
@@ -161,13 +164,15 @@
 - 拡張のコンテキストどうしのメッセージには、宛先（`target: 'background' | 'offscreen' | 'panel' | 'content'`）を付ける。受け手は、検証の前に宛先だけを見て、自分宛てでないものを捨てる（comment-assistant の Task P で、サイドパネルがすべてのメッセージを検証していた問題の対策）。`content` は、background が視聴ページのトップフレームに送る `subs/lines` と `subs/status` の宛先。
 - 字幕の翻訳モデル（ユーザーの決定、2026-11-06）:
   - 既定は Gemma（`models.translate`、既定 `gemma4-e4b`）。サイドパネルで PLaMo 3 Translate 2B（`plamo-3-translate-2b`）を選べる（任意）。設定は `subtitles` の `translator: 'gemma' | 'plamo'`（既定 `gemma`）。
-  - PLaMo へのリクエスト（`/v1/chat/completions`、Task 8）:
+  - PLaMo へのリクエスト（`/v1/chat/completions`）は、extension-core の `plamoTranslateRequest`（Task 0）で組み立て、Task 8 で使う。③ page-translator も同じ関数を使う。
     - user メッセージは 1 つだけで、空でない原文 1 行を入れる。
     - `chat_template_kwargs` に `target_lang: "ja"`、`source_lang`（小文字。分からないときは付けない）、`context`（直前の原文。上限付き）、`glossary`（`[{ source, target }]`。視聴者の用語集から）を入れる。
-    - `temperature: 0`、`max_tokens` は上限付き、`stop: ["<|plamo:tag|>", "<|plamo:bos|>"]`、`cache_prompt: true`、`id_slot: 0`。
+    - `temperature: 0`、`max_tokens` は上限付き（字幕は 256 まで）、`stop: ["<|plamo:tag|>", "<|plamo:bos|>"]`、`cache_prompt: true`。
+    - 枠（`id_slot`）は呼ぶ側が渡す。字幕は `0`。
     - `response_format`、`json_schema`、`grammar`、system メッセージは決して送らない。
     - 送る前に、空の行と `<|plamo:` を含む行を断る。言語コードは PLaMo の小文字の形（`zh-hans`、`zh-hant` を含む）にする。`zh-CN` は HTTP 400 になる。
-  - ルーターが PLaMo を載せていない（`/v1/models` にない）とき、または PLaMo へのリクエストが HTTP 4xx/5xx になったときは、その行を Gemma で訳す。サイドパネルに Gemma に切り替えたことを出す。
+    - HTTP 4xx/5xx は `model_refused`（公開コード `unavailable`）で返る。PLaMo の要求だけが `tellRefusal` でこれを求める。ほかの要求は今までどおり `network_failed`。
+  - ルーターが PLaMo を載せていない（`/v1/models` にない）とき、または PLaMo へのリクエストが HTTP 4xx/5xx（`model_refused`）になったときは、その行を Gemma で訳す。サイドパネルに Gemma に切り替えたことを出す。
   - PLaMo を選んでいる間、サイドパネルに「Built with PLaMo」と PLaMo Community License へのリンクを出す。
 - UI の文言は日本語。例外は「Built with PLaMo」で、ライセンスが求める英語の表記をそのまま出す。
 - 公開リポジトリ:
@@ -179,7 +184,7 @@
 
 - 字幕トラックのない動画で、まだ音声を始めていない → ボタンに「字幕なし・Alt+Shift+S で音声字幕」と出す。推論は 0 件（Task 9・Task 15 でテスト）。
 - 投影器のないサーバー → 開始を断り、サイドパネルに「音声入力が使えません」と mmproj の案内を出す。stream id は取らず、offscreen は作らない（Task 1・Task 13・Task 14・Task 15 でテスト）。
-- PLaMo を選んだのに、ルーターに PLaMo がない、または PLaMo が HTTP のエラーを返した → その行は Gemma の訳で出る。サイドパネルに Gemma に切り替えたことが出る。接続できないときは Gemma にも送らず、原語のまま（Task 8・Task 14・Task 15 でテスト）。
+- PLaMo を選んだのに、ルーターに PLaMo がない、または PLaMo が HTTP のエラーを返した → その行は Gemma の訳で出る。サイドパネルに Gemma に切り替えたことが出る。接続できないときは Gemma にも送らず、原語のまま（Task 0・Task 8・Task 14・Task 15 でテスト）。
 - 裏のタブ、広告、プレイヤーが画面外 → サーバーへのリクエストは 0 件で、待ちは捨てる。前面に戻れば再開する（Task 10・Task 12・Task 13・Task 15 でテスト）。
 - 一時停止 → 止める直前の発話も字幕になる（Task 12・Task 13 でテスト）。
 - 早口が続いて枠 0 が追いつかない → 待ちは増えない。捨てた数と期限切れの数を数え、p95 が伸び続けない（Task 12 でテスト）。
@@ -192,6 +197,246 @@
 
 ---
 
+### Task 0: PLaMo の要求、止める文字列、拒否のエラー（extension-core。③ と共有）
+
+最初に行う（Task 1 より前）。Task 1〜16 のどれにも依らない。使うのは今のコードの `createLlamaClient`、`cutByMaxTokens`、`ChatReply`、`ChatRequest`、`GlossaryEntry` と、`prompts.ts` の `translationLimit` だけ。③ page-translator の計画も、この Task の型と関数をそのまま使う。③ のブランチは、この Task が入った `feat/subtitle-translator` の上に積む（判断 S24）。字幕の側の使い方は Task 8 で足す。
+
+背景（2026-11-06 の評価。`docs/llama-server.md` の「PLaMo 3 Translate」。llama.cpp `620d222` のルーターで確かめた）:
+
+- PLaMo 3 Translate 2B は、ルーターで Gemma とは別の子プロセスとして動き、自分の枠を持つ。プリセットの節は `[plamo-3-translate-2b]`（`no-prefill-assistant = true`）。字幕は PLaMo の枠 0 を、③ のページ翻訳は枠 1 と 2 を使う。そこで、枠は呼ぶ側が渡す（判断 S26）。
+- 固定したリビジョンの GGUF に埋め込まれたチャットテンプレートが、`chat_template_kwargs` を PLaMo の形式に組み立てる。テンプレートは次を HTTP 400 にする。
+  - 空の原文（ASCII の空白だけも）
+  - `<|plamo:` を含む原文、文脈、用語集
+  - 小文字でない言語コードや、地域の付いた言語コード（`zh-CN`）
+- `response_format`、JSON Schema、`grammar` を付けると出力が壊れる。system メッセージは文脈として読まれる。止める文字列はサーバー側で設定できないので、クライアントが送る。
+- 対応する言語は 53（モデルカードの「Supported Languages」）。ポルトガル語（`pt`）は含まれない。
+- PLaMo Community License: リポジトリには PLaMo の出力を入れない（Global Constraints）。テスト、スタブ、README の例は自作の文字列にする。
+- 今の `createLlamaClient` は、HTTP 4xx/5xx の応答も、接続できないときも、時間切れも `network_failed` にする。comment-assistant はこの値で「llama.cpp に接続できません」を出しているので、既定の扱いは変えず、求めたリクエストだけ HTTP のエラーを見分ける（判断 S12）。
+  - ルーターは、プリセットにないモデルに 400 `model '<name>' not found` を返す。これも、ほかの 4xx/5xx と同じエラーにする。モデルが「ない」ことは、呼ぶ側が `/v1/models` の一覧で確かめる（字幕は Task 8、③ は ③ の Task 7。判断 S25）。
+
+**Files:**
+
+- Create: `packages/extension-core/src/plamo.ts`、`src/plamo.test.ts`
+- Modify: `packages/extension-core/src/llm.ts`、`src/llm.test.ts`（`stop`、`tellRefusal`）
+- Modify: `packages/extension-core/src/prompts.ts`（`translationLimit` に `export` を付けるだけ。式は変えない。`index.ts` からは export しない）
+- Modify: `packages/extension-core/src/index.ts`（`plamo.ts` の export を 1 つのまとまりにして、`./prompts.ts` のまとまりのすぐ後に置く）
+- Modify: `packages/extension-core/README.md`（`src/plamo.ts` の行を足す。`src/llm.ts` の行に `stop` と `tellRefusal`、`testing/llama-stub.ts` の行に `withPlamo` を書く）
+- Modify: `tools/errors/catalog.json`（`internal` の末尾に `model_refused` → 公開コード `unavailable`）。続けて `pnpm errors:generate` を実行する。`packages/contracts/src/errors.generated.ts`、`docs/errors.generated.md`、`.template.json` が変わる。
+- Modify: `packages/extension-core/testing/llama-stub.ts`、`testing/llama-stub.test.ts`、`testing/playwright.ts`（export）
+
+**Interfaces:**
+
+- Produces（`llm.ts`）。`ChatRequest` に 2 つ足す。
+  - `stop?: readonly string[]`: 本文の `stop`。ないときは、本文に `stop` のキーを入れない。
+  - `tellRefusal?: boolean`: `true` のとき、HTTP 4xx/5xx の応答を `network_failed` ではなく `model_refused` にする。
+    - 2xx 以外の判定は、今の `request` の 1 か所（`if (!response.value.ok) return Err(failure('network_failed'))`）に置いたままにする。`chat` だけが `tellRefusal` を渡す。`health`、`models`、`props` は今までどおり。
+    - 応答の本文は読まない。ルーターの 400 `model '<name>' not found`、ほかの 400、404、503 は、どれも `model_refused`。
+    - 接続できない、時間切れは今までどおり `network_failed`。中断は今までどおり、HTTP の状態より先に見て `operation_cancelled`。
+    - 省いたときの扱いは変えない。
+    - Task 1 は、この分岐に `audio_unsupported`（音声入力のない 400）の判定を、`tellRefusal` より先に足す。
+- Produces（`plamo.ts`。`index.ts` から export する）:
+  - `PLAMO_TRANSLATE_MODEL = 'plamo-3-translate-2b'`（プリセットの節の名前。設定では変えない。判断 S13）
+  - `PLAMO_STOP = ['<|plamo:tag|>', '<|plamo:bos|>'] as const`
+  - `PLAMO_LICENSE_URL = 'https://plamo.preferredai.jp/info/plamo-community-license-ja'`
+  - `PLAMO_LIMITS = { contextLines: 3, contextLineChars: 200, maxTokens: 256 } as const`
+  - `PLAMO_LANGUAGES`: モデルカードの 53 の言語コード。`ja`、`en`、`zh-hans`、`zh-hant`、`ko`、`ar`、`az`、`be`、`bg`、`bn`、`ca`、`ceb`、`de`、`es`、`et`、`eu`、`fa`、`fr`、`gu`、`he`、`hi`、`hr`、`hu`、`hy`、`id`、`it`、`jv`、`ka`、`kk`、`km`、`lt`、`lv`、`ml`、`mr`、`ms`、`my`、`ne`、`nl`、`pa`、`pl`、`ru`、`si`、`sk`、`sl`、`sr`、`sw`、`ta`、`te`、`th`、`tl`、`ur`、`uz`、`vi`
+  - `PlamoLanguage = Readonly<{ kind: 'send'; code: string } | { kind: 'omit' } | { kind: 'unsupported' }>`
+  - `plamoLanguage(code: string): PlamoLanguage`
+    - 小文字にし、`_` を `-` に置き換えてから判定する。
+    - `auto`、空、`/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/u` に合わないもの → `omit`
+    - `zh` だけ → `omit`（簡体字か繁体字か分からないので、モデルに判別させる。判断 S15）
+    - `zh-cn`、`zh-sg` と、`zh-hans` で始まるもの → `zh-hans`。`zh-tw`、`zh-hk`、`zh-mo` と、`zh-hant` で始まるもの → `zh-hant`
+    - ほかは、最初の部分（`en-us` → `en`、`es-419` → `es`）が `PLAMO_LANGUAGES` にあれば `send`、なければ `unsupported`（`pt`、`pt-br`）
+  - `PlamoInput = Readonly<{ line: string; sourceLang: string; previous: readonly string[]; glossary: readonly GlossaryEntry[]; slot: number | undefined; maxTokensCap?: number }>`
+    - `sourceLang`: 分からないときは `'auto'`（`source_lang` を送らない）。③ は常に `'auto'`。
+    - `previous`: 直前の原文。古い順。字幕は直前の文。③ は `Page: <ページのタイトル>` の行と、同じ要求の中の前の 2 単位の原文。
+    - `glossary`: 空の `target` を `source` に置き換えたもの（字幕は Task 5 の `toPromptGlossary` を通す）。用語集を持たない ③ は `[]`。
+    - `slot`: PLaMo の枠。字幕は `0`。③ は、枠の数が分かるまで `undefined`（`id_slot` を送らない）、分かったら 1 か 2。
+    - `maxTokensCap`: `max_tokens` の上限。省くと `PLAMO_LIMITS.maxTokens`（256）。③ は、400 文字までの単位のために 816（③ の `PAGE_PLAMO_MAX_TOKENS`）を渡す（判断 S27）。
+  - `plamoTranslateRequest(input: PlamoInput): Result<ChatRequest & Readonly<{ model: string; maxTokens: number }>>`
+    - `input_invalid`: `line` が空か ASCII の空白（空白、タブ、CR、LF）だけ、`line` が `<|plamo:` を含む、`plamoLanguage(sourceLang)` が `unsupported`。
+    - 返す request:
+      - `model: PLAMO_TRANSLATE_MODEL`
+      - `messages: [{ role: 'user', content: line }]`（system はない）
+      - `templateKwargs`: `target_lang: 'ja'`。`source_lang` は `send` のときだけ。`context` と `glossary` は、下の規則で残るものがあるときだけ。
+      - `temperature: 0`、`maxTokens: plamoMaxTokens(line, maxTokensCap)`、`stop: PLAMO_STOP`、`cachePrompt: true`、`tellRefusal: true`
+      - `slot`: `input.slot` が数のときだけ入れる。`undefined` のときはキーを入れない（`exactOptionalPropertyTypes`）。
+      - `grammar` と `jsonSchema` は付けない。`signal` も付けない（呼ぶ側が `{ ...request, signal }` で足す）。
+    - 文脈（`context`）: `previous` から、空の行（ASCII の空白だけを含む）と `<|plamo:` を含む行を除き、後ろの 3 行を古い順に、各行の先頭から 200 コードポイントまで切って、`\n` でつなぐ。
+    - 用語集（`glossary`）: `source` が `line` に含まれる語だけを、保存された順に送る（NFKC にして小文字で比べる。判断 S14）。`source` か `target` が空か `<|plamo:` を含む語は除く。
+  - `plamoMaxTokens(line: string, cap: number = PLAMO_LIMITS.maxTokens): number` = min(cap, `translationLimit(line)`)。`translationLimit(line)` は min(2000, 2 × コードポイント数 + 16)（判断 S18、S27）。
+  - `parsePlamoLine(reply: ChatReply, maxTokens: number, line: string): Result<string>`
+    - 前後の空白を除き、内側の改行（前後の空白ごと）を 1 つの空白にする。
+    - 次のどれかなら `response_invalid`: `cutByMaxTokens` に当たる、空、`<|plamo:` を含む、`translationLimit(line)` コードポイントを超える。
+      - この上限は、Task 2 の `subtitleLimit`（Task 9 の `LiveLine.ja` の上限）と同じ関数（判断 S28）。
+    - `<` と `>` は残す。③ は、印（`<1>…</1>`、`<k1/>`）のある単位の訳を、この後に ③ の `readPagePieces` で読む。
+- llama のスタブ:
+  - `StubChat` に `temperature?: number`、`stop?: readonly string[]`、`chat_template_kwargs?: Record<string, unknown>`、`response_format?: unknown` を足す。
+  - `STUB_PLAMO_PREFIX = '訳P:'`
+  - `withPlamo(responder: Responder): Responder`: PLaMo を載せたルーターとして振る舞う。
+    - `GET /v1/models`: `responder` の答えの `data` の後ろに `{ id: PLAMO_TRANSLATE_MODEL }` を足す。
+    - `model` が `PLAMO_TRANSLATE_MODEL` のチャット: 形式が正しければ `` `${STUB_PLAMO_PREFIX}${content}` `` を返す（自作の文字列。PLaMo の出力ではない）。正しくなければ HTTP 400（`{ error: { code: 400, type: 'invalid_request_error' } }`）。
+    - 正しい形式: メッセージは user 1 つだけ（空でなく `<|plamo:` を含まない）、`chat_template_kwargs.target_lang === 'ja'`、`stop` が `PLAMO_STOP` と同じ、`grammar` と `response_format` がない。
+    - それ以外のリクエスト（Gemma へのチャット、`/props` など）は `responder` に渡す。
+  - `withPlamo` を通さない既定のスタブは、今までどおり `/v1/models` に PLaMo を載せず、PLaMo へのチャットに 404 を返す。
+  - `testing/playwright.ts` からも `withPlamo`、`STUB_PLAMO_PREFIX` を export する。
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+すべて自作の文字列にする。PLaMo の実際の出力は使わない。
+
+```ts
+// plamo.test.ts
+it('builds one user message with the template kwargs and nothing that breaks PLaMo', () => {
+  /* line 'Okay chat, the bridge is out.'、sourceLang 'en'、previous ['We reached the gate.']、
+     glossary [{ source: 'Fixturo', target: 'Fixturo' }, { source: 'bridge', target: '橋' }]、slot 0
+     → model 'plamo-3-translate-2b'、messages [{ role: 'user', content: line }]、
+       templateKwargs { target_lang: 'ja', source_lang: 'en', context: 'We reached the gate.', glossary: [{ source: 'bridge', target: '橋' }] }、
+       temperature 0、maxTokens 74、stop ['<|plamo:tag|>', '<|plamo:bos|>']、cachePrompt true、slot 0、tellRefusal true。
+       'grammar' と 'jsonSchema' のキーがない。role 'system' のメッセージがない */
+});
+it.each([
+  { name: '字幕の枠', slot: 0, expected: 0 },
+  { name: 'ページの枠', slot: 2, expected: 2 },
+  { name: '枠の数が分からない', slot: undefined, expected: 'none' },
+])('slot: $name', ({ slot, expected }) => {
+  /* line 'Okay chat'、sourceLang 'en'、previous []、glossary []。
+     expected が 'none' なら 'slot' in request が false、ほかは request.slot === expected */
+});
+it('builds the page form: no glossary, no source language, the title and two units as context', () => {
+  /* line 'Roll backward to dodge the light attack.'、sourceLang 'auto'、glossary []、slot 1、maxTokensCap 816、
+     previous ['Page: Fixture Wiki', 'Final Boss Guide', 'Phase two starts at half health.']
+     → templateKwargs は { target_lang: 'ja', context: 'Page: Fixture Wiki\nFinal Boss Guide\nPhase two starts at half health.' } と等しい
+       （'source_lang' と 'glossary' のキーがない）。maxTokens 96、slot 1 */
+});
+it.each([
+  { code: 'en', expected: { kind: 'send', code: 'en' } },
+  { code: 'EN-us', expected: { kind: 'send', code: 'en' } },
+  { code: 'ceb', expected: { kind: 'send', code: 'ceb' } },
+  { code: 'zh-CN', expected: { kind: 'send', code: 'zh-hans' } },
+  { code: 'zh-Hans', expected: { kind: 'send', code: 'zh-hans' } },
+  { code: 'zh_TW', expected: { kind: 'send', code: 'zh-hant' } },
+  { code: 'zh-Hant-HK', expected: { kind: 'send', code: 'zh-hant' } },
+  { code: 'zh', expected: { kind: 'omit' } },
+  { code: 'auto', expected: { kind: 'omit' } },
+  { code: '', expected: { kind: 'omit' } },
+  { code: 'pt', expected: { kind: 'unsupported' } },
+  { code: 'pt-BR', expected: { kind: 'unsupported' } },
+])('plamoLanguage($code)', ({ code, expected }) => {
+  /* ... */
+});
+it('leaves source_lang out when the language is unknown', () => {
+  /* sourceLang 'auto' → templateKwargs に 'source_lang' のキーがない */
+});
+it.each([
+  { name: '空', line: '', sourceLang: 'en' },
+  { name: 'ASCII の空白だけ', line: ' \t\r\n', sourceLang: 'en' },
+  { name: '予約トークン', line: 'gg <|plamo:tag|> ez', sourceLang: 'en' },
+  { name: '対応していない言語', line: 'Bom dia chat', sourceLang: 'pt' },
+])('rejects $name with input_invalid', ({ line, sourceLang }) => {
+  /* slot 0 */
+});
+it('keeps the last three usable previous lines, each cut to 200 code points', () => {
+  /* previous ['one', 'two', 'x <|plamo:msg|> y', 'three', 'a'.repeat(250), '  ']
+     → context `two\nthree\n${'a'.repeat(200)}`。previous [] → 'context' のキーがない */
+});
+it('sends only glossary terms found in the line and leaves the key out when none are', () => {
+  /* line 'FIXTURO crossed the bridge'、glossary [Fixturo→Fixturo, castle→城, '<|plamo:x'→y]
+     → glossary [{ source: 'Fixturo', target: 'Fixturo' }]。line 'Okay chat' → 'glossary' のキーがない */
+});
+it.each([
+  { name: '短い行', line: 'Okay chat', cap: undefined, expected: 34 },
+  { name: '200 文字は 256 まで', line: 'a'.repeat(200), cap: undefined, expected: 256 },
+  { name: '上限を上げても短い行は同じ', line: 'Okay chat', cap: 816, expected: 34 },
+  { name: 'ページの 400 文字', line: 'a'.repeat(400), cap: 816, expected: 816 },
+])('plamoMaxTokens: $name', ({ line, cap, expected }) => {
+  /* cap が undefined なら引数を省く */
+});
+it('caps max_tokens of the request at maxTokensCap', () => {
+  /* line 'a'.repeat(400)、slot 1: maxTokensCap なし → maxTokens 256、maxTokensCap 816 → 816 */
+});
+it.each([
+  { name: '1 行', text: '  よしチャット\n', finish: 'stop', expected: 'よしチャット' },
+  { name: '内側の改行', text: 'よし\n  チャット', finish: 'stop', expected: 'よし チャット' },
+  {
+    name: '印はそのまま',
+    text: '<1>ここ</1>を押す\n',
+    finish: 'stop',
+    expected: '<1>ここ</1>を押す',
+  },
+  { name: '切れた', text: 'よしチャ', finish: 'length', expected: 'response_invalid' },
+  { name: '空', text: ' \n', finish: 'stop', expected: 'response_invalid' },
+  { name: '予約トークン', text: 'よし<|plamo:tag|>', finish: 'stop', expected: 'response_invalid' },
+  { name: '上限を超えた', text: 'あ'.repeat(35), finish: 'stop', expected: 'response_invalid' },
+])('parsePlamoLine: $name', ({ text, finish, expected }) => {
+  /* parsePlamoLine(reply, plamoMaxTokens('Okay chat'), 'Okay chat')（上限 34） */
+});
+// llm.test.ts
+it('sends stop strings only when the request has them', async () => {
+  /* body.stop が ['<|plamo:tag|>', '<|plamo:bos|>']。stop のない要求の body に 'stop' のキーがない */
+});
+it.each([
+  {
+    status: 400,
+    message: "model 'plamo-3-translate-2b' not found",
+    tellRefusal: true,
+    expected: 'model_refused',
+  },
+  { status: 400, message: 'Invalid slot ID', tellRefusal: true, expected: 'model_refused' },
+  { status: 404, message: 'File Not Found', tellRefusal: true, expected: 'model_refused' },
+  { status: 503, message: 'Loading model', tellRefusal: true, expected: 'model_refused' },
+  { status: 503, message: 'Loading model', tellRefusal: false, expected: 'network_failed' },
+  { status: 404, message: 'File Not Found', tellRefusal: false, expected: 'network_failed' },
+])('HTTP $status "$message" with tellRefusal $tellRefusal is $expected', async (row) => {
+  /* 本文は { error: { code: status, message } } */
+});
+it('keeps an unreachable server as network_failed even with tellRefusal', async () => {
+  /* fetch が reject */
+});
+it('returns operation_cancelled before reading the status of a refused reply', async () => {
+  /* tellRefusal true。signal を abort してから 503 を返す fetch → operation_cancelled */
+});
+// llama-stub.test.ts（createLlamaClient で送る）
+it('withPlamo lists the model and answers the request plamoTranslateRequest builds', async () => {
+  /* /v1/models は ['stub-model', 'plamo-3-translate-2b']。
+     plamoTranslateRequest({ line: 'Okay chat', sourceLang: 'en', previous: [], glossary: [], slot: 0 }) → '訳P:Okay chat' */
+});
+it.each([
+  { name: 'system メッセージ', change: 'system' },
+  { name: 'grammar', change: 'grammar' },
+  { name: 'stop がない', change: 'no-stop' },
+  { name: 'response_format', change: 'response-format' },
+])('withPlamo refuses a PLaMo chat with $name with 400', async ({ change }) => {
+  /* tellRefusal の client で model_refused */
+});
+it('withPlamo leaves Gemma chats to the wrapped responder', async () => {
+  /* withPlamo(defaultResponder) にコメントのバッチ → commentBatchReply と同じ答え */
+});
+it('the default stub lists no PLaMo and answers a PLaMo chat with 404', async () => {
+  /* tellRefusal の client で model_refused */
+});
+```
+
+- [ ] **Step 2: 失敗を確認する**
+  - Run: `pnpm --filter @chrome-toolbox/extension-core test`
+  - Expected: FAIL
+- [ ] **Step 3: 実装する**
+  - `plamo.ts` は `prompts.ts` に入れない（`prompts.ts` は 700 行を超えている。G1 のレビューの M8）。
+  - README の例も自作の文字列にする。PLaMo の出力を貼らない。
+- [ ] **Step 4: 通ることを確認する**
+  - Run:
+    - `pnpm errors:generate`
+    - `pnpm --filter @chrome-toolbox/extension-core test`
+    - `pnpm --filter @chrome-toolbox/comment-assistant test`
+    - `pnpm check`
+  - Expected: PASS。comment-assistant は `tellRefusal` も `stop` も付けないので、変化はない。
+- [ ] **Step 5: 実サーバーで 1 回だけ形を確かめる（コントローラー。PLaMo を載せたサーバーがあるときだけ）**
+  - `plamoTranslateRequest` が作る本文（自作の 1 行、`slot: 0`）を `curl` で `http://127.0.0.1:18083/v1/chat/completions` に送り、HTTP 200 で 1 行の訳が返ることを確かめる。`slot: 1` でも 1 回送る。
+  - `source_lang: "zh-CN"` にした本文が HTTP 400 になり、`createLlamaClient` が `tellRefusal` で `model_refused` を返すことを確かめる。
+  - 応答の本文は記録しない。リポジトリにも、ledger にも書かない（PLaMo Community License）。
+- [ ] **Step 6: Commit**
+  - `git commit -m "feat(extension-core): PLaMo translation request, stop strings and opt-in model_refused"`
+
 ### Task 1: LLM クライアントの音声入力（extension-core）
 
 背景（llama.cpp `620d222` のソースで確認）:
@@ -201,6 +446,7 @@
 - `GET /props?model=<name>` は `modalities: { vision, video, audio }` を返す（`tools/server/server-context.cpp` の `get_res_props`）。
 - 投影器のないモデルに `input_audio` を送ると、`oaicompat` の解析が例外を出し、HTTP 400（`invalid_request_error`）になる（`server-common.cpp`）。
 - `id_slot` で指定した枠が使用中のときは、サーバーがその枠の解放まで待たせる（`server-context.cpp` の deferred task）。
+- Task 0 が先に入っている。`ChatRequest` には `stop` と `tellRefusal` があり、2xx 以外の応答は `request` の 1 か所で、`chat` が渡す `tellRefusal` に従って `model_refused` か `network_failed` になる。この Task は、その分岐に `audio_unsupported` の判定を足す（判断 S30）。
 
 **Files:**
 
@@ -228,9 +474,10 @@
   - `ServerProps = Readonly<{ totalSlots: number; audio: boolean | undefined }>`
     - `audio` は `modalities.audio`。サーバーが返さないときは `undefined`。
   - `chat`:
-    - HTTP 400 で、JSON の `error.message` に `audio input is not supported` を含む → `Err(failure('audio_unsupported'))`
-    - それ以外の 2xx 以外の応答は、今までどおり `network_failed`
+    - HTTP 400 で、JSON の `error.message` に `audio input is not supported` を含む → `Err(failure('audio_unsupported'))`。`tellRefusal` の有無にかかわらず、この判定を先にする。
+    - それ以外の 2xx 以外の応答は、Task 0 のとおり（`tellRefusal` なら `model_refused`、なければ `network_failed`）
 - llama のスタブ:
+  - Task 0 の `StubChat` の項目（`temperature`、`stop`、`chat_template_kwargs`、`response_format`）と `withPlamo` は、そのまま残す。
   - 部品の本文を持つメッセージも受け付ける。`StubChat.messages` の型は `readonly ChatMessage[]` のままにし、部品の本文は、テキストの部品を `\n` でつないだ文字列として入れる。
   - `StubChat.audio: number` を足す。`input_audio` の部品の数で、テキストだけのチャットは 0。
   - `GET /props` は `{ total_slots: 2, modalities: { vision: false, video: false, audio: true } }` を返す。
@@ -268,11 +515,14 @@ it.each([
 ])('props: $name', async ({ body, expected }) => {
   /* Ok(expected) */
 });
-it("maps the server's no-projector 400 to audio_unsupported", async () => {
+it.each([
+  { name: 'tellRefusal なし', tellRefusal: false },
+  { name: 'tellRefusal あり', tellRefusal: true },
+])("maps the server's no-projector 400 to audio_unsupported: $name", async ({ tellRefusal }) => {
   /* status 400, { error: { code: 400, message: 'audio input is not supported - hint: …', type: 'invalid_request_error' } } */
 });
-it('keeps other 400 replies as network_failed', async () => {
-  /* 'Invalid slot ID' */
+it('keeps other 400 replies as Task 0 maps them', async () => {
+  /* 'Invalid slot ID': tellRefusal なし → network_failed、tellRefusal あり → model_refused */
 });
 // llama-stub.test.ts
 it('answers input_audio chats with numbered transcript lines', async () => {
@@ -287,7 +537,7 @@ it('withoutAudio reports no audio in props and rejects input_audio with 400', as
   - Run: `pnpm --filter @chrome-toolbox/extension-core test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
-  - 400 の本文は、`audio_unsupported` を判定するときだけ読む。それ以外の応答の扱いは変えない。
+  - 400 の本文は、`audio_unsupported` を判定するときだけ読む。それ以外の応答の扱い（Task 0 の `tellRefusal`）は変えない。
 - [ ] **Step 4: 通ることを確認する**
   - Run:
     - `pnpm errors:generate`
@@ -329,7 +579,7 @@ it('withoutAudio reports no audio in props and rejects input_audio with 400', as
   - `subtitlePrompt(input: Readonly<{ source: string; sourceLang: string; previous: readonly string[]; context: string; glossary: readonly GlossaryEntry[] }>): GrammarPrompt`
     - user の並び: 配信ごとの前置き → `Task: translate` → `Source language` → `Previous lines (JSON, context only)`（最大 3 行、古い順。4 行目からは無視する）→ `Line to translate (JSON string)`
     - 文法: `root ::= [^\n<>]{1,L} "\n"`。`L = subtitleLimit(source)`
-  - `subtitleLimit(source: string): number` = min(2000, 2 × コードポイント数 + 16)。コメントの `translationLimit` と同じ式。
+  - `subtitleLimit(source: string): number` = min(2000, 2 × コードポイント数 + 16)。Task 0 で export した `translationLimit` をそのまま使う（コメントと PLaMo の上限と同じ関数。式を書き直さない。判断 S28）。
   - `subtitleMaxTokens(source: string): number` = 8 + 3 × `subtitleLimit(source)`
   - `parseSubtitleLine(reply: ChatReply, maxTokens: number, source: string): Result<string>`
     - 最後の改行を除いた 1 行を返す。
@@ -633,7 +883,7 @@ it('fails the target when ja p95 exceeds 3000 ms', async () => {
   - `SOURCE_LANGUAGE_CODES = ['en', 'es', 'ko', 'id', 'zh', 'ja', 'pt', 'fr', 'de', 'ru', 'th', 'vi'] as const`（`SOURCE_LANGUAGES` のキーと同じ順。`satisfies` で両方が揃っていることを型で確かめる）
   - `SUBTITLE_TRANSLATORS = ['gemma', 'plamo'] as const`、`SubtitleTranslator = (typeof SUBTITLE_TRANSLATORS)[number]`
     - `gemma`: extension-core の設定の `models.translate`（既定 `gemma4-e4b`）で、Task 2 の形式で訳す。
-    - `plamo`: `plamo-3-translate-2b` に、Task 8 の形式で訳す。
+    - `plamo`: `plamo-3-translate-2b` に、Task 0 の形式（`plamoTranslateRequest`）で訳す。使うのは Task 8 の line translator。
   - `TRANSLATOR_LABELS = { gemma: 'Gemma（既定）', plamo: 'PLaMo 3 Translate 2B（速い・任意）' }`
   - `subtitleSettingsSchema = z.strictObject({ display: z.enum(DISPLAY_MODES), source: z.enum(['auto', 'captions', 'audio']), sourceLang: z.union([z.literal('auto'), z.enum(SOURCE_LANGUAGE_CODES)]), translator: z.enum(SUBTITLE_TRANSLATORS) })`
   - `defaultSubtitleSettings = { display: 'both', source: 'auto', sourceLang: 'auto', translator: 'gemma' }`
@@ -970,22 +1220,11 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
 背景（2026-11-06 の評価。`docs/llama-server.md` の「PLaMo 3 Translate」）:
 
 - PLaMo 3 Translate 2B（Preferred Networks）は翻訳専用のモデル。字幕の 1 文の p50 は 121 ms（gemma4-e4b は 329 ms）、コメント 2 本の負荷の下で 179 ms（854 ms）。常駐メモリは 2.47 GB。品質は英語、中国語、インドネシア語で Gemma とほぼ同じで、韓国語とスペイン語のゲームのスラングで劣る。コメントは Gemma のまま（PLaMo は分類ができない）。
-- ルーター（llama.cpp `620d222`）で動く。プリセットの節は `[plamo-3-translate-2b]`（`no-prefill-assistant = true`）。Gemma とは別の子プロセスで、枠も別に持つ。
-- 固定したリビジョンの GGUF に埋め込まれたチャットテンプレートが、`chat_template_kwargs` を PLaMo の形式に組み立てる。テンプレートは次を HTTP 400 にする。
-  - 空の原文（ASCII の空白だけも）
-  - `<|plamo:` を含む原文、文脈、用語集
-  - 小文字でない言語コードや、地域の付いた言語コード（`zh-CN`）
-- `response_format`、JSON Schema、`grammar` を付けると出力が壊れる。system メッセージは文脈として読まれる。止める文字列はサーバー側で設定できないので、クライアントが送る。
-- 対応する言語は 53（モデルカードの「Supported Languages」）。ポルトガル語（`pt`）は含まれない。
+- 要求の形（user 1 通、`chat_template_kwargs`、止める文字列、言語コード、上限）、`model_refused`、スタブの `withPlamo` は、Task 0 で extension-core に入っている。この Task は、字幕の側の使い方だけを足す（判断 S24）。
 - PLaMo Community License: 出力を他人に渡すときは「Built with PLaMo」の表示が要る。リポジトリには PLaMo の出力を入れない（Global Constraints）。
-- 今の `createLlamaClient` は、HTTP 4xx/5xx の応答も、接続できないときも、時間切れも `network_failed` にする。comment-assistant はこの値で「llama.cpp に接続できません」を出しているので、既定の扱いは変えず、求めたリクエストだけ HTTP のエラーを見分ける（判断 S12）。
 
 **Files:**
 
-- Create: `packages/extension-core/src/plamo.ts`、`src/plamo.test.ts`
-- Modify: `packages/extension-core/src/llm.ts`、`src/llm.test.ts`（`stop`、`tellRefusal`）、`src/index.ts`、`README.md`（`src/plamo.ts` の行）
-- Modify: `tools/errors/catalog.json`（`model_refused` → 公開コード `unavailable`）。続けて `pnpm errors:generate` を実行する。
-- Modify: `packages/extension-core/testing/llama-stub.ts`、`testing/llama-stub.test.ts`、`testing/playwright.ts`（export）
 - Create: `packages/subtitle-translator/src/line-translator.ts`、`test/unit/line-translator.test.ts`
 - Modify: `packages/subtitle-translator/src/translate.ts`、`src/runtime.ts`、`test/unit/translate.test.ts`
 - Modify: `docs/llama-server.md`（「PLaMo 3 Translate」の節の最初の段落と、§6 の表の下）
@@ -993,54 +1232,10 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
 **Interfaces:**
 
 - Consumes:
+  - Task 0 の `plamoTranslateRequest`、`parsePlamoLine`、`plamoLanguage`、`PLAMO_TRANSLATE_MODEL`、`ChatRequest.tellRefusal`（`model_refused`）
   - Task 2 の `subtitlePrompt`、`subtitleMaxTokens`、`parseSubtitleLine`、`subtitleLimit`
   - Task 5 の `SubtitleSettings`（`translator`）、`SubtitleTranslator`、`subtitleSettingsStore`、`toPromptGlossary`
   - Task 7 の `createSubtitleTranslator`（1 文の呼び出しをここに移す）
-- Produces（extension-core の `llm.ts`）。`ChatRequest` に 2 つ足す。
-  - `stop?: readonly string[]`: 本文の `stop`。
-  - `tellRefusal?: boolean`: `true` のとき、HTTP 4xx/5xx の応答を `network_failed` ではなく `model_refused` にする。
-    - 接続できない、時間切れは今までどおり `network_failed`、中断は `operation_cancelled`。
-    - Task 1 の `audio_unsupported`（音声入力のない 400）は、これより先に当たる。
-    - 省いたときの扱いは変えない。
-- Produces（extension-core の `plamo.ts`。`index.ts` から export する）:
-  - `PLAMO_TRANSLATE_MODEL = 'plamo-3-translate-2b'`
-  - `PLAMO_STOP = ['<|plamo:tag|>', '<|plamo:bos|>'] as const`
-  - `PLAMO_LICENSE_URL = 'https://plamo.preferredai.jp/info/plamo-community-license-ja'`
-  - `PLAMO_LIMITS = { contextLines: 3, contextLineChars: 200, maxTokens: 256 } as const`
-  - `PLAMO_LANGUAGES`: モデルカードの 53 の言語コード。`ja`、`en`、`zh-hans`、`zh-hant`、`ko`、`ar`、`az`、`be`、`bg`、`bn`、`ca`、`ceb`、`de`、`es`、`et`、`eu`、`fa`、`fr`、`gu`、`he`、`hi`、`hr`、`hu`、`hy`、`id`、`it`、`jv`、`ka`、`kk`、`km`、`lt`、`lv`、`ml`、`mr`、`ms`、`my`、`ne`、`nl`、`pa`、`pl`、`ru`、`si`、`sk`、`sl`、`sr`、`sw`、`ta`、`te`、`th`、`tl`、`ur`、`uz`、`vi`
-  - `PlamoLanguage = Readonly<{ kind: 'send'; code: string } | { kind: 'omit' } | { kind: 'unsupported' }>`
-  - `plamoLanguage(code: string): PlamoLanguage`
-    - 小文字にし、`_` を `-` に置き換えてから判定する。
-    - `auto`、空、`/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/u` に合わないもの → `omit`
-    - `zh` だけ → `omit`（簡体字か繁体字か分からないので、モデルに判別させる。判断 S15）
-    - `zh-cn`、`zh-sg` と、`zh-hans` で始まるもの → `zh-hans`。`zh-tw`、`zh-hk`、`zh-mo` と、`zh-hant` で始まるもの → `zh-hant`
-    - ほかは、最初の部分（`en-us` → `en`、`es-419` → `es`）が `PLAMO_LANGUAGES` にあれば `send`、なければ `unsupported`（`pt`、`pt-br`）
-  - `PlamoInput = Readonly<{ line: string; sourceLang: string; previous: readonly string[]; glossary: readonly GlossaryEntry[] }>`
-    - `glossary` は `toPromptGlossary` を通したもの（空の `target` は `source` に置き換え済み）。
-  - `plamoTranslateRequest(input: PlamoInput): Result<ChatRequest & Readonly<{ model: string; maxTokens: number }>>`
-    - `input_invalid`: `line` が空か ASCII の空白（空白、タブ、CR、LF）だけ、`line` が `<|plamo:` を含む、`plamoLanguage(sourceLang)` が `unsupported`。
-    - 返す request:
-      - `model: PLAMO_TRANSLATE_MODEL`
-      - `messages: [{ role: 'user', content: line }]`（system はない）
-      - `templateKwargs`: `target_lang: 'ja'`。`source_lang` は `send` のときだけ。`context` と `glossary` は、下の規則で残るものがあるときだけ。
-      - `temperature: 0`、`maxTokens: plamoMaxTokens(line)`、`stop: PLAMO_STOP`、`cachePrompt: true`、`slot: 0`、`tellRefusal: true`
-      - `grammar` と `jsonSchema` は付けない。
-    - 文脈（`context`）: `previous` から、空の行（ASCII の空白だけを含む）と `<|plamo:` を含む行を除き、後ろの 3 行を古い順に、各行の先頭から 200 コードポイントまで切って、`\n` でつなぐ。
-    - 用語集（`glossary`）: `source` が `line` に含まれる語だけを、保存された順に送る（NFKC にして小文字で比べる。判断 S14）。`source` か `target` が空か `<|plamo:` を含む語は除く。
-  - `plamoMaxTokens(line: string): number` = min(256, 2 × コードポイント数 + 16)（判断 S18）
-  - `parsePlamoLine(reply: ChatReply, maxTokens: number, line: string): Result<string>`
-    - 前後の空白を除き、内側の改行（前後の空白ごと）を 1 つの空白にする。
-    - 次のどれかなら `response_invalid`（その文は原語のまま表示する）: `cutByMaxTokens` に当たる、空、`<|plamo:` を含む、`subtitleLimit(line)` コードポイントを超える（Task 9 の `LiveLine.ja` の上限と同じ）。
-- llama のスタブ:
-  - `StubChat` に `temperature?: number`、`stop?: readonly string[]`、`chat_template_kwargs?: Record<string, unknown>`、`response_format?: unknown` を足す。
-  - `STUB_PLAMO_PREFIX = '訳P:'`
-  - `withPlamo(responder: Responder): Responder`: PLaMo を載せたルーターとして振る舞う。
-    - `GET /v1/models` の `data` に `{ id: 'plamo-3-translate-2b' }` を足す。
-    - `model` が `plamo-3-translate-2b` のチャット: 形式が正しければ `` `${STUB_PLAMO_PREFIX}${content}` `` を返す（自作の文字列。PLaMo の出力ではない）。正しくなければ HTTP 400（`{ error: { code: 400, type: 'invalid_request_error' } }`）。
-    - 正しい形式: メッセージは user 1 つだけ（空でなく `<|plamo:` を含まない）、`chat_template_kwargs.target_lang === 'ja'`、`stop` が `PLAMO_STOP` と同じ、`grammar` と `response_format` がない。
-    - それ以外のリクエストは `responder` に渡す。
-  - `withPlamo` を通さない既定のスタブは、今までどおり `/v1/models` に PLaMo を載せず、PLaMo へのチャットに 404 を返す。
-  - `testing/playwright.ts` からも `withPlamo`、`STUB_PLAMO_PREFIX` を export する。
 - Produces（subtitle-translator の `src/line-translator.ts`）:
   - `LineInput = Readonly<{ source: string; sourceLang: string; previous: readonly string[]; context: string; glossary: readonly GlossaryEntry[]; signal?: AbortSignal }>`
     - Task 12 のライブの処理の `translate` が受け取る形と同じ。`glossary` は `toPromptGlossary` を通したもの。
@@ -1058,11 +1253,11 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
     2. PLaMo が載っているかを `client.models()` で確かめる。
        - 聞くのは、インスタンスを作ってから、または `translator` が `plamo` に変わってから、最初の PLaMo の行の前に 1 回だけ。答えは持ち続ける。タイマーで聞き直さない。
        - `models()` が失敗したら答えを持たず、PLaMo に送る。次の行の前にまた聞く。
-       - 一覧に `plamo-3-translate-2b` がない → Gemma（`not_listed`）。
-    3. `plamoTranslateRequest` が `input_invalid` → Gemma（`refused`）。
-    4. `client.chat` が `model_refused` → Gemma（`refused`）。次の行は、また PLaMo に送る。
+       - 一覧に `PLAMO_TRANSLATE_MODEL` がない → Gemma（`not_listed`）。
+    3. `plamoTranslateRequest({ line: source, sourceLang, previous, glossary, slot: 0 })`（`maxTokensCap` は渡さない。256 まで）が `input_invalid` → Gemma（`refused`）。
+    4. `client.chat({ ...request, signal })` が `model_refused` → Gemma（`refused`）。次の行は、また PLaMo に送る。
     5. それ以外の失敗（`network_failed`、`operation_cancelled`、`response_invalid`、`queue_full`）は、そのまま返す。Gemma には送らない（サーバーに届かないなら Gemma にも届かず、時間切れの後に送り直すと遅れが倍になる）。
-    6. 成功 → `parsePlamoLine(reply, maxTokens, source)`。読めなければ `response_invalid` を返す（Gemma には送らない）。
+    6. 成功 → `parsePlamoLine(reply, request.maxTokens, source)`。読めなければ `response_invalid` を返す（Gemma には送らない）。
   - 日本語（`sourceLang` が `ja`）の行は、呼ぶ側が送らない（Task 7、Task 12）。
   - ライブの処理（Task 12）の待ちは、PLaMo で訳すときも 1 本の列のままにする（判断 S17）。
 - `createSubtitleTranslator`（Task 7）を直す:
@@ -1071,109 +1266,20 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
   - `status(this: void): TranslatorStatus` を足す。Task 14 のサイドパネルが `subs/tab-state` で読む。
   - `src/runtime.ts` は、background の `createSubtitleTranslator` に `subtitleSettingsStore(storage.local).load` を渡す。
 - `docs/llama-server.md`:
-  - 「PLaMo 3 Translate」の節の最初の文（"The extensions do not send requests to PLaMo yet. …"）を直す。字幕の拡張のサイドパネルで選べること（既定は Gemma）、ルーターに載っていないときと HTTP のエラーのときは、その行を Gemma で訳してパネルに出すこと、選んでいる間は「Built with PLaMo」とライセンスへのリンクを出すこと。
-  - §6 の表の下に 1 行足す: 字幕の拡張は、自分の設定（キー `subtitles`）の `translator`（`gemma` か `plamo`、既定 `gemma`）で訳すモデルを選ぶ。`plamo` はプリセットの節の名前 `plamo-3-translate-2b` に送る。
+  - 「PLaMo 3 Translate」の節の最初の 2 文（"The extensions do not send requests to PLaMo yet. The subtitle extension's plan adds it as an optional translator."）だけを直す。字幕の拡張のサイドパネルで選べること（既定は Gemma）、ルーターに載っていないときと HTTP のエラーのときは、その行を Gemma で訳してパネルに出すこと、選んでいる間は「Built with PLaMo」とライセンスへのリンクを出すこと。③ page-translator は、この段落の後ろに自分の段落を足す（判断 S32）。
+  - §6 の表のすぐ下に 1 行足す: 字幕の拡張は、自分の設定（キー `subtitles`）の `translator`（`gemma` か `plamo`、既定 `gemma`）で訳すモデルを選ぶ。`plamo` はプリセットの節の名前 `plamo-3-translate-2b` に送る。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
 すべて自作の文字列にする。PLaMo の実際の出力は使わない。
 
 ```ts
-// plamo.test.ts
-it('builds one user message with the template kwargs and nothing that breaks PLaMo', () => {
-  /* line 'Okay chat, the bridge is out.'、sourceLang 'en'、previous ['We reached the gate.']、
-     glossary [{ source: 'Fixturo', target: 'Fixturo' }, { source: 'bridge', target: '橋' }]
-     → model 'plamo-3-translate-2b'、messages [{ role: 'user', content: line }]、
-       templateKwargs { target_lang: 'ja', source_lang: 'en', context: 'We reached the gate.', glossary: [{ source: 'bridge', target: '橋' }] }、
-       temperature 0、maxTokens 74、stop ['<|plamo:tag|>', '<|plamo:bos|>']、cachePrompt true、slot 0、tellRefusal true。
-       'grammar' と 'jsonSchema' のキーがない。role 'system' のメッセージがない */
-});
-it.each([
-  { code: 'en', expected: { kind: 'send', code: 'en' } },
-  { code: 'EN-us', expected: { kind: 'send', code: 'en' } },
-  { code: 'ceb', expected: { kind: 'send', code: 'ceb' } },
-  { code: 'zh-CN', expected: { kind: 'send', code: 'zh-hans' } },
-  { code: 'zh-Hans', expected: { kind: 'send', code: 'zh-hans' } },
-  { code: 'zh_TW', expected: { kind: 'send', code: 'zh-hant' } },
-  { code: 'zh-Hant-HK', expected: { kind: 'send', code: 'zh-hant' } },
-  { code: 'zh', expected: { kind: 'omit' } },
-  { code: 'auto', expected: { kind: 'omit' } },
-  { code: '', expected: { kind: 'omit' } },
-  { code: 'pt', expected: { kind: 'unsupported' } },
-  { code: 'pt-BR', expected: { kind: 'unsupported' } },
-])('plamoLanguage($code)', ({ code, expected }) => {
-  /* ... */
-});
-it('leaves source_lang out when the language is unknown', () => {
-  /* sourceLang 'auto' → templateKwargs に 'source_lang' のキーがない */
-});
-it.each([
-  { name: '空', line: '', sourceLang: 'en' },
-  { name: 'ASCII の空白だけ', line: ' \t\r\n', sourceLang: 'en' },
-  { name: '予約トークン', line: 'gg <|plamo:tag|> ez', sourceLang: 'en' },
-  { name: '対応していない言語', line: 'Bom dia chat', sourceLang: 'pt' },
-])('rejects $name with input_invalid', ({ line, sourceLang }) => {
-  /* ... */
-});
-it('keeps the last three usable previous lines, each cut to 200 code points', () => {
-  /* previous ['one', 'two', 'x <|plamo:msg|> y', 'three', 'a'.repeat(250), '  ']
-     → context `two\nthree\n${'a'.repeat(200)}`。previous [] → 'context' のキーがない */
-});
-it('sends only glossary terms found in the line and leaves the key out when none are', () => {
-  /* line 'FIXTURO crossed the bridge'、glossary [Fixturo→Fixturo, castle→城, '<|plamo:x'→y]
-     → glossary [{ source: 'Fixturo', target: 'Fixturo' }]。line 'Okay chat' → 'glossary' のキーがない */
-});
-it.each([
-  { line: 'Okay chat', expected: 34 },
-  { line: 'a'.repeat(200), expected: 256 },
-])('plamoMaxTokens($line)', ({ line, expected }) => {
-  /* ... */
-});
-it.each([
-  { name: '1 行', text: '  よしチャット\n', finish: 'stop', expected: 'よしチャット' },
-  { name: '内側の改行', text: 'よし\n  チャット', finish: 'stop', expected: 'よし チャット' },
-  { name: '切れた', text: 'よしチャ', finish: 'length', expected: 'response_invalid' },
-  { name: '空', text: ' \n', finish: 'stop', expected: 'response_invalid' },
-  { name: '予約トークン', text: 'よし<|plamo:tag|>', finish: 'stop', expected: 'response_invalid' },
-  { name: '上限を超えた', text: 'あ'.repeat(35), finish: 'stop', expected: 'response_invalid' },
-])('parsePlamoLine: $name', ({ text, finish, expected }) => {
-  /* parsePlamoLine(reply, plamoMaxTokens('Okay chat'), 'Okay chat')（上限 34） */
-});
-// llm.test.ts
-it('sends stop strings when the request has them', async () => {
-  /* body.stop が ['<|plamo:tag|>', '<|plamo:bos|>'] */
-});
-it.each([
-  { status: 400, tellRefusal: true, expected: 'model_refused' },
-  { status: 404, tellRefusal: true, expected: 'model_refused' },
-  { status: 503, tellRefusal: true, expected: 'model_refused' },
-  { status: 503, tellRefusal: false, expected: 'network_failed' },
-])('HTTP $status with tellRefusal $tellRefusal is $expected', async (row) => {
-  /* ... */
-});
-it('keeps an unreachable server as network_failed even with tellRefusal', async () => {
-  /* fetch が reject */
-});
-// llama-stub.test.ts
-it('withPlamo lists the model and answers a well-formed PLaMo chat with the stub prefix', async () => {
-  /* /v1/models に 'plamo-3-translate-2b'。'Okay chat' → '訳P:Okay chat' */
-});
-it.each([
-  { name: 'system メッセージ', change: 'system' },
-  { name: 'grammar', change: 'grammar' },
-  { name: 'stop がない', change: 'no-stop' },
-])('withPlamo refuses a PLaMo chat with $name with 400', async ({ change }) => {
-  /* ... */
-});
-it('the default stub lists no PLaMo and answers a PLaMo chat with 404', async () => {
-  /* ... */
-});
 // line-translator.test.ts（createLlamaClient と偽の fetch）
 it('translates with Gemma on slot 0 when Gemma is chosen', async () => {
   /* model 'gemma4-e4b'、grammar あり、id_slot 0。by 'gemma'。/v1/models は聞かない */
 });
 it('translates with PLaMo when it is chosen and listed', async () => {
-  /* model 'plamo-3-translate-2b'、messages は user 1 つ。by 'plamo'。status は { chosen: 'plamo' } */
+  /* model 'plamo-3-translate-2b'、messages は user 1 つ、id_slot 0、max_tokens は plamoMaxTokens(source)。by 'plamo'。status は { chosen: 'plamo' } */
 });
 it.each([
   { name: 'ルーターに載っていない', models: ['gemma4-e4b'], reason: 'not_listed' },
@@ -1203,24 +1309,14 @@ it('keys the cache by the translator that produced the line', async () => {
 ```
 
 - [ ] **Step 2: 失敗を確認する**
-  - Run: `pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/subtitle-translator test`
+  - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test`
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
-  - `plamo.ts` は `prompts.ts` に入れない（`prompts.ts` は 700 行を超えている。G1 のレビューの M8）。
-  - 文書と README の例も自作の文字列にする。PLaMo の出力を貼らない。
+  - 文書の例も自作の文字列にする。PLaMo の出力を貼らない。
 - [ ] **Step 4: 通ることを確認する**
-  - Run:
-    - `pnpm errors:generate`
-    - `pnpm --filter @chrome-toolbox/extension-core test`
-    - `pnpm --filter @chrome-toolbox/comment-assistant test`
-    - `pnpm --filter @chrome-toolbox/subtitle-translator test`
-    - `pnpm check`
-  - Expected: PASS。comment-assistant は `tellRefusal` を付けないので、変化はない。
-- [ ] **Step 5: 実サーバーで 1 回だけ形を確かめる（コントローラー。PLaMo を載せたサーバーがあるときだけ）**
-  - `plamoTranslateRequest` が作る本文（自作の 1 行）を `curl` で `http://127.0.0.1:18083/v1/chat/completions` に送り、HTTP 200 で 1 行の訳が返ることを確かめる。
-  - `source_lang: "zh-CN"` にした本文が HTTP 400 になり、`createLlamaClient` が `tellRefusal` で `model_refused` を返すことを確かめる。
-  - 応答の本文は記録しない。リポジトリにも、ledger にも書かない（PLaMo Community License）。
-- [ ] **Step 6: Commit**
+  - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
+  - Expected: PASS
+- [ ] **Step 5: Commit**
   - `git commit -m "feat(subtitle-translator): optional PLaMo 3 Translate 2B translator with a Gemma fallback"`
 
 ### Task 9: 字幕の描画と再生位置の同期
@@ -1846,6 +1942,7 @@ it('translates live lines with the line translator chosen in the config and repo
 
 **Interfaces:**
 
+- Consumes: Task 0 の `PLAMO_LICENSE_URL`、`PLAMO_TRANSLATE_MODEL`、Task 5 の設定と用語集、Task 8 の `TranslatorStatus`、Task 13 の `SessionState`
 - `PanelPort`（comment-assistant の `panel.ts` と同じ作り。`watch` を呼ぶまで何も登録しない）:
 
   ```ts
@@ -1871,7 +1968,7 @@ it('translates live lines with the line translator chosen in the config and repo
   - `translator` は background の字幕トラックの訳（Task 8 の `createSubtitleTranslator().status()`）。音声の経路のタブでは、パネルは `session.translator`（offscreen の訳）を出す。
 - `'subs/capability'`（page から）→ `{ audio: boolean | undefined; plamo: boolean | undefined }`。
   - `audio`: `props({ model: models.asr })` の `audio`。
-  - `plamo`: `models()` の一覧に `plamo-3-translate-2b` があるか。`models()` が失敗したら `undefined`。
+  - `plamo`: `models()` の一覧に `PLAMO_TRANSLATE_MODEL`（`plamo-3-translate-2b`）があるか。`models()` が失敗したら `undefined`。
 - 画面（1 ページ。上から順に）:
   1. **状態**
      - 字幕の取得元（字幕トラック／音声認識／なし）と言語
@@ -1992,6 +2089,10 @@ it('ignores runtime messages that are not addressed to the panel before decoding
   - 220 Hz ののこぎり波を 600 ms、無音を 500 ms、の繰り返し。
 - Create: `test/browser/captions.spec.ts`、`audio.spec.ts`、`front.spec.ts`、`translator.spec.ts`、`soak.spec.ts`
 - Modify: `packages/subtitle-translator/package.json`（`starter.soak: true`）
+- Modify: `packages/comment-assistant/test/unit/soak-marker.test.ts`（判断 S31）
+  - テストの名前を `'lists the packages that mark a browser soak in their manifest'` にする。
+  - 期待する一覧を、名前の順の `['@chrome-toolbox/comment-assistant', '@chrome-toolbox/subtitle-translator']` にする。
+  - ③ page-translator の計画（Task 11）も同じ名前で `'@chrome-toolbox/page-translator'` を足す。③ のブランチを rebase して衝突したら、一覧は両方を名前の順に残す。
 - Playwright Test には `test.each` がない。行ごとのテストは、行の配列を `for` で回して `test(...)` を呼ぶ（判断 S23）。
 
 **Interfaces:**
@@ -2007,10 +2108,12 @@ it('ignores runtime messages that are not addressed to the panel before decoding
   - (a) E2E で本物の `tabCapture` を使えるか。headless の Chrome for Testing 156 で、次を順に試す。
     1. サイドパネルのページ（タブで開いたもの）のボタンを、Playwright でクリックする。
     2. CDP で拡張のアクションを起動してから、ショートカットの経路を使う。
+       - アクションの起動を補助の関数にするときは、`packages/extension-core/testing/playwright.ts` の `triggerAction(context: BrowserContext, page: Page): Promise<void>`（CDP の `Extensions.triggerAction`）にする。③ page-translator の Task 1 も同じ名前と形で使う。先に入った方を使い、後の方は足さない（判断 S32）。
   - (b) どちらもだめなら、次の代わりの方式にする。
     - `tools/quality/extension-browser.ts` に、e2e 用のビルド（`wxt build --mode e2e`）を足す。対象は `starter.e2eBuild: true` のパッケージだけ。
     - offscreen は、`import.meta.env.MODE === 'e2e'` のときだけ、fixture の `<audio>` の `captureStream()` から MediaStream を作る。MediaStream から先は本番と同じコードを通る。
     - 本番のビルドにこの経路が入っていないことを、ビルド結果の grep で確かめる（目印の文字列 `e2e-fixture-audio`）。
+    - ③ page-translator の Task 1 Step 0 の C も、同じ `starter.e2eBuild` と `wxt build --mode e2e` を使う。先に入った方を使い、後の方は足さない（判断 S32）。
   - (c) offscreen のヒープと長いタスクを、どちらの候補で測れるか。
   - 結果を `docs/adoption.md` に記録する。
 - [ ] **Step 1: 失敗するテストを書く**
@@ -2061,7 +2164,7 @@ for (const { name, act } of [
     /* act の後 5 秒、llama.requests の chat が増えない。戻すと再開する */
   });
 }
-// translator.spec.ts（Task 8）
+// translator.spec.ts（Task 0 の withPlamo、Task 8）
 test('PLaMo translates caption lines and the panel shows Built with PLaMo', async ({
   llama,
   sidePanel,
@@ -2096,8 +2199,8 @@ test('SOAK_MINUTES of audio subtitles keeps heap and long tasks within budget', 
 - [ ] **Step 3: 足りない配線を直す**
   - テストを通すために本体のコードを直す場合は、該当するタスクの単体テストにも同じケースを足す。
 - [ ] **Step 4: 通ることを確認する**
-  - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test:e2e && pnpm --filter @chrome-toolbox/extension-core test && pnpm check`
-  - Expected: PASS（soak は 2 分版）
+  - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test:e2e && pnpm --filter @chrome-toolbox/extension-core test && pnpm --filter @chrome-toolbox/comment-assistant test && pnpm check`
+  - Expected: PASS（soak は 2 分版。comment-assistant の `soak-marker.test.ts` も通る）
   - Step 0 で代わりの方式にした場合は、本番のビルドに e2e の経路がないことも確かめる。
     - Run: `pnpm --filter @chrome-toolbox/subtitle-translator build && ! grep -r "e2e-fixture-audio" packages/subtitle-translator/dist/chrome-mv3`
     - Expected: 終了コード 0

@@ -99,6 +99,7 @@ extension-core の LLM クライアント ──HTTP──▶ llama-server（ル
   - タイムアウトは AbortSignal で扱う。
   - 出力の形は JSON Schema（`response_format`）か GBNF の文法（`grammar`）で縛る。PLaMo 3 Translate には縛りを付けない（付けると出力が壊れる）。代わりに止める文字列（`stop`）を送る。
   - 指定できる項目: `model`、`id_slot`、`cache_prompt`、`chat_template_kwargs`、`stop`。
+  - PLaMo 3 Translate へのリクエストは、extension-core の 1 か所（`plamo.ts`）で組み立てる。user の 1 通、`chat_template_kwargs`（訳先、原語、上限付きの文脈と用語集）、止める文字列、上限付きの `max_tokens`。枠（`id_slot`）は呼ぶ側が渡す（判断。PLaMo の枠を拡張どうしで分けるため）。①は PLaMo の枠 0 を使う。
   - user の本文に、音声の部品（`input_audio`。WAV の base64）を入れられる。①の音声認識に使う。
   - `/props?model=<name>` から、枠の数（`total_slots`）と、音声入力が使えるか（`modalities.audio`）を読む。
   - 想定する失敗は Result のエラーコードで返す。①のために足すもの:
