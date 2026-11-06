@@ -8,7 +8,7 @@ import {
   SOURCE_LANGUAGES,
   SOURCE_LANGUAGE_CODES,
   SUBTITLE_TRANSLATORS,
-  subtitleSettingsSchema,
+  parseSubtitleSettings,
   subtitleSettingsStore,
   TRANSLATOR_LABELS,
 } from '../../src/settings.ts';
@@ -43,13 +43,13 @@ describe('subtitle settings', () => {
     expect(await subtitleSettingsStore(fakeBrowser.storage.local).load()).toEqual(Ok(next));
   });
 
-  it('rejects an unknown source language with input_invalid', async () => {
-    const store = subtitleSettingsStore(fakeBrowser.storage.local);
-    const input: unknown = { ...defaultSubtitleSettings, sourceLang: 'xx' };
-    expect(subtitleSettingsSchema.safeParse(input).success).toBe(false);
-    const result = await store.save(input);
-    expect(result).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
-    expect(await store.load()).toEqual(Ok(defaultSubtitleSettings));
+  it('rejects an unknown source language with input_invalid', () => {
+    const value: unknown = { ...defaultSubtitleSettings, sourceLang: 'xx' };
+    expect(parseSubtitleSettings(value)).toMatchObject({
+      ok: false,
+      error: { internalCode: 'input_invalid' },
+    });
+    expect(parseSubtitleSettings({ ...defaultSubtitleSettings, sourceLang: 'ko' }).ok).toBe(true);
   });
 
   it('fails to load a stored record that does not match', async () => {

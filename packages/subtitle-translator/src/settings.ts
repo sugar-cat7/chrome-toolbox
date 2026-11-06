@@ -79,9 +79,15 @@ export const defaultSubtitleSettings: SubtitleSettings = {
   translator: 'gemma',
 };
 
+/** Checks a value of unknown origin (a message) against the schema: `input_invalid` when it fails. */
+export function parseSubtitleSettings(value: unknown): Result<SubtitleSettings> {
+  const parsed = subtitleSettingsSchema.safeParse(value);
+  return parsed.success ? Ok(parsed.data) : Err(failure('input_invalid'));
+}
+
 export type SubtitleSettingsStore = {
   load(this: void): Promise<Result<SubtitleSettings>>;
-  save(this: void, settings: unknown): Promise<Result<SubtitleSettings>>;
+  save(this: void, settings: SubtitleSettings): Promise<Result<SubtitleSettings>>;
 };
 
 /** The viewer's subtitle choices; the server URL and models stay in extension-core's settings. */
@@ -95,11 +101,12 @@ export function subtitleSettingsStore(area: StorageArea, key = 'subtitles'): Sub
         ? Ok(defaultSubtitleSettings)
         : decode(subtitleSettingsSchema, value);
     },
-    save: async (settings: unknown): Promise<Result<SubtitleSettings>> => {
-      const parsed = subtitleSettingsSchema.safeParse(settings);
-      if (!parsed.success) return Err(failure('input_invalid'));
-      const written = await capture(() => area.set({ [key]: parsed.data }), 'storage_failed');
-      return written.ok ? Ok(parsed.data) : written;
+    save: async (settings): Promise<Result<SubtitleSettings>> => {
+      // The type guards callers; the check guards values that arrive in messages.
+      const parsed = parseSubtitleSettings(settings);
+      if (!parsed.ok) return parsed;
+      const written = await capture(() => area.set({ [key]: parsed.value }), 'storage_failed');
+      return written.ok ? Ok(parsed.value) : written;
     },
   };
 }
