@@ -1045,7 +1045,7 @@ it.each([
   - isolated world の側は、`event.source === window` と `source` を確かめ、すべてを Zod と上限で検証する。ページのスクリプトも同じメッセージを送れるので、中身はページのデータとして扱う（最悪でも字幕が間違うだけで、拡張の権限には届かない）。
 - Step 0 の結果による追加:
   - `cues` に `kind: 'asr' | 'manual'` を足す。同じ言語に manual と asr があり、プレイヤーはどちらも取得しうるため。
-  - 送るのは 1 本の動画の 1 つのトラックにつき 1 回。訳（`tlang`）と、`fmt` が `json3` でない応答は読まない。CC がオンの視聴者では、プレイヤーが話されている言語でないトラックや訳を取得することがあり、SPA の遷移では同じ URL を 2 回取得することもあった。
+  - 送るのは、1 回の訪問（`yt-navigate-start` から次の `yt-navigate-start` まで）の 1 つのトラックにつき 1 回。同じ動画に戻れば、また送る。訳（`tlang`）と、`fmt` が `json3` でない応答は読まない。fetch の本文は流れのまま読み、8,000,000 文字を超えたら読むのをやめる。CC がオンの視聴者では、プレイヤーが話されている言語でないトラックや訳を取得することがあり、SPA の遷移では同じ URL を 2 回取得することもあった。
   - isolated 側からの `{ source: 'st-content', type: 'ready' }` を足す。content script（`document_idle`）は、プレイヤーの最初の取得（読み込みから 1.3〜2.2 s）や最初の `yt-navigate-finish`（1.1〜2.8 s）より後に動き出しうるため。受けたブリッジは `video` と、持っている `cues` を送り直す。
   - ブリッジは最後に送った `cues` を 1 組だけ持つ。`load-track` がそのトラックなら、プレイヤーに取得させずに送り直す。
   - `load-track` の方式:
@@ -1053,7 +1053,9 @@ it.each([
     - `#movie_player[data-st-loading]` で YouTube の字幕を隠し、`setOption('captions', 'track', { languageCode })` を呼ぶ（asr は `kind: 'asr'` を付ける）。プレイヤーは数 ms で取得する。
     - そのトラックの応答の後（来なければ `LOAD_TIMEOUT_MS` = 10,000 ms 後、または `yt-navigate-start`）に、CC がオンだったら元のトラックに、オフだったら `{}` に戻し、2 つのキーを元の値（なければ削除）に書き戻す。
     - `unloadModule('captions')` は戻す方法にならない（persistence が true のまま残り、次の動画で CC がオンになる）。
-    - 視聴者が別のトラックで CC をオンにしていたときは、元のトラックに戻すとプレイヤーがそれをもう一度取得する（その動画で 1 回）。
+    - 視聴者が別のトラックで CC をオンにしていたときは、元のトラックに戻すとプレイヤーがそれをもう一度取得する（その動画で 1 回。判断 S41 で許容）。原語のトラックがすでにオンなら、追加の取得なしに使う。
+    - プレイヤーに取得させるのは、1 回の訪問の 1 つのトラックにつき 1 回だけ（結果を問わない）。繰り返しの `load-track` には、持っている `cues` を送り直すか、何もしない。
+    - 控えた persistence が true なのに、まだトラックがオンでないとき（読み込みの直後）は、プレイヤーを動かさずに、プレイヤー自身の取得を最長 `LOAD_TIMEOUT_MS` 待つ。その間に来た応答は普通に送る。待っても来なければ、いつもどおりプレイヤーに取得させる。
   - isolated 側の受け口は `readBridgeMessage(event, window)`、送り口は `postToPage(window, message)`（`src/captions/messages.ts`）。Task 9 の content script は、受け始めたら `ready` を送る。
 
 - [ ] **Step 0: スパイク（使い捨て。実サイトで確かめる）**

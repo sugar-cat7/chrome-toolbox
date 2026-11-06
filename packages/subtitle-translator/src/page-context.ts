@@ -1,8 +1,9 @@
 import { z } from 'zod/mini';
 import { createLruCache } from '@chrome-toolbox/extension-core';
+import { PAGE_LIMITS } from './limits.ts';
 
-/** Characters kept of what a page names; they go into prompts. */
-export const PAGE_LIMITS = { title: 200, author: 100, streamer: 128 } as const;
+/** Characters kept of what a page names; defined in limits.ts for the MAIN-world bridge. */
+export { PAGE_LIMITS };
 
 /** A too-long value is cut, not refused. */
 const cut = (max: number) =>

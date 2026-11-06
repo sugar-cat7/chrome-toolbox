@@ -12,9 +12,20 @@ const fixtureText = (name: string): string =>
 const JSON3 = fixtureText('timedtext.json3.json');
 const PLAYER_RESPONSE: unknown = JSON.parse(fixtureText('player-response.json'));
 const CUES = parseJson3(JSON.parse(JSON3));
+/** The fixture's player response for another video id. */
+const responseFor = (videoId: string): unknown =>
+  JSON.parse(fixtureText('player-response.json').replaceAll('fixture-v01', videoId));
 
-const timedtext = (query: string): string =>
-  `/api/timedtext?v=fixture-v01&${query}&fmt=json3&pot=x`;
+const timedtext = (query: string, videoId = 'fixture-v01'): string =>
+  `/api/timedtext?v=${videoId}&${query}&fmt=json3&pot=x`;
+const loadTrack = (languageCode: string) =>
+  fromContent({ source: 'st-content', type: 'load-track', languageCode });
+const navigate = () => document.dispatchEvent(new CustomEvent('yt-navigate-start'));
+/** The `setOption` calls that turned a track on (not the restores). */
+const asked = (calls: unknown[][]) =>
+  calls.filter(
+    ([, , value]) => typeof value === 'object' && value !== null && 'languageCode' in value,
+  );
 
 /** A stand-in for the page's XMLHttpRequest that answers every request with `FakeXhr.body`. */
 class FakeXhr extends EventTarget {
@@ -63,8 +74,9 @@ function addPlayer(track: Record<string, unknown> = {}) {
   const element = document.createElement('div');
   element.id = 'movie_player';
   let current = track;
+  let response = PLAYER_RESPONSE;
   const api = {
-    getPlayerResponse: vi.fn<() => unknown>(() => PLAYER_RESPONSE),
+    getPlayerResponse: vi.fn<() => unknown>(() => response),
     getOption: vi.fn<(module: string, option: string) => Record<string, unknown>>(() => current),
     // Like the player: turning a track on remembers it and its language.
     setOption: vi.fn<(module: string, option: string, value: Record<string, unknown>) => void>(
@@ -82,7 +94,11 @@ function addPlayer(track: Record<string, unknown> = {}) {
   };
   Object.assign(element, api);
   document.body.append(element);
-  return { element, api };
+  /** The player moves to another video (an in-app navigation). */
+  const show = (next: unknown) => {
+    response = next;
+  };
+  return { element, api, show };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -280,7 +296,7 @@ describe('player bridge (MAIN world)', () => {
     const persistence = JSON.stringify({ data: 'true', creation: 1 });
     localStorage.setItem('yt-player-caption-sticky-language', sticky);
     localStorage.setItem('yt-player-caption-persistence', persistence);
-    const { api } = addPlayer(viewer);
+    const { element, api } = addPlayer(viewer);
     const clock = manualTimers();
     uninstall = installBridge(window, { timers: clock.timers });
 
@@ -292,6 +308,7 @@ describe('player bridge (MAIN world)', () => {
     // The track never arrives: the bridge gives up after the timeout and restores.
     clock.run();
 
+    expect(element.hasAttribute('data-st-loading')).toBe(false);
     expect(api.setOption).toHaveBeenLastCalledWith('captions', 'track', viewer);
     expect(localStorage.getItem('yt-player-caption-sticky-language')).toBe(sticky);
     expect(localStorage.getItem('yt-player-caption-persistence')).toBe(persistence);
@@ -309,6 +326,186 @@ describe('player bridge (MAIN world)', () => {
     expect(localStorage.getItem('yt-player-caption-persistence')).toBeNull();
     expect(element.hasAttribute('data-st-loading')).toBe(false);
     expect(clock.delays()).toEqual([]);
+  });
+
+  it('loads the source track again when the viewer comes back to a video with CC off', async () => {
+    const { api, show } = addPlayer();
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+
+    for (const videoId of ['fixture-v01', 'fixture-v02', 'fixture-v01']) {
+      navigate();
+      show(responseFor(videoId));
+      loadTrack('es');
+      await pageXhr(timedtext('lang=es&kind=asr', videoId));
+      clock.run();
+    }
+
+    expect(posts('cues').map(({ videoId }) => videoId)).toEqual([
+      'fixture-v01',
+      'fixture-v02',
+      'fixture-v01',
+    ]);
+    expect(asked(api.setOption.mock.calls)).toHaveLength(3);
+  });
+
+  it('posts the source track again when the viewer comes back to a video with it on', async () => {
+    const { api, show } = addPlayer({ languageCode: 'es', kind: 'asr' });
+    uninstall = installBridge(window, { timers: manualTimers().timers });
+
+    for (const videoId of ['fixture-v01', 'fixture-v02', 'fixture-v01']) {
+      navigate();
+      show(responseFor(videoId));
+      // The player fetches the track that is on, sometimes twice in one visit.
+      await pageXhr(timedtext('lang=es&kind=asr', videoId));
+      await pageXhr(timedtext('lang=es&kind=asr', videoId));
+    }
+    loadTrack('es');
+
+    expect(posts('cues').map(({ videoId }) => videoId)).toEqual([
+      'fixture-v01',
+      'fixture-v02',
+      'fixture-v01',
+      'fixture-v01',
+    ]);
+    expect(api.setOption).not.toHaveBeenCalled();
+  });
+
+  it.each<{ name: string; answer: string | undefined }>([
+    { name: 'times out', answer: undefined },
+    { name: 'answers with an empty body', answer: '' },
+    { name: 'answers with a body that is not json3', answer: '{"wireMagic":"pb3"}' },
+  ])(
+    'does not drive the player twice for one track in one visit when it $name',
+    async ({ answer }) => {
+      const { api } = addPlayer();
+      const clock = manualTimers();
+      uninstall = installBridge(window, { timers: clock.timers });
+
+      loadTrack('es');
+      // The content script asks on every video message; the load is still on.
+      loadTrack('es');
+      if (answer !== undefined) {
+        FakeXhr.body = answer;
+        await pageXhr(timedtext('lang=es&kind=asr'));
+        FakeXhr.body = JSON3;
+      }
+      clock.run();
+      loadTrack('es');
+
+      expect(asked(api.setOption.mock.calls)).toHaveLength(1);
+      expect(posts('cues')).toEqual([]);
+      expect(clock.delays()).toEqual([]);
+    },
+  );
+
+  it('waits for the player to turn on the CC the viewer keeps on before driving it', async () => {
+    localStorage.setItem('yt-player-caption-persistence', JSON.stringify({ data: 'true' }));
+    // The player has not turned the remembered track on yet (a full load).
+    const { api } = addPlayer();
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+
+    loadTrack('es');
+    expect(api.setOption).not.toHaveBeenCalled();
+    expect(clock.delays()).toEqual([LOAD_TIMEOUT_MS]);
+
+    // The player's own request for the remembered track is posted as usual.
+    await pageXhr(timedtext('lang=es&kind=asr'));
+    expect(posts('cues')).toHaveLength(1);
+    clock.run();
+
+    expect(api.setOption).not.toHaveBeenCalled();
+    expect(posts('cues')).toHaveLength(1);
+  });
+
+  it('drops the wait when the viewer leaves for another video', () => {
+    localStorage.setItem('yt-player-caption-persistence', JSON.stringify({ data: 'true' }));
+    const { api } = addPlayer();
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+
+    loadTrack('es');
+    navigate();
+
+    expect(clock.delays()).toEqual([]);
+    expect(api.setOption).not.toHaveBeenCalled();
+  });
+
+  it('posts the asked track even when this visit posted it before', async () => {
+    // CC on in the source language, then the viewer switches YouTube's CC to Japanese.
+    const { api } = addPlayer({ languageCode: 'es', kind: 'asr' });
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+    await pageXhr(timedtext('lang=es&kind=asr'));
+    api.setOption('captions', 'track', { languageCode: 'ja', kind: '' });
+    await pageXhr(timedtext('lang=ja'));
+    api.setOption.mockClear();
+
+    loadTrack('es');
+    await pageXhr(timedtext('lang=es&kind=asr'));
+
+    expect(asked(api.setOption.mock.calls)).toHaveLength(1);
+    expect(posts('cues').map(({ languageCode }) => languageCode)).toEqual(['es', 'ja', 'es']);
+  });
+
+  it('drives the player after that wait when its own request never comes', () => {
+    localStorage.setItem('yt-player-caption-persistence', JSON.stringify({ data: 'true' }));
+    const { api } = addPlayer();
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+
+    loadTrack('es');
+    clock.run();
+
+    expect(api.setOption).toHaveBeenCalledWith('captions', 'track', {
+      languageCode: 'es',
+      kind: 'asr',
+    });
+    expect(clock.delays()).toEqual([LOAD_TIMEOUT_MS]);
+  });
+
+  it('stops reading a fetched body at the limit', async () => {
+    const chunk = new TextEncoder().encode(' '.repeat(1 << 20));
+    let pulls = 0;
+    window.fetch = vi.fn<typeof window.fetch>(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            // 16 MiB in all, twice the limit.
+            pull(controller) {
+              pulls += 1;
+              if (pulls > 16) controller.close();
+              else controller.enqueue(chunk);
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    addPlayer();
+    const clock = manualTimers();
+    uninstall = installBridge(window, { timers: clock.timers });
+    loadTrack('es');
+
+    // The page does not read its own copy here; the bridge must give up on its copy.
+    const response = await window.fetch(timedtext('lang=es&kind=asr'));
+    await vi.waitFor(() => expect(clock.delays()).toEqual([0]));
+
+    expect(posts('cues')).toEqual([]);
+    expect(pulls).toBeLessThan(MAX_BODY_LENGTH / chunk.length + 4);
+    await response.body?.cancel();
+  });
+
+  it('does not re-post held cues of another video on ready', async () => {
+    const { show } = addPlayer({ languageCode: 'es', kind: 'asr' });
+    uninstall = installBridge(window, { timers: manualTimers().timers });
+    await pageXhr(timedtext('lang=es&kind=asr'));
+    show(responseFor('fixture-v02'));
+
+    fromContent({ source: 'st-content', type: 'ready' });
+
+    expect(posts('cues')).toHaveLength(1);
+    expect(posts('video').at(-1)).toMatchObject({ video: { videoId: 'fixture-v02' } });
   });
 
   it('re-posts cues it holds instead of asking the player again', async () => {

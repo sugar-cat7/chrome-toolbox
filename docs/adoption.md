@@ -46,14 +46,18 @@ Direct fetch: `baseUrl + '&fmt=json3'` fetched from the page without `pot` retur
 
 Decision (the plan's default policy holds):
 
-- The MAIN-world bridge reads only the player's own responses: `/api/timedtext` on the page's origin with `fmt=json3`, never a `tlang` translation. XHR is read from `responseText` after `load`, and `fetch` is wrapped too, reading `response.clone()`. It posts one `cues` message per video and track, with `kind`.
+- The MAIN-world bridge reads only the player's own responses: `/api/timedtext` on the page's origin with `fmt=json3`, never a `tlang` translation. XHR is read from `responseText` after `load`. `fetch` is wrapped too: it reads `response.clone()` as a stream and stops after 8,000,000 characters. It posts one `cues` message per track, with `kind`, in each visit. A visit runs from one `yt-navigate-start` to the next, so returning to a video posts its track again.
 - With CC off, which is the usual case, the isolated content script asks for its source track with `load-track`. The bridge then:
   - saves the current track and the two localStorage keys;
   - hides YouTube's caption window (`#movie_player[data-st-loading]`) and calls `setOption`;
-  - after that track's response, or after 10 s or `yt-navigate-start`, sets the saved track again (or `{}` if CC was off) and writes both keys back as they were.
+  - after that track's response, or after 10 s or `yt-navigate-start`, sets the saved track again (or `{}` if CC was off) and writes both keys back as they were;
+  - drives the player at most once per track in a visit, whatever the outcome. A repeated `load-track` gets the cues it holds or nothing;
+  - waits up to 10 s before driving the player when the saved persistence is true but no track is on yet. On a full load the player may not have turned the viewer's CC on yet, and a restore would turn it off. The player's own request is posted as usual meanwhile.
+- A source-language track that is already on is reused with no extra request (ruling S41).
 - No direct fetch. Live streams use only the audio path.
 - Additions to the brief: a `ready` message from the content script, because it starts at `document_idle` and can miss the first posts; `kind` in `cues`; and the bridge keeps the last cues it posted and sends them again on `ready` or `load-track`.
-- Cost: when the viewer had CC on with another track, restoring it makes the player request that track a second time (one extra player request for that video).
+- Cost, accepted in S41: when the viewer had CC on with another track, restoring it makes the player request that track a second time (one extra player request for that video).
+- Known difference after a `{}` restore: the player keeps persistence false in memory. If the key was absent before (YouTube's own default), CC does not turn on by itself for the rest of that page session; a reload reads the restored key again.
 - A smoke run of the built extension in the same kind of browser posted `video` on load, after an SPA navigation and on `ready`. `load-track` made the player request the asked track. CC was off again afterwards, both localStorage keys equalled their earlier values exactly, and playback went on.
 - E2E (subtitle Task 15): the fake player script requests timedtext with an `XMLHttpRequest` of `responseType` `''`, like the real player.
 

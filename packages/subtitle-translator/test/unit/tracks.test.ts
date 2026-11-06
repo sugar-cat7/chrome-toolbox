@@ -121,14 +121,6 @@ describe('caption tracks', () => {
     });
   });
 
-  it('bounds the video names like the page context does', () => {
-    expect(CAPTION_LIMITS).toMatchObject({
-      title: PAGE_LIMITS.title,
-      author: PAGE_LIMITS.author,
-      channelId: PAGE_LIMITS.streamer,
-    });
-  });
-
   it('cuts long names and leaves out empty ones', () => {
     const video = readVideo({
       videoDetails: {
@@ -141,8 +133,8 @@ describe('caption tracks', () => {
 
     expect(video).toMatchObject({ ok: true });
     if (!video.ok) return;
-    expect(video.value.title).toHaveLength(CAPTION_LIMITS.title);
-    expect(video.value.channelId).toHaveLength(CAPTION_LIMITS.channelId);
+    expect(video.value.title).toHaveLength(PAGE_LIMITS.title);
+    expect(video.value.channelId).toHaveLength(PAGE_LIMITS.streamer);
     expect(video.value).not.toHaveProperty('author');
   });
 

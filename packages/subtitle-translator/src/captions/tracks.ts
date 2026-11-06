@@ -1,10 +1,10 @@
 import { z } from 'zod/mini';
 import { Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
+import { PAGE_LIMITS } from '../limits.ts';
 
 /**
- * Bounds on what the player gives the bridge and what one bridge message may carry. `title`,
- * `author` and `channelId` equal `PAGE_LIMITS` (page-context.ts); they are repeated here so that
- * the MAIN-world bundle does not import extension-core.
+ * Bounds on what the player gives the bridge and what one bridge message may carry. The video's
+ * names are cut like the page context cuts them.
  */
 export const CAPTION_LIMITS = {
   tracks: 200,
@@ -14,9 +14,9 @@ export const CAPTION_LIMITS = {
   vssId: 64,
   baseUrl: 4096,
   languageCode: 35,
-  title: 200,
-  author: 100,
-  channelId: 128,
+  title: PAGE_LIMITS.title,
+  author: PAGE_LIMITS.author,
+  channelId: PAGE_LIMITS.streamer,
 } as const;
 
 /** A BCP 47 tag as YouTube writes caption languages (`en`, `es-419`, `zh-Hans`). */
