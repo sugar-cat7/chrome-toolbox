@@ -1,0 +1,57 @@
+{
+  "responseContext": {},
+  "playabilityStatus": { "status": "OK" },
+  "captions": {
+    "playerCaptionsTracklistRenderer": {
+      "captionTracks": [
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=fixture-v01&ei=fixture&caps=asr&opi=1&exp=fixture&xoaf=5&xowf=1&hl=ja&ip=0.0.0.0&ipbits=0&expire=1700000000&sparams=ip,ipbits,expire,v,ei,caps,opi,exp,xoaf&signature=FIXTURE&key=yt8&lang=es-419",
+          "name": { "simpleText": "スペイン語（ラテンアメリカ）" },
+          "vssId": ".es-419",
+          "languageCode": "es-419",
+          "isTranslatable": true,
+          "trackName": ""
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=fixture-v01&ei=fixture&caps=asr&opi=1&exp=fixture&xoaf=5&xowf=1&hl=ja&ip=0.0.0.0&ipbits=0&expire=1700000000&sparams=ip,ipbits,expire,v,ei,caps,opi,exp,xoaf&signature=FIXTURE&key=yt8&kind=asr&lang=es",
+          "name": { "simpleText": "スペイン語 (自動生成)" },
+          "vssId": "a.es",
+          "languageCode": "es",
+          "kind": "asr",
+          "isTranslatable": true,
+          "trackName": ""
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=fixture-v01&ei=fixture&caps=asr&opi=1&exp=fixture&xoaf=5&xowf=1&hl=ja&ip=0.0.0.0&ipbits=0&expire=1700000000&sparams=ip,ipbits,expire,v,ei,caps,opi,exp,xoaf&signature=FIXTURE&key=yt8&lang=ja",
+          "name": { "simpleText": "日本語" },
+          "vssId": ".ja",
+          "languageCode": "ja",
+          "isTranslatable": true,
+          "trackName": ""
+        }
+      ],
+      "audioTracks": [{ "captionTrackIndices": [0, 1, 2], "defaultCaptionTrackIndex": 0 }],
+      "translationLanguages": [
+        { "languageCode": "ja", "languageName": { "simpleText": "日本語" } }
+      ],
+      "defaultAudioTrackIndex": 0
+    }
+  },
+  "videoDetails": {
+    "videoId": "fixture-v01",
+    "title": "Fixture Quest day 3",
+    "lengthSeconds": "754",
+    "keywords": ["fixture"],
+    "channelId": "UCfixture-channel-000000",
+    "isOwnerViewing": false,
+    "shortDescription": "A made-up video for tests.",
+    "isCrawlable": true,
+    "thumbnail": { "thumbnails": [] },
+    "allowRatings": true,
+    "viewCount": "0",
+    "author": "Fixture Ch",
+    "isPrivate": false,
+    "isUnpluggedCorpus": false,
+    "isLiveContent": false
+  }
+}
