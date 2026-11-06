@@ -1,51 +1,27 @@
 import { Ok, type Result } from '@chrome-toolbox/contracts';
 import {
   createLruCache,
-  parseSubtitleLine,
-  subtitleMaxTokens,
-  subtitlePrompt,
+  defaultSettings,
   type LlamaClient,
   type LruCache,
   type Settings,
 } from '@chrome-toolbox/extension-core';
 import { isJapanese } from './captions/tracks.ts';
 import { toPromptGlossary, type GlossaryEntry } from './glossary.ts';
+import { createLineTranslator, type TranslatorStatus } from './line-translator.ts';
 import { contextHash, contextText, type PageInfo } from './page-context.ts';
 import { TRANSLATE_LIMITS, type TranslateRequest, type TranslateResponse } from './protocol.ts';
-
-/** Translations the service worker keeps (keyed by language, context, glossary and source). */
-export const CAPTION_CACHE_ENTRIES = 2_000;
-
-/** One caption line to translate, with what its prompt needs. */
-type LineInput = Readonly<{
-  source: string;
-  sourceLang: string;
-  previous: readonly string[];
-  context: string;
-  glossary: readonly GlossaryEntry[];
-}>;
+import {
+  defaultSubtitleSettings,
+  type SubtitleSettings,
+  type SubtitleTranslator,
+} from './settings.ts';
 
 /**
- * One sentence with Gemma on slot 0 (Task 8 moves this call into the line translator, beside
- * PLaMo). A reply that is cut or not one line fails, and the sentence stays in its source.
+ * Translations the service worker keeps (keyed by the translator that made them, language,
+ * context, glossary and source).
  */
-async function translateLine(
-  client: LlamaClient,
-  model: string,
-  input: LineInput,
-): Promise<Result<string>> {
-  const maxTokens = subtitleMaxTokens(input.source);
-  const reply = await client.chat({
-    ...subtitlePrompt(input),
-    model,
-    slot: 0,
-    temperature: 0,
-    cachePrompt: true,
-    maxTokens,
-    templateKwargs: { enable_thinking: false },
-  });
-  return reply.ok ? parseSubtitleLine(reply.value, maxTokens, input.source) : reply;
-}
+export const CAPTION_CACHE_ENTRIES = 2_000;
 
 /**
  * Failures after which the rest of a batch gets no chat: a server that cannot be reached (or did
@@ -68,24 +44,37 @@ export type CaptionTranslator = {
     request: TranslateRequest,
     page: PageInfo | undefined,
   ): Promise<Result<TranslateResponse>>;
+  /** The line translator's status for the translator of the settings read last (Gemma before). */
+  status(this: void): TranslatorStatus;
 };
 
 /**
- * The service worker's caption translator: it keeps no state but its cache, so a service worker
- * that stopped loses nothing the watch page needs.
+ * The service worker's caption translator: it keeps no state but its cache and the line
+ * translator's status, so a service worker that stopped loses nothing the watch page needs. A line
+ * is kept under the translator that made it and looked up under the chosen one (S20): a line
+ * Gemma translated while PLaMo was chosen is kept under Gemma.
  */
 export function createSubtitleTranslator({
   client,
   settings,
+  subtitles,
   glossary,
   cache = createLruCache({ max: CAPTION_CACHE_ENTRIES }),
 }: {
   client: LlamaClient;
   settings: () => Promise<Result<Settings>>;
+  subtitles: () => Promise<Result<SubtitleSettings>>;
   glossary: (streamer: string) => Promise<Result<GlossaryEntry[]>>;
   cache?: LruCache<string, string>;
 }): CaptionTranslator {
+  /** The translator and Gemma model of the settings read last. */
+  let latest: Readonly<{ translator: SubtitleTranslator; model: string }> = {
+    translator: defaultSubtitleSettings.translator,
+    model: defaultSettings.models.translate,
+  };
+  const lineTranslator = createLineTranslator({ client, config: () => latest });
   return {
+    status: lineTranslator.status,
     translate: async (request, page): Promise<Result<TranslateResponse>> => {
       const { sourceLang, sentences } = request;
       if (isJapanese(sourceLang))
@@ -94,24 +83,29 @@ export function createSubtitleTranslator({
         });
       const loaded = await settings();
       if (!loaded.ok) return loaded;
+      const chosen = await subtitles();
+      if (!chosen.ok) return chosen;
+      const { translator } = chosen.value;
+      latest = { translator, model: loaded.value.models.translate };
       const shown = page?.videoId === request.videoId ? page : undefined;
       const entries =
         shown?.streamer === undefined ? Ok<GlossaryEntry[]>([]) : await glossary(shown.streamer);
       if (!entries.ok) return entries;
       const context = shown === undefined ? '' : contextText(shown);
       const terms = toPromptGlossary(entries.value);
-      const keyHead = `${sourceLang}\u0000${contextHash(context)}\u0000${contextHash(JSON.stringify(terms))}\u0000`;
+      const keyTail = `${sourceLang}\u0000${contextHash(context)}\u0000${contextHash(JSON.stringify(terms))}\u0000`;
+      const keyOf = (by: SubtitleTranslator, source: string): string =>
+        `${by}\u0000${keyTail}${source}`;
       const previous = [...request.previous];
       const lines: TranslateResponse['lines'] = [];
       /** Set once the server could not be reached or the request was cancelled. */
       let unreachable = false;
       for (const { id, source } of sentences) {
-        const key = `${keyHead}${source}`;
-        const cached = cache.get(key);
+        const cached = cache.get(keyOf(translator, source));
         if (cached !== undefined) lines.push({ id, ja: cached, state: 'done' });
         else if (unreachable) lines.push({ id, state: 'failed' });
         else {
-          const ja = await translateLine(client, loaded.value.models.translate, {
+          const ja = await lineTranslator.translate({
             source,
             sourceLang,
             previous: previous.slice(-TRANSLATE_LIMITS.previous),
@@ -119,8 +113,8 @@ export function createSubtitleTranslator({
             glossary: terms,
           });
           if (ja.ok) {
-            cache.set(key, ja.value);
-            lines.push({ id, ja: ja.value, state: 'done' });
+            cache.set(keyOf(ja.value.by, source), ja.value.ja);
+            lines.push({ id, ja: ja.value.ja, state: 'done' });
           } else {
             unreachable = BATCH_STOPPERS.includes(ja.error.internalCode);
             lines.push({ id, state: 'failed' });

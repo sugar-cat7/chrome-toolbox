@@ -5,6 +5,7 @@ import { Ok } from '@chrome-toolbox/contracts';
 import { subtitleStreamPart } from '@chrome-toolbox/extension-core';
 import { glossaryStore } from '../../src/glossary.ts';
 import { tabPagesStore } from '../../src/page-context.ts';
+import { defaultSubtitleSettings, subtitleSettingsStore } from '../../src/settings.ts';
 import {
   senderKind,
   type Sender,
@@ -264,6 +265,43 @@ describe('caption translation routes', () => {
       }
     }
     expect(bodies).toHaveLength(2);
+    stop();
+  });
+
+  it('translates captions with the translator saved in the subtitle settings', async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.endsWith('/v1/models'))
+          return Response.json({ data: [{ id: 'gemma4-e4b' }, { id: 'plamo-3-translate-2b' }] });
+        bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        // A made-up translation, not a PLaMo output.
+        return Response.json({
+          choices: [{ message: { content: '訳P:一行' }, finish_reason: 'stop' }],
+        });
+      }),
+    );
+    expect(
+      await subtitleSettingsStore(fakeBrowser.storage.local).save({
+        ...defaultSubtitleSettings,
+        translator: 'plamo',
+      }),
+    ).toMatchObject({ ok: true });
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+      new Promise((resolve) => {
+        add.mock.calls[0]?.[0]?.(message, sender, resolve);
+      });
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+
+    expect(await ask(translate('Okay chat.'), topFrame(watch))).toEqual(
+      Ok({ lines: [{ id: '0:a', ja: '訳P:一行', state: 'done' }] }),
+    );
+    expect(bodies).toEqual([
+      expect.objectContaining({ model: 'plamo-3-translate-2b', id_slot: 0 }),
+    ]);
     stop();
   });
 

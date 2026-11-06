@@ -5,6 +5,7 @@ import {
   createLruCache,
   createQueue,
   defaultSettings,
+  PLAMO_TRANSLATE_MODEL,
   subtitleMaxTokens,
   subtitlePrompt,
   type Fetch,
@@ -13,6 +14,11 @@ import {
 import { toPromptGlossary, type GlossaryEntry } from '../../src/glossary.ts';
 import { contextHash, type PageInfo } from '../../src/page-context.ts';
 import type { TranslateRequest } from '../../src/protocol.ts';
+import {
+  defaultSubtitleSettings,
+  type SubtitleSettings,
+  type SubtitleTranslator,
+} from '../../src/settings.ts';
 import { CAPTION_CACHE_ENTRIES, createSubtitleTranslator } from '../../src/translate.ts';
 
 type ChatBody = {
@@ -35,15 +41,24 @@ function lineOf(body: ChatBody): string {
 }
 
 /**
- * llama-server's chat endpoint at the HTTP boundary: answers `訳:<line>` and a newline, or what
- * `reply` says for a line; unreachable for a line `reply` answers with undefined.
+ * A llama.cpp router at the HTTP boundary. `GET /v1/models` lists `server.models`. Gemma
+ * answers `訳:<line>` and a newline, or what `reply` says for a line; unreachable for a line
+ * `reply` answers with undefined. PLaMo answers `訳P:<line>` (made up).
  */
 function fakeServer(reply: (line: string) => string | undefined = (line) => `訳:${line}\n`) {
   const bodies: ChatBody[] = [];
-  const fetch: Fetch = async (_input, init) => {
+  const server: { models: readonly string[] } = {
+    models: ['gemma4-e4b', PLAMO_TRANSLATE_MODEL],
+  };
+  const fetch: Fetch = async (input, init) => {
+    if (input.endsWith('/v1/models'))
+      return Response.json({ data: server.models.map((id) => ({ id })) });
     const body: ChatBody = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
     bodies.push(body);
-    const content = reply(lineOf(body));
+    const content =
+      body.model === PLAMO_TRANSLATE_MODEL
+        ? `訳P:${body.messages[0]?.content ?? ''}`
+        : reply(lineOf(body));
     if (content === undefined) throw new TypeError('Failed to fetch');
     return Response.json({ choices: [{ message: { content }, finish_reason: 'stop' }] });
   };
@@ -52,8 +67,13 @@ function fakeServer(reply: (line: string) => string | undefined = (line) => `訳
     fetch,
     queue: createQueue(),
   });
-  return { bodies, client };
+  return { bodies, client, server };
 }
+
+/** The viewer's subtitle settings with `translator`. */
+const subtitlesWith =
+  (translator: SubtitleTranslator) => async (): Promise<Result<SubtitleSettings>> =>
+    Ok({ ...defaultSubtitleSettings, translator });
 
 const VIDEO = 'abcdefghijk';
 const PAGE: PageInfo = {
@@ -84,6 +104,7 @@ describe('caption translator', () => {
     const translator = createSubtitleTranslator({
       client,
       settings: async () => Ok(defaultSettings),
+      subtitles: subtitlesWith('gemma'),
       glossary,
     });
     const sources = ['Fixturo is here.', 'Okay chat.', "We're going in."];
@@ -125,13 +146,14 @@ describe('caption translator', () => {
     );
   });
 
-  it('serves repeated sentences from the cache, keyed by language, context and glossary', async () => {
+  it('serves repeated sentences from the cache, keyed by translator, language, context and glossary', async () => {
     const { bodies, client } = fakeServer();
     let entries = GLOSSARY;
     const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
     const translator = createSubtitleTranslator({
       client,
       settings: async () => Ok(defaultSettings),
+      subtitles: subtitlesWith('gemma'),
       glossary: async () => Ok(entries),
       cache,
     });
@@ -140,7 +162,7 @@ describe('caption translator', () => {
     expect(bodies).toHaveLength(1);
     expect(
       cache.get(
-        `en\u0000${contextHash(CONTEXT)}\u0000${contextHash(JSON.stringify(toPromptGlossary(GLOSSARY)))}\u0000Okay chat.`,
+        `gemma\u0000en\u0000${contextHash(CONTEXT)}\u0000${contextHash(JSON.stringify(toPromptGlossary(GLOSSARY)))}\u0000Okay chat.`,
       ),
     ).toBe('訳:Okay chat.');
     // The same sentence after other lines: the previous lines are not part of the key.
@@ -168,6 +190,7 @@ describe('caption translator', () => {
       const translator = createSubtitleTranslator({
         client,
         settings: async () => Err(failure('storage_failed')),
+        subtitles: async () => Err(failure('storage_failed')),
         glossary: async () => Err(failure('storage_failed')),
       });
       expect(
@@ -188,6 +211,7 @@ describe('caption translator', () => {
     const translator = createSubtitleTranslator({
       client,
       settings: async () => Ok(defaultSettings),
+      subtitles: subtitlesWith('gemma'),
       glossary: async () => Ok([]),
     });
     const result = await translator.translate(
@@ -212,11 +236,12 @@ describe('caption translator', () => {
       const { client } = fakeServer();
       const chat = vi.fn<LlamaClient['chat']>(async () => Err(failure(code)));
       const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
-      const keyHead = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000`;
+      const keyHead = `gemma\u0000en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000`;
       cache.set(`${keyHead}Known.`, '訳:Known.');
       const translator = createSubtitleTranslator({
         client: { ...client, chat },
         settings: async () => Ok(defaultSettings),
+        subtitles: subtitlesWith('gemma'),
         glossary: async () => Ok([]),
         cache,
       });
@@ -256,6 +281,7 @@ describe('caption translator', () => {
     const translator = createSubtitleTranslator({
       client,
       settings: async () => Ok(defaultSettings),
+      subtitles: subtitlesWith('gemma'),
       glossary,
     });
     await translator.translate(request(), page);
@@ -272,13 +298,30 @@ describe('caption translator', () => {
   });
 
   it.each([
-    { name: 'settings', settings: Err(failure('storage_failed')), glossary: Ok(GLOSSARY) },
-    { name: 'glossary', settings: Ok(defaultSettings), glossary: Err(failure('storage_failed')) },
+    {
+      name: 'settings',
+      settings: Err(failure('storage_failed')),
+      subtitles: Ok(defaultSubtitleSettings),
+      glossary: Ok(GLOSSARY),
+    },
+    {
+      name: 'subtitle settings',
+      settings: Ok(defaultSettings),
+      subtitles: Err(failure('storage_failed')),
+      glossary: Ok(GLOSSARY),
+    },
+    {
+      name: 'glossary',
+      settings: Ok(defaultSettings),
+      subtitles: Ok(defaultSubtitleSettings),
+      glossary: Err(failure('storage_failed')),
+    },
   ])('returns the error when the $name cannot be read, without a chat', async (row) => {
     const { bodies, client } = fakeServer();
     const translator = createSubtitleTranslator({
       client,
       settings: async () => row.settings,
+      subtitles: async () => row.subtitles,
       glossary: async () => row.glossary,
     });
     expect(await translator.translate(request(), PAGE)).toMatchObject({
@@ -286,5 +329,70 @@ describe('caption translator', () => {
       error: { internalCode: 'storage_failed' },
     });
     expect(bodies).toEqual([]);
+  });
+
+  it('keys the cache by the translator that produced the line', async () => {
+    const { bodies, client } = fakeServer();
+    const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+    let chosen: SubtitleTranslator = 'gemma';
+    const translator = createSubtitleTranslator({
+      client,
+      settings: async () => Ok(defaultSettings),
+      subtitles: async () => Ok({ ...defaultSubtitleSettings, translator: chosen }),
+      glossary: async () => Ok([]),
+      cache,
+    });
+    const byGemma = Ok({ lines: [translated('a', 'Okay chat.')] });
+    const byPlamo = Ok({ lines: [{ id: 'a', ja: '訳P:Okay chat.', state: 'done' }] });
+    const keyTail = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000Okay chat.`;
+
+    expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
+    chosen = 'plamo';
+    // Gemma's line is not served for PLaMo.
+    expect(await translator.translate(request(), PAGE)).toEqual(byPlamo);
+    expect(bodies.map((body) => body.model)).toEqual(['gemma4-e4b', 'plamo-3-translate-2b']);
+    expect(cache.get(`gemma\u0000${keyTail}`)).toBe('訳:Okay chat.');
+    expect(cache.get(`plamo\u0000${keyTail}`)).toBe('訳P:Okay chat.');
+    chosen = 'gemma';
+    expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
+    chosen = 'plamo';
+    expect(await translator.translate(request(), PAGE)).toEqual(byPlamo);
+    expect(bodies).toHaveLength(2);
+  });
+
+  it('keeps a line Gemma translated for PLaMo under the Gemma key and reports the fallback', async () => {
+    const { bodies, client, server } = fakeServer();
+    server.models = ['gemma4-e4b'];
+    const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+    let chosen: SubtitleTranslator = 'plamo';
+    const translator = createSubtitleTranslator({
+      client,
+      settings: async () => Ok(defaultSettings),
+      subtitles: async () => Ok({ ...defaultSubtitleSettings, translator: chosen }),
+      glossary: async () => Ok([]),
+      cache,
+    });
+    const keyTail = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000Okay chat.`;
+    // Before any request: the default translator.
+    expect(translator.status()).toEqual({ chosen: 'gemma' });
+
+    expect(await translator.translate(request(), PAGE)).toEqual(
+      Ok({ lines: [translated('a', 'Okay chat.')] }),
+    );
+    expect(translator.status()).toEqual({
+      chosen: 'plamo',
+      fallback: { reason: 'not_listed', lines: 1 },
+    });
+    expect(cache.get(`gemma\u0000${keyTail}`)).toBe('訳:Okay chat.');
+    expect(cache.get(`plamo\u0000${keyTail}`)).toBeUndefined();
+    // Looked up with the chosen translator's key: translated again.
+    await translator.translate(request(), PAGE);
+    expect(bodies).toHaveLength(2);
+    chosen = 'gemma';
+    expect(await translator.translate(request(), PAGE)).toEqual(
+      Ok({ lines: [translated('a', 'Okay chat.')] }),
+    );
+    expect(bodies).toHaveLength(2);
+    expect(translator.status()).toEqual({ chosen: 'gemma' });
   });
 });

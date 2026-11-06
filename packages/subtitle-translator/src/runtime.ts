@@ -15,6 +15,7 @@ import {
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
 import { tabPagesStore, type PageInfo } from './page-context.ts';
+import { subtitleSettingsStore, type SubtitleSettingsStore } from './settings.ts';
 import {
   subtitleProtocol,
   type SubtitleMessageType,
@@ -109,10 +110,12 @@ const CAPTION_TIMEOUT_MS = 15_000;
  */
 function captionTranslation({
   settings,
+  subtitles,
   glossary,
   fetch,
 }: {
   settings: SettingsStore;
+  subtitles: SubtitleSettingsStore;
   glossary: GlossaryStore;
   fetch: Fetch;
 }): {
@@ -141,6 +144,7 @@ function captionTranslation({
         translator: createSubtitleTranslator({
           client,
           settings: settings.load,
+          subtitles: subtitles.load,
           glossary: glossary.load,
           cache,
         }),
@@ -162,6 +166,7 @@ export function startBackground(): () => void {
   const pages = tabPagesStore(browser.storage.session);
   const captions = captionTranslation({
     settings: settingsStore(browser.storage.local),
+    subtitles: subtitleSettingsStore(browser.storage.local),
     glossary: glossaryStore(browser.storage.local),
     fetch: fetcher,
   });
