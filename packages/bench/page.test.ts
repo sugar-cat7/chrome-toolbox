@@ -32,6 +32,7 @@ type Sent = {
   id_slot?: number;
   max_tokens?: number;
   temperature?: number;
+  cache_prompt?: boolean;
 };
 
 /**
@@ -44,13 +45,19 @@ function fakeServer(
     advance?: (index: number) => number;
     totalSlots?: number;
     status?: (body: Sent) => number;
+    propsStatus?: number;
+    finishReason?: (body: Sent) => string;
   } = {},
 ) {
   const sent: Sent[] = [];
   let t = 0;
   const fetch = async (url: string, init?: RequestInit): Promise<Response> => {
     if (url.endsWith('/health')) return Response.json({ status: 'ok' });
-    if (url.includes('/props')) return Response.json({ total_slots: options.totalSlots ?? 3 });
+    if (url.includes('/props')) {
+      if (options.propsStatus !== undefined)
+        return new Response('', { status: options.propsStatus });
+      return Response.json({ total_slots: options.totalSlots ?? 3 });
+    }
     const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Sent;
     const index = sent.length;
     sent.push(body);
@@ -58,7 +65,12 @@ function fakeServer(
     const status = options.status?.(body) ?? 200;
     if (status !== 200) return new Response('', { status });
     return Response.json({
-      choices: [{ message: { content: options.reply?.(body) ?? '' }, finish_reason: 'stop' }],
+      choices: [
+        {
+          message: { content: options.reply?.(body) ?? '' },
+          finish_reason: options.finishReason?.(body) ?? 'stop',
+        },
+      ],
     });
   };
   const client = createLlamaClient({
@@ -175,7 +187,7 @@ describe('runPageBench', () => {
       rounds: 1,
       now: server.now,
     });
-    const main = server.sent.slice(0, packBatches(units).length);
+    const main = server.sent.slice(1, 1 + packBatches(units).length);
     for (const body of main) {
       expect(body.model).toBe('gemma-x');
       expect(body.messages[0]?.role).toBe('system');
@@ -261,7 +273,8 @@ describe('runPageBench', () => {
     const delays = [100, 300, 200];
     const server = fakeServer({
       reply: echoBatch,
-      advance: (index) => (index < main ? 1 : (delays[Math.floor((index - main) / batches)] ?? 0)),
+      advance: (index) =>
+        index < main + 1 ? 1 : (delays[Math.floor((index - main - 1) / batches)] ?? 0),
     });
     const report = await runPageBench({
       gemma: server.client,
@@ -273,7 +286,7 @@ describe('runPageBench', () => {
     expect(FIRST_SCREEN_UNITS).toBe(12);
     expect(report.firstScreen.gemmaMs).toEqual(delays.map((delay) => delay * batches));
     expect(report.firstScreen.gemmaP50Ms).toBe(200 * batches);
-    expect(server.sent).toHaveLength(main + 3 * batches);
+    expect(server.sent).toHaveLength(1 + main + 3 * batches);
     expect(report.firstScreen.plamoMs).toBeUndefined();
   });
 
@@ -334,5 +347,119 @@ describe('runPageBench', () => {
     expect(report.rows.find((row) => row.model === 'gemma' && row.id === 'ok')?.pieces).toEqual([
       'Boss guide',
     ]);
+  });
+
+  it('never uses slot 0: two slots leave PLaMo slot 1 only, one slot or no /props is an error', async () => {
+    const two = fakeServer({ reply: echoLine, totalSlots: 2 });
+    await runPageBench({
+      gemma: two.client,
+      plamo: two.client,
+      gemmaModel: 'gemma-x',
+      units: units.slice(0, 3),
+      rounds: 1,
+    });
+    expect(two.sent.length).toBeGreaterThan(0);
+    expect(two.sent.every((body) => body.id_slot === 1)).toBe(true);
+
+    const one = fakeServer({ reply: echoLine, totalSlots: 1 });
+    await expect(
+      runPageBench({ gemma: one.client, gemmaModel: 'gemma-x', units, rounds: 1 }),
+    ).rejects.toThrow(/gemma-x has 1 slot/u);
+    expect(one.sent).toEqual([]);
+
+    const broken = fakeServer({ propsStatus: 500 });
+    await expect(
+      runPageBench({ gemma: broken.client, gemmaModel: 'gemma-x', units, rounds: 1 }),
+    ).rejects.toThrow(/cannot read the slot count of gemma-x/u);
+    expect(broken.sent).toEqual([]);
+  });
+
+  it('warms each model up with one untimed label request and records the time apart from the rows', async () => {
+    const server = fakeServer({
+      reply: (body) => (isGemma(body) ? echoBatch(body) : echoLine(body)),
+      advance: () => 7,
+    });
+    const report = await runPageBench({
+      gemma: server.client,
+      plamo: server.client,
+      gemmaModel: 'gemma-x',
+      units,
+      rounds: 1,
+      now: server.now,
+    });
+    const label = units.find((unit) => unit.kind === 'label');
+    expect(server.sent[0]?.model).toBe('gemma-x');
+    expect(server.sent[0]?.messages.at(-1)?.content).toContain(
+      pageUnitSource(label?.tokens ?? []).text,
+    );
+    expect(report.warmupMs).toEqual({ gemma: 7, plamo: 7 });
+    expect(report.rows).toHaveLength(80);
+  });
+
+  it('turns the prompt cache off for the first-screen rounds only', async () => {
+    const server = fakeServer({
+      reply: (body) => (isGemma(body) ? echoBatch(body) : echoLine(body)),
+    });
+    await runPageBench({
+      gemma: server.client,
+      plamo: server.client,
+      gemmaModel: 'gemma-x',
+      units,
+      rounds: 2,
+    });
+    const main = 1 + packBatches(units).length;
+    const batches = packBatches(units.slice(0, FIRST_SCREEN_UNITS)).length;
+    const gemmaCalls = server.sent.filter((body) => isGemma(body));
+    expect(gemmaCalls.slice(0, main).every((body) => body.cache_prompt === true)).toBe(true);
+    expect(gemmaCalls.slice(main)).toHaveLength(2 * batches);
+    expect(gemmaCalls.slice(main).every((body) => body.cache_prompt === false)).toBe(true);
+    const plamoCalls = server.sent.filter((body) => !isGemma(body));
+    expect(
+      plamoCalls.slice(-2 * FIRST_SCREEN_UNITS).every((body) => body.cache_prompt === false),
+    ).toBe(true);
+    expect(plamoCalls.slice(0, 41).every((body) => body.cache_prompt === true)).toBe(true);
+  });
+
+  it('counts the failures of each first-screen round, and keeps cut and unreadable apart', async () => {
+    let gemmaCalls = 0;
+    const main = packBatches(units).length + 1;
+    const server = fakeServer({
+      reply: (body) => (gemmaCalls++ < main ? echoBatch(body) : ''),
+      finishReason: () => 'stop',
+    });
+    const report = await runPageBench({
+      gemma: server.client,
+      gemmaModel: 'gemma-x',
+      units,
+      rounds: 2,
+    });
+    expect(report.firstScreen.gemmaFailed).toEqual([FIRST_SCREEN_UNITS, FIRST_SCREEN_UNITS]);
+
+    const cut = fakeServer({ reply: () => '1\tこ', finishReason: () => 'length' });
+    const cutReport = await runPageBench({
+      gemma: cut.client,
+      gemmaModel: 'gemma-x',
+      units: units.slice(0, 2),
+      rounds: 1,
+    });
+    expect(cutReport.gemma.failures.truncated).toBeGreaterThan(0);
+    expect(cutReport.gemma.failures).not.toHaveProperty('response_invalid', 2);
+  });
+
+  it('puts the source text in each row', async () => {
+    const server = fakeServer({
+      reply: (body) => (isGemma(body) ? echoBatch(body) : echoLine(body)),
+    });
+    const report = await runPageBench({
+      gemma: server.client,
+      plamo: server.client,
+      gemmaModel: 'gemma-x',
+      units: units.slice(0, 3),
+      rounds: 1,
+    });
+    for (const row of report.rows)
+      expect(row.source).toBe(
+        pageUnitSource(units.find((u) => u.id === row.id)?.tokens ?? []).text,
+      );
   });
 });

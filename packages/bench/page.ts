@@ -37,6 +37,8 @@ export type PageRow = {
   id: string;
   lang: string;
   kind: PageUnitSample['kind'];
+  /** The text sent for the unit (`pageUnitSource`), so a comparison needs no fixture join. */
+  source: string;
   /** Wall time of the request that produced the row; a Gemma row waits for its whole batch. */
   ms: number;
   /** The translated text nodes, in order (what the extension writes back). */
@@ -62,7 +64,10 @@ export type FirstScreen = {
   /** One entry per round: the time to translate the first screen, in document order. */
   gemmaMs: number[];
   gemmaP50Ms: number | undefined;
+  /** Units that failed in each round; a round with failures times a partial translation. */
+  gemmaFailed: number[];
   plamoMs?: number[];
+  plamoFailed?: number[];
   plamoP50Ms?: number | undefined;
 };
 export type PageReport = {
@@ -71,7 +76,9 @@ export type PageReport = {
   plamo?: PageModelStats;
   firstScreen: FirstScreen;
   /** The `id_slot` of Gemma batches and of PLaMo's workers; undefined sends none. */
-  slots: { gemma: number | undefined; plamo: (number | undefined)[] };
+  slots: { gemma: number; plamo: number[] };
+  /** The untimed request that loads each model before its main pass. */
+  warmupMs: { gemma: number; plamo?: number };
 };
 
 /** The extension's batch: at most 6 units and 800 characters of source text. */
@@ -145,7 +152,14 @@ const rowOf = (
   outcome: { pieces: string[]; timing?: ChatTiming | undefined } | { error: string },
   batchSize?: number,
 ): PageRow => {
-  const row: PageRow = { model, id: unit.id, lang: unit.lang, kind: unit.kind, ms };
+  const row: PageRow = {
+    model,
+    id: unit.id,
+    lang: unit.lang,
+    kind: unit.kind,
+    source: pageUnitSource(unit.tokens).text,
+    ms,
+  };
   if (batchSize !== undefined) row.batchSize = batchSize;
   if ('error' in outcome) row.error = outcome.error;
   else {
@@ -158,9 +172,10 @@ const rowOf = (
 async function gemmaPass(
   client: LlamaClient,
   model: string,
-  slot: number | undefined,
+  slot: number,
   units: readonly PageUnitSample[],
   now: () => number,
+  cachePrompt = true,
 ): Promise<Pass> {
   const rows: PageRow[] = [];
   const valid = units.filter((unit) => pageTokensValid(unit.tokens));
@@ -178,6 +193,7 @@ async function gemmaPass(
       maxTokens,
       temperature: GENERATION.temperature,
       templateKwargs: GENERATION.templateKwargs,
+      cachePrompt,
       ...(slot === undefined ? {} : { slot }),
     });
     const ms = now() - started;
@@ -186,9 +202,8 @@ async function gemmaPass(
         rows.push(rowOf('gemma', unit, ms, { error: result.error.internalCode }, batch.length));
       continue;
     }
-    const read = parsePageBatch(result.value.text, tokens, {
-      cut: cutByMaxTokens(result.value, maxTokens),
-    });
+    const cut = cutByMaxTokens(result.value, maxTokens);
+    const read = parsePageBatch(result.value.text, tokens, { cut });
     for (const [i, unit] of batch.entries()) {
       const pieces = read[i];
       rows.push(
@@ -197,7 +212,7 @@ async function gemmaPass(
           unit,
           ms,
           pieces === undefined
-            ? { error: 'response_invalid' }
+            ? { error: cut ? 'truncated' : 'response_invalid' }
             : { pieces, timing: result.value.timing },
           batch.length,
         ),
@@ -210,15 +225,16 @@ async function gemmaPass(
 async function plamoPass(
   client: LlamaClient,
   model: string,
-  slots: readonly (number | undefined)[],
+  slots: readonly number[],
   units: readonly PageUnitSample[],
   now: () => number,
+  cachePrompt = true,
 ): Promise<Pass> {
   const sources = units.map((unit) => pageUnitSource(unit.tokens).text);
   const rows: (PageRow | undefined)[] = units.map(() => undefined);
   let next = 0;
   // One worker per slot, each taking the next unit in document order.
-  const worker = async (slot: number | undefined): Promise<void> => {
+  const worker = async (slot: number): Promise<void> => {
     for (let i = next++; i < units.length; i = next++) {
       const unit = units[i];
       if (unit === undefined) continue;
@@ -242,6 +258,7 @@ async function plamoPass(
       const started = now();
       const result = await client.chat({
         ...request.value,
+        cachePrompt,
         ...(model === PLAMO_TRANSLATE_MODEL ? {} : { model }),
       });
       const ms = now() - started;
@@ -256,7 +273,7 @@ async function plamoPass(
         unit,
         ms,
         pieces === undefined
-          ? { error: 'response_invalid' }
+          ? { error: translation.ok ? 'response_invalid' : translation.error.internalCode }
           : { pieces, timing: result.value.timing },
       );
     }
@@ -288,14 +305,18 @@ function stats(rows: readonly PageRow[]): PageModelStats {
   };
 }
 
+/** Slot 0 is the subtitle's: Gemma takes the last slot, PLaMo slots 1 and 2 (at most). */
 async function slotsOf(
   client: LlamaClient,
   model: string,
-): Promise<{ gemma: number | undefined; plamo: (number | undefined)[] }> {
+): Promise<{ gemma: number; plamo: number[] }> {
   const props = await client.props({ model });
-  if (!props.ok) return { gemma: undefined, plamo: [undefined, undefined] };
+  if (!props.ok) throw new Error(`cannot read the slot count of ${model}`);
   const total = props.value.totalSlots;
-  if (total < 2) return { gemma: 0, plamo: [0] };
+  if (total < 2)
+    throw new Error(
+      `${model} has ${total} slot; the bench needs --parallel 2 or more (never slot 0)`,
+    );
   return {
     gemma: total - 1,
     plamo: Array.from({ length: Math.min(PLAMO_PARALLEL, total - 1) }, (_, i) => i + 1),
@@ -325,26 +346,52 @@ export async function runPageBench(options: {
   const slots = { gemma: gemmaSlots.gemma, plamo: plamoSlots.plamo };
   const first = units.slice(0, FIRST_SCREEN_UNITS);
 
-  // One model after the other: concurrent models would pollute each other's latency.
+  // One model after the other: concurrent models would pollute each other's latency. An untimed
+  // label request first loads the model, so the router's load time is not in the first row.
+  const warm = units.find((unit) => unit.kind === 'label') ?? units.slice(0, 1);
+  const warmUnits = Array.isArray(warm) ? warm : [warm];
+  const timed = async (pass: () => Promise<Pass>): Promise<{ ms: number; pass: Pass }> => {
+    const started = now();
+    const done = await pass();
+    return { ms: now() - started, pass: done };
+  };
+  const gemmaWarm = await timed(() => gemmaPass(gemma, gemmaModel, slots.gemma, warmUnits, now));
   const rows = (await gemmaPass(gemma, gemmaModel, slots.gemma, units, now)).rows;
+  const plamoWarm =
+    plamo === undefined
+      ? undefined
+      : await timed(() => plamoPass(plamo, plamoModel, slots.plamo, warmUnits, now));
   const plamoRows =
     plamo === undefined ? [] : (await plamoPass(plamo, plamoModel, slots.plamo, units, now)).rows;
 
-  const timeRounds = async (pass: () => Promise<Pass>): Promise<number[]> => {
+  // Rounds send no prompt cache, so the first screen is the cold upper bound for both models.
+  const timeRounds = async (
+    pass: () => Promise<Pass>,
+  ): Promise<{ times: number[]; failed: number[] }> => {
     const times: number[] = [];
+    const failed: number[] = [];
     for (let round = 0; round < rounds; round += 1) {
-      const started = now();
-      await pass();
-      times.push(now() - started);
+      const result = await timed(pass);
+      times.push(result.ms);
+      failed.push(result.pass.rows.filter((row) => row.error !== undefined).length);
     }
-    return times;
+    return { times, failed };
   };
-  const gemmaMs = await timeRounds(() => gemmaPass(gemma, gemmaModel, slots.gemma, first, now));
-  const firstScreen: FirstScreen = { gemmaMs, gemmaP50Ms: percentile(gemmaMs, 50) };
+  const gemmaRounds = await timeRounds(() =>
+    gemmaPass(gemma, gemmaModel, slots.gemma, first, now, false),
+  );
+  const firstScreen: FirstScreen = {
+    gemmaMs: gemmaRounds.times,
+    gemmaP50Ms: percentile(gemmaRounds.times, 50),
+    gemmaFailed: gemmaRounds.failed,
+  };
   if (plamo !== undefined) {
-    const plamoMs = await timeRounds(() => plamoPass(plamo, plamoModel, slots.plamo, first, now));
-    firstScreen.plamoMs = plamoMs;
-    firstScreen.plamoP50Ms = percentile(plamoMs, 50);
+    const plamoRounds = await timeRounds(() =>
+      plamoPass(plamo, plamoModel, slots.plamo, first, now, false),
+    );
+    firstScreen.plamoMs = plamoRounds.times;
+    firstScreen.plamoP50Ms = percentile(plamoRounds.times, 50);
+    firstScreen.plamoFailed = plamoRounds.failed;
   }
   return {
     rows: [...rows, ...plamoRows],
@@ -352,6 +399,7 @@ export async function runPageBench(options: {
     ...(plamo === undefined ? {} : { plamo: stats(plamoRows) }),
     firstScreen,
     slots,
+    warmupMs: { gemma: gemmaWarm.ms, ...(plamoWarm === undefined ? {} : { plamo: plamoWarm.ms }) },
   };
 }
 
@@ -362,15 +410,31 @@ function summary(report: PageReport): string {
     Object.entries(table)
       .map(([code, n]) => `${code}=${n}`)
       .join(', ') || 'none';
-  const line = (label: string, s: PageModelStats, screen: number | undefined): string =>
-    `| ${label} | ${s.attempts} | ${s.successes} | ${fixed(s.p50Ms)} | ${fixed(s.p95Ms)} | ${s.richKept}/${s.richAttempts} | ${fixed(screen)} | ${codes(s.failures)} |`;
+  const screen = (p50: number | undefined, failed: readonly number[] | undefined): string =>
+    `${fixed(p50)}${failed?.some((n) => n > 0) ? ` (FAILURES in rounds: ${failed.join('/')})` : ''}`;
+  const line = (label: string, s: PageModelStats, first: string): string =>
+    `| ${label} | ${s.attempts} | ${s.successes} | ${fixed(s.p50Ms)} | ${fixed(s.p95Ms)} | ${s.richKept}/${s.richAttempts} | ${first} | ${codes(s.failures)} |`;
   return [
-    '| model | units | ok | p50 ms | p95 ms | rich kept | first screen p50 ms | failures |',
+    '| model | units | ok | p50 ms per unit | p95 ms per unit | rich kept | first screen p50 ms (cold) | failures |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
-    line('gemma', report.gemma, report.firstScreen.gemmaP50Ms),
+    line(
+      'gemma (batch time)',
+      report.gemma,
+      screen(report.firstScreen.gemmaP50Ms, report.firstScreen.gemmaFailed),
+    ),
     ...(report.plamo === undefined
       ? []
-      : [line('plamo', report.plamo, report.firstScreen.plamoP50Ms)]),
+      : [
+          line(
+            'plamo (request time)',
+            report.plamo,
+            screen(report.firstScreen.plamoP50Ms, report.firstScreen.plamoFailed),
+          ),
+        ]),
+    '',
+    'Gemma ms per unit is the time of the batch the unit was in; PLaMo ms is its own request.',
+    'The first screen is sent without the prompt cache: a cold upper bound.',
+    `warm-up ms (untimed): gemma=${fixed(report.warmupMs.gemma)}${report.warmupMs.plamo === undefined ? '' : `, plamo=${fixed(report.warmupMs.plamo)}`}`,
   ].join('\n');
 }
 
@@ -428,6 +492,8 @@ async function main(): Promise<void> {
       firstScreenUnits: FIRST_SCREEN_UNITS,
       plamoMaxTokens: PAGE_PLAMO_MAX_TOKENS,
       slots: report.slots,
+      warmupMs: report.warmupMs,
+      firstScreenCache: 'off',
       firstScreen: report.firstScreen,
       stats: { gemma: report.gemma, plamo: report.plamo ?? null },
     },
