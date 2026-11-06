@@ -299,4 +299,63 @@ describe('llama.cpp client', () => {
     expect(calls).toEqual([{ path: '/props', search: '?model=gemma4-e4b' }]);
     expect(result.ok ? result.value : result.error.internalCode).toEqual({ totalSlots: 2 });
   });
+
+  it('sends stop strings only when the request has them', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (_u, init) => {
+        sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        return json({ choices: [{ message: { content: 'x' } }] });
+      },
+    });
+    await client.chat({ messages: [], stop: ['<|plamo:tag|>', '<|plamo:bos|>'] });
+    await client.chat({ messages: [] });
+    expect(sent[0]?.stop).toEqual(['<|plamo:tag|>', '<|plamo:bos|>']);
+    expect(sent[1]).not.toHaveProperty('stop');
+  });
+
+  it.each([
+    {
+      status: 400,
+      message: "model 'plamo-3-translate-2b' not found",
+      tellRefusal: true,
+      expected: 'model_refused',
+    },
+    { status: 400, message: 'Invalid slot ID', tellRefusal: true, expected: 'model_refused' },
+    { status: 404, message: 'File Not Found', tellRefusal: true, expected: 'model_refused' },
+    { status: 503, message: 'Loading model', tellRefusal: true, expected: 'model_refused' },
+    { status: 503, message: 'Loading model', tellRefusal: false, expected: 'network_failed' },
+    { status: 404, message: 'File Not Found', tellRefusal: false, expected: 'network_failed' },
+  ])('HTTP $status "$message" with tellRefusal $tellRefusal is $expected', async (row) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json({ error: { code: row.status, message: row.message } }, row.status),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: row.tellRefusal }))).toBe(
+      row.expected,
+    );
+  });
+
+  it('keeps an unreachable server as network_failed even with tellRefusal', async () => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => Promise.reject(new TypeError('fetch failed')),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: true }))).toBe('network_failed');
+  });
+
+  it('returns operation_cancelled before reading the status of a refused reply', async () => {
+    const controller = new AbortController();
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => {
+        controller.abort();
+        return json({ error: { code: 503 } }, 503);
+      },
+    });
+    expect(
+      code(await client.chat({ messages: [], tellRefusal: true, signal: controller.signal })),
+    ).toBe('operation_cancelled');
+  });
 });

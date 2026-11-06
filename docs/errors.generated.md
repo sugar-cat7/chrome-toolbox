@@ -33,3 +33,4 @@ Internal to public projection:
 - `queue_full` → `unavailable`
 - `host_permission_denied` → `permission_denied`
 - `sender_forbidden` → `sender_forbidden`
+- `model_refused` → `unavailable`

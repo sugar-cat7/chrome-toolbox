@@ -27,6 +27,13 @@ export type ChatRequest = Readonly<{
   grammar?: string;
   /** Extra chat-template variables (`chat_template_kwargs`), e.g. `{ enable_thinking: false }`. */
   templateKwargs?: Record<string, unknown>;
+  /** Strings that end the reply (`stop`); the key is left out when absent. */
+  stop?: readonly string[];
+  /**
+   * Report an HTTP 4xx/5xx answer as `model_refused` instead of `network_failed`, so a caller
+   * can tell a server that answered "no" from one it cannot reach.
+   */
+  tellRefusal?: boolean;
   signal?: AbortSignal;
 }>;
 export type ChatTiming = Readonly<{
@@ -131,6 +138,7 @@ export function createLlamaClient({
     path: string,
     init: RequestInit,
     signal?: AbortSignal,
+    tellRefusal = false,
   ): Promise<Result<T>> {
     const origin = parseBaseUrl(baseUrl);
     if (!origin.ok) return origin;
@@ -145,7 +153,7 @@ export function createLlamaClient({
     );
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!response.ok) return response;
-    if (!response.value.ok) return Err(failure('network_failed'));
+    if (!response.value.ok) return Err(failure(tellRefusal ? 'model_refused' : 'network_failed'));
     const body = await capture((): Promise<unknown> => response.value.json(), 'response_invalid');
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!body.ok) return body;
@@ -191,6 +199,7 @@ export function createLlamaClient({
             ...(input.templateKwargs === undefined
               ? {}
               : { chat_template_kwargs: input.templateKwargs }),
+            ...(input.stop === undefined ? {} : { stop: input.stop }),
             ...(input.grammar === undefined ? {} : { grammar: input.grammar }),
             ...(input.jsonSchema === undefined
               ? {}
@@ -203,6 +212,7 @@ export function createLlamaClient({
           }),
         },
         signal,
+        input.tellRefusal,
       );
       if (!result.ok) return result;
       const timings = decode(timingsSchema, result.value.timings);

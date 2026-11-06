@@ -8,6 +8,8 @@ import {
   COMMENT_CATEGORY_CODES,
   commentBatchPrompt,
   genrePrompt,
+  PLAMO_STOP,
+  PLAMO_TRANSLATE_MODEL,
   summaryPrompt,
   type ChatMessage,
   type CommentCategory,
@@ -21,6 +23,10 @@ export type StubChat = Readonly<{
   grammar?: string;
   max_tokens?: number;
   id_slot?: number;
+  temperature?: number;
+  stop?: readonly string[];
+  chat_template_kwargs?: Record<string, unknown>;
+  response_format?: unknown;
 }>;
 export type StubRequest = Readonly<{
   method: string;
@@ -156,6 +162,52 @@ export const chatCompletion = (content: string): StubReply => ({
   },
 });
 const NOT_FOUND: StubReply = { status: 404, body: { error: { code: 404 } } };
+
+/** The translation prefix of a PLaMo reply from `withPlamo`: made up, not a PLaMo output. */
+export const STUB_PLAMO_PREFIX = '訳P:';
+const PLAMO_REFUSED: StubReply = {
+  status: 400,
+  body: { error: { code: 400, type: 'invalid_request_error' } },
+};
+const sameStrings = (a: readonly string[] | undefined, b: readonly string[]): boolean =>
+  a !== undefined && a.length === b.length && a.every((item, i) => item === b[i]);
+
+/** Whether a PLaMo chat has the form PLaMo's chat template accepts (see `plamoTranslateRequest`). */
+function plamoForm(chat: StubChat): boolean {
+  const [only, ...rest] = chat.messages;
+  return (
+    only?.role === 'user' &&
+    rest.length === 0 &&
+    only.content.trim() !== '' &&
+    !only.content.includes('<|plamo:') &&
+    chat.chat_template_kwargs?.target_lang === 'ja' &&
+    sameStrings(chat.stop, PLAMO_STOP) &&
+    chat.grammar === undefined &&
+    chat.response_format === undefined
+  );
+}
+
+/**
+ * Makes `responder` a router that also serves PLaMo 3 Translate 2B: the model is listed, and a
+ * chat to it in the form PLaMo takes is answered `訳P:` + the line, anything else with HTTP 400
+ * as the template does. Every other request goes to `responder`.
+ */
+export function withPlamo(responder: Responder): Responder {
+  return async (request) => {
+    const key = `${request.method} ${request.path}`;
+    if (key === 'POST /v1/chat/completions' && request.chat?.model === PLAMO_TRANSLATE_MODEL)
+      return plamoForm(request.chat)
+        ? chatCompletion(`${STUB_PLAMO_PREFIX}${request.chat.messages[0]?.content ?? ''}`)
+        : PLAMO_REFUSED;
+    const reply = await responder(request);
+    if (key !== 'GET /v1/models' || !isRecord(reply.body) || !Array.isArray(reply.body.data))
+      return reply;
+    return {
+      ...reply,
+      body: { ...reply.body, data: [...reply.body.data, { id: PLAMO_TRANSLATE_MODEL }] },
+    };
+  };
+}
 
 /**
  * llama.cpp as the extensions use it: a healthy server with one model and 2 slots, a comment

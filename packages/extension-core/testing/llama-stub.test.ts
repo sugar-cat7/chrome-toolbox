@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import type { Result } from '@chrome-toolbox/contracts';
 import {
   commentBatchPrompt,
   createClefJudge,
@@ -8,15 +9,21 @@ import {
   parseCommentBatch,
   parseGenre,
   parseSummary,
+  PLAMO_TRANSLATE_MODEL,
+  plamoTranslateRequest,
   summaryPrompt,
   type LlamaClient,
   type SummaryInput,
 } from '../src/index.ts';
 import {
+  commentBatchReply,
+  defaultResponder,
   startLlamaStub,
   STUB_ABUSIVE,
   STUB_BENIGN,
   STUB_GENRE,
+  STUB_PLAMO_PREFIX,
+  withPlamo,
   type LlamaStub,
 } from './llama-stub.ts';
 
@@ -139,5 +146,64 @@ describe('llama.cpp stub', () => {
     stub.respond = () => ({ status: 503, body: { error: { code: 503 } } });
     const loading = await client.health();
     expect(loading.ok ? undefined : loading.error.internalCode).toBe('network_failed');
+  });
+
+  const plamoLine = { line: 'Okay chat', sourceLang: 'en', previous: [], glossary: [], slot: 0 };
+  const plamoRequest = () => {
+    const request = plamoTranslateRequest(plamoLine);
+    if (!request.ok) throw new Error('the request must build');
+    return request.value;
+  };
+  const codeOf = (result: Result<unknown>): string =>
+    result.ok ? 'ok' : result.error.internalCode;
+
+  test('withPlamo lists the model and answers the request plamoTranslateRequest builds', async () => {
+    stub.respond = withPlamo(defaultResponder);
+    expect(await client.models()).toEqual({
+      ok: true,
+      value: ['stub-model', PLAMO_TRANSLATE_MODEL],
+    });
+    const reply = await client.chat(plamoRequest());
+    expect(reply.ok && reply.value.text).toBe(`${STUB_PLAMO_PREFIX}Okay chat`);
+    expect(STUB_PLAMO_PREFIX).toBe('訳P:');
+  });
+
+  test.each([
+    { name: 'system メッセージ', change: 'system' },
+    { name: 'grammar', change: 'grammar' },
+    { name: 'stop がない', change: 'no-stop' },
+    { name: 'response_format', change: 'response-format' },
+  ])('withPlamo refuses a PLaMo chat with $name with 400', async ({ change }) => {
+    stub.respond = withPlamo(defaultResponder);
+    const request = plamoRequest();
+    const changed = {
+      system: {
+        ...request,
+        messages: [{ role: 'system' as const, content: 'x' }, ...request.messages],
+      },
+      grammar: { ...request, grammar: 'root ::= "a"' },
+      'no-stop': { ...request, stop: [] },
+      'response-format': { ...request, jsonSchema: {} },
+    }[change];
+    expect(codeOf(await client.chat(changed ?? request))).toBe('model_refused');
+  });
+
+  test('withPlamo leaves Gemma chats to the wrapped responder', async () => {
+    const comments = [{ text: 'which level is this?', lang: 'und-Latn', translate: true }];
+    const prompt = commentBatchPrompt({ comments, context: 'Title: a made-up stream' });
+    const plain = await client.chat({ ...prompt, model: 'gemma', slot: 1 });
+    stub.respond = withPlamo(defaultResponder);
+    const wrapped = await client.chat({ ...prompt, model: 'gemma', slot: 1 });
+    expect(wrapped).toEqual(plain);
+    expect(wrapped.ok && wrapped.value.text).toBe(
+      commentBatchReply(
+        '{"id":1,"lang":"und-Latn","translate":true,"text":"which level is this?"}',
+      ),
+    );
+  });
+
+  test('the default stub lists no PLaMo and answers a PLaMo chat with 404', async () => {
+    expect(await client.models()).toEqual({ ok: true, value: ['stub-model'] });
+    expect(codeOf(await client.chat(plamoRequest()))).toBe('model_refused');
   });
 });

@@ -82,6 +82,7 @@ export const INTERNAL_ERRORS = {
   queue_full: 'unavailable',
   host_permission_denied: 'permission_denied',
   sender_forbidden: 'sender_forbidden',
+  model_refused: 'unavailable',
 } as const;
 export type PublicErrorCode = keyof typeof PUBLIC_ERRORS;
 export type InternalErrorCode = keyof typeof INTERNAL_ERRORS;

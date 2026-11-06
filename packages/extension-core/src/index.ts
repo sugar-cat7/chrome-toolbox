@@ -56,6 +56,19 @@ export {
   type SummaryText,
 } from './prompts.ts';
 export {
+  parsePlamoLine,
+  PLAMO_LANGUAGES,
+  PLAMO_LICENSE_URL,
+  PLAMO_LIMITS,
+  PLAMO_STOP,
+  PLAMO_TRANSLATE_MODEL,
+  plamoLanguage,
+  plamoMaxTokens,
+  plamoTranslateRequest,
+  type PlamoInput,
+  type PlamoLanguage,
+} from './plamo.ts';
+export {
   commentCategorySchema,
   genreEvalLineSchema,
   isStreamCategory,

@@ -78,7 +78,7 @@ function codePoints(text: string): number {
  * even from Korean or Chinese) plus 16, so one runaway translation cannot use up the batch.
  * llama.cpp turns `x{0,n}` into n rules and treats n above 2000 as unbounded, hence the cap.
  */
-const translationLimit = (text: string): number => Math.min(2 * codePoints(text) + 16, 2000);
+export const translationLimit = (text: string): number => Math.min(2 * codePoints(text) + 16, 2000);
 
 /**
  * One line per comment, `<n>\t<code>[\t<ja>]\n`: the number is fixed, and the translation
