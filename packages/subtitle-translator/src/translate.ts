@@ -47,11 +47,21 @@ async function translateLine(
   return reply.ok ? parseSubtitleLine(reply.value, maxTokens, input.source) : reply;
 }
 
+/**
+ * Failures after which the rest of a batch gets no chat: a server that cannot be reached (or did
+ * not answer within the timeout) would only make each sentence wait as long again, and a cancelled
+ * request means the batch is no longer wanted. The rest fail (or come from the cache), and the
+ * page retries them once.
+ */
+const BATCH_STOPPERS: readonly string[] = ['network_failed', 'operation_cancelled'];
+
 export type CaptionTranslator = {
   /**
    * Translates the sentences one after another. `page` is what the sender's tab reported; it
    * gives the stream context and the streamer's glossary only when it names the request's video.
-   * A sentence that fails is `failed`; reading the settings or the glossary fails the request.
+   * A sentence that fails is `failed`, and after an unreachable server or a cancellation so are the
+   * ones after it that are not in the cache; reading the settings or the glossary fails the
+   * request.
    */
   translate(
     this: void,
@@ -93,23 +103,29 @@ export function createSubtitleTranslator({
       const keyHead = `${sourceLang}\u0000${contextHash(context)}\u0000${contextHash(JSON.stringify(terms))}\u0000`;
       const previous = [...request.previous];
       const lines: TranslateResponse['lines'] = [];
+      /** Set once the server could not be reached or the request was cancelled. */
+      let unreachable = false;
       for (const { id, source } of sentences) {
         const key = `${keyHead}${source}`;
         const cached = cache.get(key);
-        const ja =
-          cached === undefined
-            ? await translateLine(client, loaded.value.models.translate, {
-                source,
-                sourceLang,
-                previous: previous.slice(-TRANSLATE_LIMITS.previous),
-                context,
-                glossary: terms,
-              })
-            : Ok(cached);
-        if (ja.ok) {
-          cache.set(key, ja.value);
-          lines.push({ id, ja: ja.value, state: 'done' });
-        } else lines.push({ id, state: 'failed' });
+        if (cached !== undefined) lines.push({ id, ja: cached, state: 'done' });
+        else if (unreachable) lines.push({ id, state: 'failed' });
+        else {
+          const ja = await translateLine(client, loaded.value.models.translate, {
+            source,
+            sourceLang,
+            previous: previous.slice(-TRANSLATE_LIMITS.previous),
+            context,
+            glossary: terms,
+          });
+          if (ja.ok) {
+            cache.set(key, ja.value);
+            lines.push({ id, ja: ja.value, state: 'done' });
+          } else {
+            unreachable = BATCH_STOPPERS.includes(ja.error.internalCode);
+            lines.push({ id, state: 'failed' });
+          }
+        }
         previous.push(source);
       }
       return Ok({ lines });

@@ -267,7 +267,7 @@ describe('caption translation routes', () => {
     stop();
   });
 
-  it('keeps the tab page across a service worker restart and forgets it when the tab closes or shows another video', async () => {
+  it('keeps the tab page across a service worker restart and forgets it when the tab closes', async () => {
     const bodies = stubChat();
     await saveGlossary();
     const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
@@ -288,19 +288,14 @@ describe('caption translation routes', () => {
     first();
     // A new service worker has nothing in memory: the page comes from storage.session.
     const second = startBackground();
+    // Tab updates are not listened to: without a host permission Chrome leaves out their URL, and
+    // a listener would wake the service worker for every tab of every site (S43).
+    expect(fakeBrowser.tabs.onUpdated.hasListeners()).toBe(false);
     expect(await ask(translate('Fixturo is here.'), topFrame(watch))).toEqual(
       Ok({ lines: [{ id: '0:a', ja: '訳:一行', state: 'done' }] }),
     );
     expect(bodies[0]?.messages[1]?.content).toContain(PAGE_PART);
 
-    // The same video at another time keeps the page; another video forgets it.
-    await fakeBrowser.tabs.update(watch.id, { url: `${youtube}&t=30s` });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(await stored(watch.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
-    await fakeBrowser.tabs.update(watch.id, { url: 'https://www.youtube.com/watch?v=zyxwvutsrqp' });
-    await vi.waitFor(async () => {
-      expect(await stored(watch.id ?? -1)).toEqual(Ok(undefined));
-    });
     // A closed tab is forgotten.
     expect(await stored(closing.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
     // The fake's tabs.remove looks the tab id up as a window id; the event is what Chrome sends.
@@ -311,9 +306,9 @@ describe('caption translation routes', () => {
     await vi.waitFor(async () => {
       expect(await stored(closing.id ?? -1)).toEqual(Ok(undefined));
     });
+    expect(await stored(watch.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
     second();
     expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(false);
-    expect(fakeBrowser.tabs.onUpdated.hasListeners()).toBe(false);
   });
 });
 

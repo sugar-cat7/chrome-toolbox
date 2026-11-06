@@ -209,6 +209,56 @@ describe('caption feeder', () => {
     expect(run.asked()).toEqual([ids(0, 3)]);
   });
 
+  it('applies the answer in flight when the page leaves the front, then sends nothing until it is back', async () => {
+    const run = start({ sentences: first(10) });
+    run.feeder.position(0);
+    await settle();
+    run.feeder.front(false);
+    await run.reply(0, ['s0']);
+    expect(run.emitted.at(-1)).toEqual([done(1), done(2), done(3)]);
+    // Neither the next sentences nor the retry of s0 go while the page is not in front.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(run.asked()).toEqual([ids(0, 3)]);
+    run.feeder.front(true);
+    await settle();
+    expect(run.asked()).toEqual([ids(0, 3), ['s0']]);
+  });
+
+  it('ends a batch before a sentence that is not to be sent, so the previous lines are right', async () => {
+    const run = start({ sentences: first(12) });
+    run.feeder.position(0);
+    await settle();
+    await run.reply(0, ['s1']);
+    expect(run.asked()).toEqual([ids(0, 3), ids(4, 7)]);
+    // s1 may go again after 5 s; the request for s4–s7 is still out.
+    await vi.advanceTimersByTimeAsync(5_000);
+    await run.reply(1);
+    // s1 goes alone (s2 is translated), after s0; then s8 onwards, after s5–s7.
+    expect(run.asked()[2]).toEqual(['s1']);
+    expect(run.calls[2]?.batch.previous).toEqual(['Line 0.']);
+    await run.reply(2);
+    expect(run.asked()[3]).toEqual(ids(8, 11));
+    expect(run.calls[3]?.batch.previous).toEqual(['Line 5.', 'Line 6.', 'Line 7.']);
+  });
+
+  it('shows nothing while the display is off, and the whole range once it is back', async () => {
+    const run = start({ sentences: first(10) });
+    run.feeder.position(0);
+    await settle();
+    const shown = run.emitted.length;
+    run.show('off');
+    await run.reply(0);
+    expect(run.emitted).toHaveLength(shown);
+    run.show('both');
+    run.feeder.position(16);
+    expect(run.emitted.at(-1)).toEqual([
+      ...[0, 1, 2, 3].map((i) => done(i)),
+      ...first(10)
+        .slice(4)
+        .map((sentence) => ({ ...sentence, state: 'pending' })),
+    ]);
+  });
+
   it('retries a failed sentence once after 5 s, then marks it failed', async () => {
     const run = start({ sentences: [s(0), s(1)] });
     run.feeder.position(0);

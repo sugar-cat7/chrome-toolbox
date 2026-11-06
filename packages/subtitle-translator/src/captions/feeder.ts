@@ -56,10 +56,11 @@ type Batch = Readonly<{ items: readonly Item[] }>;
  * service worker (which keeps no state) for the next untranslated ones. `sentences` are in time
  * order, as `toSentences` gives them.
  *
- * In the range around the position, the next untranslated sentences are sent in time order, 4 at
- * a time, one request at a time; the next goes when the answer comes. Nothing is sent while the
- * page is not in front, the display is `source` or `off`, or the track is Japanese (its sentences
- * are shown as their own translation). With the display `off`, nothing is shown either.
+ * In the range around the position, the next untranslated sentences are sent in time order, up to
+ * 4 consecutive ones at a time, one request at a time; the next goes when the answer comes. Nothing
+ * is sent while the page is not in front (`front(false)`: an answer in flight is still applied), the
+ * display is `source` or `off`, or the track is Japanese (its sentences are shown as their own
+ * translation). With the display `off`, nothing is shown either, until it is back.
  */
 export function createCaptionFeeder({
   videoId,
@@ -201,7 +202,9 @@ export function createCaptionFeeder({
       changed.push(lineOf(index, sentence));
     }
     if (failedOnce.length > 0) retryLater(failedOnce);
-    if (changed.length > 0) onLines(changed);
+    // With the display off nothing is shown: the next position shows the whole range again.
+    if (display() === 'off') stale = true;
+    else if (changed.length > 0) onLines(changed);
     pump();
   }
 
@@ -216,7 +219,12 @@ export function createCaptionFeeder({
     for (let index = rangeStart(ms); index < end; index += 1) {
       const sentence = inRange(index, ms);
       const state = progress.get(index);
-      if (sentence === undefined || (state !== undefined && state.kind !== 'again')) continue;
+      // A batch is a run of consecutive sentences: the service worker takes each one's previous
+      // lines from the request's `previous` and the sentences before it in the batch.
+      if (sentence === undefined || (state !== undefined && state.kind !== 'again')) {
+        if (items === undefined) continue;
+        break;
+      }
       items ??= [];
       items.push({ index, sentence, attempt: state === undefined ? 1 : 2 });
       if (items.length === TRANSLATE_LIMITS.sentences) break;

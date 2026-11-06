@@ -8,7 +8,6 @@ import {
   PAGE_LIMITS,
   pageInfoSchema,
   tabPagesStore,
-  videoOfUrl,
   type PageInfo,
 } from '../../src/page-context.ts';
 
@@ -101,16 +100,13 @@ describe('tab pages kept in storage.session', () => {
     for (const tab of [0, 2, 15, 16]) expect(await restarted.get(tab)).toEqual(Ok(titled(tab)));
   });
 
-  it('forgets a closed tab and a tab that shows another video or no video', async () => {
+  it('forgets a closed tab', async () => {
     const pages = tabPagesStore(session());
-    for (const tab of [1, 2, 3, 4]) await pages.report(tab, shown);
+    for (const tab of [1, 2]) await pages.report(tab, shown);
     expect(await pages.forget(1)).toEqual(Ok(undefined));
-    expect(await pages.shows(2, 'zyxwvutsrqp')).toEqual(Ok(undefined));
-    expect(await pages.shows(3, undefined)).toEqual(Ok(undefined));
-    expect(await pages.shows(4, shown.videoId)).toEqual(Ok(undefined));
     for (const store of [pages, tabPagesStore(session())]) {
-      for (const tab of [1, 2, 3]) expect(await store.get(tab)).toEqual(Ok(undefined));
-      expect(await store.get(4)).toEqual(Ok(shown));
+      expect(await store.get(1)).toEqual(Ok(undefined));
+      expect(await store.get(2)).toEqual(Ok(shown));
     }
   });
 
@@ -131,17 +127,5 @@ describe('tab pages kept in storage.session', () => {
     expect(await pages.get(1)).toMatchObject(failed);
     expect(await pages.report(1, shown)).toMatchObject(failed);
     expect(await pages.get(1)).toEqual(Ok(shown));
-  });
-
-  it.each([
-    { url: 'https://www.youtube.com/watch?v=abcdefghijk', video: 'abcdefghijk' },
-    { url: 'https://www.youtube.com/watch?v=abcdefghijk&t=30s', video: 'abcdefghijk' },
-    { url: 'https://www.youtube.com/live/abcdefghijk?si=x', video: 'abcdefghijk' },
-    { url: 'https://www.youtube.com/', video: undefined },
-    { url: 'https://www.youtube.com/watch?v=short', video: undefined },
-    { url: 'https://example.com/watch?v=abcdefghijk', video: undefined },
-    { url: 'not a url', video: undefined },
-  ])('videoOfUrl($url)', ({ url, video }) => {
-    expect(videoOfUrl(url)).toBe(video);
   });
 });

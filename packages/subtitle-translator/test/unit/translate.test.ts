@@ -8,6 +8,7 @@ import {
   subtitleMaxTokens,
   subtitlePrompt,
   type Fetch,
+  type LlamaClient,
 } from '@chrome-toolbox/extension-core';
 import { toPromptGlossary, type GlossaryEntry } from '../../src/glossary.ts';
 import { contextHash, type PageInfo } from '../../src/page-context.ts';
@@ -182,7 +183,6 @@ describe('caption translator', () => {
   it.each([
     { name: 'a reply without its newline', reply: 'nope' },
     { name: 'an empty reply', reply: '\n' },
-    { name: 'an unreachable server', reply: undefined },
   ])('marks a sentence failed on $name and goes on with the next', async ({ reply }) => {
     const { bodies, client } = fakeServer((line) => (line === 'Bad.' ? reply : `訳:${line}\n`));
     const translator = createSubtitleTranslator({
@@ -205,6 +205,45 @@ describe('caption translator', () => {
     await translator.translate(request({ sentences: [{ id: 'a', source: 'Bad.' }] }), PAGE);
     expect(bodies).toHaveLength(3);
   });
+
+  it.each(['network_failed', 'operation_cancelled'] as const)(
+    'after %s, fails the rest of the batch without a chat, still answering it from the cache',
+    async (code) => {
+      const { client } = fakeServer();
+      const chat = vi.fn<LlamaClient['chat']>(async () => Err(failure(code)));
+      const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+      const keyHead = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000`;
+      cache.set(`${keyHead}Known.`, '訳:Known.');
+      const translator = createSubtitleTranslator({
+        client: { ...client, chat },
+        settings: async () => Ok(defaultSettings),
+        glossary: async () => Ok([]),
+        cache,
+      });
+      const result = await translator.translate(
+        request({
+          sentences: [
+            { id: 'a', source: 'First.' },
+            { id: 'b', source: 'Second.' },
+            { id: 'c', source: 'Known.' },
+            { id: 'd', source: 'Fourth.' },
+          ],
+        }),
+        PAGE,
+      );
+      expect(result).toEqual(
+        Ok({
+          lines: [
+            { id: 'a', state: 'failed' },
+            { id: 'b', state: 'failed' },
+            translated('c', 'Known.'),
+            { id: 'd', state: 'failed' },
+          ],
+        }),
+      );
+      expect(chat).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each([
     { name: 'of another video', page: { ...PAGE, videoId: 'zyxwvutsrqp' } },

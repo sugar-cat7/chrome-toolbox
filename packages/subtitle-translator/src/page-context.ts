@@ -1,13 +1,10 @@
 import { z } from 'zod/mini';
-import { capture, captureSync, Ok, type Result } from '@chrome-toolbox/contracts';
+import { capture, Ok, type Result } from '@chrome-toolbox/contracts';
 import { createLruCache, createQueue, type StorageArea } from '@chrome-toolbox/extension-core';
 import { PAGE_LIMITS } from './limits.ts';
 
 /** Characters kept of what a page names; defined in limits.ts for the MAIN-world bridge. */
 export { PAGE_LIMITS };
-
-/** A YouTube video id. */
-const VIDEO_ID = /^[\w-]{11}$/u;
 
 /** A too-long value is cut, not refused. */
 const cut = (max: number) =>
@@ -21,7 +18,7 @@ const cut = (max: number) =>
  * response's `videoDetails.channelId`.
  */
 export const pageInfoSchema = z.strictObject({
-  videoId: z.string().check(z.regex(VIDEO_ID)),
+  videoId: z.string().check(z.regex(/^[\w-]{11}$/u)),
   streamer: z.optional(cut(PAGE_LIMITS.streamer)),
   title: z.optional(cut(PAGE_LIMITS.title)),
   author: z.optional(cut(PAGE_LIMITS.author)),
@@ -79,16 +76,6 @@ export function createTabPages(max = TAB_PAGES_MAX): TabPages {
   };
 }
 
-/** The video a YouTube watch or live URL shows; undefined for any other page or URL. */
-export function videoOfUrl(url: string): string | undefined {
-  const parsed = captureSync(() => new URL(url), 'input_invalid');
-  if (!parsed.ok || parsed.value.origin !== 'https://www.youtube.com') return undefined;
-  const { pathname, searchParams } = parsed.value;
-  const id =
-    pathname === '/watch' ? searchParams.get('v') : /^\/live\/([^/]+)/u.exec(pathname)?.[1];
-  return id !== null && id !== undefined && VIDEO_ID.test(id) ? id : undefined;
-}
-
 /** The `storage.session` key of the tab pages: `{ tabId, info }`, the oldest first. */
 const SESSION_KEY = 'subs:pages';
 const sessionSchema = z.array(
@@ -103,8 +90,6 @@ export type TabPageStore = {
   get(this: void, tabId: number): Promise<Result<PageInfo | undefined>>;
   /** Forgets a tab that closed. */
   forget(this: void, tabId: number): Promise<Result<void>>;
-  /** The tab shows `videoId`, or no video: its page is forgotten unless it is that video's. */
-  shows(this: void, tabId: number, videoId: string | undefined): Promise<Result<void>>;
 };
 
 /**
@@ -158,14 +143,6 @@ export function tabPagesStore(area: StorageArea, max = TAB_PAGES_MAX): TabPageSt
       memory.forget(tabId);
       return update((entries) =>
         entries.some((entry) => entry.tabId === tabId) ? without(entries, tabId) : undefined,
-      );
-    },
-    shows(tabId, videoId) {
-      if (memory.get(tabId)?.videoId !== videoId) memory.forget(tabId);
-      return update((entries) =>
-        entries.some((entry) => entry.tabId === tabId && entry.info.videoId !== videoId)
-          ? without(entries, tabId)
-          : undefined,
       );
     },
   };

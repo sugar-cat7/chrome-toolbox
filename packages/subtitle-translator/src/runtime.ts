@@ -14,7 +14,7 @@ import {
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
-import { tabPagesStore, videoOfUrl, type PageInfo } from './page-context.ts';
+import { tabPagesStore, type PageInfo } from './page-context.ts';
 import {
   subtitleProtocol,
   type SubtitleMessageType,
@@ -182,29 +182,16 @@ export function startBackground(): () => void {
       },
     };
   }
-  // The result of these two is not used: an entry that stays is replaced by the tab's next
-  // report or ages out, and a translation uses a page only for the video it names.
-  /** A closed tab's page is forgotten. */
+  /**
+   * A closed tab's page is forgotten. The result is not used: an entry that stays ages out, and a
+   * translation uses a page only for the video it names. Tab updates are not followed: without a
+   * host permission Chrome leaves their URL out, and a listener would wake the service worker for
+   * every tab of every site; a tab's next `subs/page` replaces its page (S43).
+   */
   function onTabRemoved(tabId: number): void {
     launch(
       async () => {
         await pages.forget(tabId);
-      },
-      () => undefined,
-    );
-  }
-  /**
-   * A tab that went to another video, or off a video, forgets its page. Chrome reports `url` only
-   * when the extension may see the tab's URL (the `tabs` permission or a host permission for the
-   * page); without it there is nothing to do here, and the tab's next `subs/page` replaces its
-   * page.
-   */
-  function onTabUpdated(tabId: number, change: Readonly<{ url?: string }>): void {
-    const { url } = change;
-    if (url === undefined) return;
-    launch(
-      async () => {
-        await pages.shows(tabId, videoOfUrl(url));
       },
       () => undefined,
     );
@@ -229,11 +216,9 @@ export function startBackground(): () => void {
   }
   browser.runtime.onMessage.addListener(onMessage);
   browser.tabs.onRemoved.addListener(onTabRemoved);
-  browser.tabs.onUpdated.addListener(onTabUpdated);
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
     browser.tabs.onRemoved.removeListener(onTabRemoved);
-    browser.tabs.onUpdated.removeListener(onTabUpdated);
     queue.clear();
     captions.dispose();
   };
