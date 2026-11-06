@@ -13,6 +13,7 @@ import {
   PLAMO_TRANSLATE_MODEL,
   summaryPrompt,
   type ChatMessage,
+  type ChatPartsMessage,
   type CommentCategory,
   type StreamGenre,
 } from '../src/index.ts';
@@ -28,6 +29,8 @@ export type StubChat = Readonly<{
   stop?: readonly string[];
   chat_template_kwargs?: Record<string, unknown>;
   response_format?: unknown;
+  /** The number of `input_audio` parts; 0 for a text-only chat. */
+  audio: number;
 }>;
 export type StubRequest = Readonly<{
   method: string;
@@ -37,6 +40,8 @@ export type StubRequest = Readonly<{
   body: unknown;
   /** The body of a chat completion request. */
   chat?: StubChat | undefined;
+  /** The stub's serial number (from 1) of this `input_audio` chat; undefined for any other request. */
+  audioNumber?: number | undefined;
 }>;
 export type StubReply = Readonly<{ status?: number; body: unknown }>;
 /** Answers one request; a test may replace the stub's responder or wrap `defaultResponder`. */
@@ -81,12 +86,40 @@ const isMessage = (value: unknown): value is ChatMessage =>
   (value.role === 'system' || value.role === 'user' || value.role === 'assistant') &&
   typeof value.content === 'string';
 
-/** The chat completion body, or undefined when `body` is not one. */
+const isAudioPart = (part: unknown): boolean => isRecord(part) && part.type === 'input_audio';
+const isTextPart = (part: unknown): part is { type: 'text'; text: string } =>
+  isRecord(part) && part.type === 'text' && typeof part.text === 'string';
+const isPartsMessage = (value: unknown): value is ChatPartsMessage =>
+  isRecord(value) &&
+  value.role === 'user' &&
+  Array.isArray(value.content) &&
+  value.content.every((part) => isTextPart(part) || isAudioPart(part));
+
+/**
+ * The chat completion body, or undefined when `body` is not one. A message of parts becomes a
+ * text message (its text parts joined by `\n`); its audio parts are counted in `audio`.
+ */
 function chatOf(body: unknown): StubChat | undefined {
   if (!isRecord(body) || !Array.isArray(body.messages)) return undefined;
-  const messages = body.messages.filter(isMessage);
-  if (messages.length !== body.messages.length) return undefined;
-  return { ...body, messages };
+  const given: unknown[] = body.messages;
+  if (!given.every((message) => isMessage(message) || isPartsMessage(message))) return undefined;
+  const messages = given.map((message): ChatMessage => {
+    if (isMessage(message)) return message;
+    return {
+      role: 'user',
+      content: (message as ChatPartsMessage).content
+        .filter(isTextPart)
+        .map((part) => part.text)
+        .join('\n'),
+    };
+  });
+  const audio = given.reduce<number>(
+    (sum, message) =>
+      sum +
+      (isPartsMessage(message) ? message.content.filter((part) => isAudioPart(part)).length : 0),
+    0,
+  );
+  return { ...body, messages, audio };
 }
 
 /** One comment line of the batch user turn: `{"id":1,"lang":…,"translate":…,"text":…}`. */
@@ -162,6 +195,10 @@ export const chatCompletion = (content: string): StubReply => ({
     choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
   },
 });
+/** The transcript of an `input_audio` chat is `STUB_TRANSCRIPT` plus a serial number. */
+export const STUB_TRANSCRIPT = 'Stub speech';
+/** The ASR reply `<lang>\t<text>\n` to the `n`th audio chat; made up, not a transcript. */
+export const asrReply = (n: number): string => `en\t${STUB_TRANSCRIPT} ${n}.\n`;
 const NOT_FOUND: StubReply = { status: 404, body: { error: { code: 404 } } };
 
 /** The translation prefix of a PLaMo reply from `withPlamo`: made up, not a PLaMo output. */
@@ -218,6 +255,37 @@ export function withPlamo(responder: Responder): Responder {
   };
 }
 
+/** `GET /props` of a server with 2 slots, with or without an audio projector. */
+const propsReply = (audio: boolean): StubReply => ({
+  body: { total_slots: 2, modalities: { vision: false, video: false, audio } },
+});
+const AUDIO_UNSUPPORTED: StubReply = {
+  status: 400,
+  body: {
+    error: {
+      code: 400,
+      message:
+        'audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj',
+      type: 'invalid_request_error',
+    },
+  },
+};
+
+/**
+ * Makes `responder` a server without an audio projector: `/props` says `audio: false`, and a
+ * chat with `input_audio` is answered HTTP 400 as llama.cpp does. Every other request goes to
+ * `responder`.
+ */
+export function withoutAudio(responder: Responder): Responder {
+  return (request) => {
+    const key = `${request.method} ${request.path}`;
+    if (key === 'GET /props') return propsReply(false);
+    if (key === 'POST /v1/chat/completions' && (request.chat?.audio ?? 0) > 0)
+      return AUDIO_UNSUPPORTED;
+    return responder(request);
+  };
+}
+
 /**
  * llama.cpp as the extensions use it: a healthy server with one model and 2 slots, a comment
  * batch and summary reply built by `commentBatchReply` (a text with `BAD` or `ROUGH` is abusive)
@@ -230,12 +298,13 @@ export function defaultResponder(request: StubRequest): StubReply {
     case 'GET /health':
       return { body: { status: 'ok' } };
     case 'GET /props':
-      return { body: { total_slots: 2 } };
+      return propsReply(true);
     case 'GET /v1/models':
       return { body: { object: 'list', data: [{ id: 'stub-model' }] } };
     case 'POST /v1/systemone':
       return clefReply(request.body);
     case 'POST /v1/chat/completions': {
+      if (request.audioNumber !== undefined) return chatCompletion(asrReply(request.audioNumber));
       const system = request.chat?.messages[0]?.content;
       const user = request.chat?.messages.find((message) => message.role === 'user')?.content;
       if (user === undefined) return NOT_FOUND;
@@ -259,15 +328,19 @@ async function bodyOf(request: IncomingMessage): Promise<unknown> {
 /** Starts the stub on a free port of 127.0.0.1. */
 export async function startLlamaStub(): Promise<LlamaStub> {
   let port = 0;
+  let audioChats = 0;
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     stub.requests.push(`${request.method} ${request.url}`);
     const { pathname } = new URL(request.url ?? '/', 'http://stub.invalid');
     const body = await bodyOf(request);
+    const chat = pathname === '/v1/chat/completions' ? chatOf(body) : undefined;
+    if (chat !== undefined && chat.audio > 0) audioChats += 1;
     const reply = await stub.respond({
       method: request.method ?? 'GET',
       path: pathname,
       body,
-      chat: pathname === '/v1/chat/completions' ? chatOf(body) : undefined,
+      chat,
+      audioNumber: chat !== undefined && chat.audio > 0 ? audioChats : undefined,
     });
     response.statusCode = reply.status ?? 200;
     response.setHeader('content-type', 'application/json');

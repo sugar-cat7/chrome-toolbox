@@ -315,6 +315,95 @@ describe('llama.cpp client', () => {
     expect(sent[1]).not.toHaveProperty('stop');
   });
 
+  it('sends audio parts as OpenAI input_audio content', async () => {
+    const sent: { messages: { content: unknown }[] }[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (_u, init) => {
+        sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        return json({ choices: [{ message: { content: 'x' } }] });
+      },
+    });
+    await client.chat({
+      messages: [
+        { role: 'system', content: 'sys' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Transcribe.' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+          ],
+        },
+      ],
+    });
+    expect(sent[0]?.messages[0]?.content).toBe('sys');
+    expect(sent[0]?.messages[1]?.content).toEqual([
+      { type: 'text', text: 'Transcribe.' },
+      { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+    ]);
+  });
+
+  it.each([
+    {
+      name: '音声入力あり',
+      body: { total_slots: 3, modalities: { vision: false, video: false, audio: true } },
+      expected: { totalSlots: 3, audio: true },
+    },
+    {
+      name: '投影器なし',
+      body: { total_slots: 3, modalities: { vision: false, video: false, audio: false } },
+      expected: { totalSlots: 3, audio: false },
+    },
+    {
+      name: 'modalities を返さない',
+      body: { total_slots: 3 },
+      expected: { totalSlots: 3, audio: undefined },
+    },
+  ])('props: $name', async ({ body, expected }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json(body),
+    });
+    const result = await client.props();
+    expect(result).toStrictEqual({ ok: true, value: expected });
+  });
+
+  it.each([
+    { name: 'tellRefusal なし', tellRefusal: false },
+    { name: 'tellRefusal あり', tellRefusal: true },
+  ])("maps the server's no-projector 400 to audio_unsupported: $name", async ({ tellRefusal }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () =>
+        json(
+          {
+            error: {
+              code: 400,
+              message:
+                'audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj',
+              type: 'invalid_request_error',
+            },
+          },
+          400,
+        ),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal }))).toBe('audio_unsupported');
+  });
+
+  it.each([
+    { tellRefusal: false, expected: 'network_failed' },
+    { tellRefusal: true, expected: 'model_refused' },
+  ])(
+    'keeps other 400 replies as Task 0 maps them: $expected',
+    async ({ tellRefusal, expected }) => {
+      const client = createLlamaClient({
+        baseUrl: 'http://127.0.0.1:8080',
+        fetch: async () => json({ error: { code: 400, message: 'Invalid slot ID' } }, 400),
+      });
+      expect(code(await client.chat({ messages: [], tellRefusal }))).toBe(expected);
+    },
+  );
+
   it.each([
     {
       status: 400,

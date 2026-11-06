@@ -34,3 +34,4 @@ Internal to public projection:
 - `host_permission_denied` → `permission_denied`
 - `sender_forbidden` → `sender_forbidden`
 - `model_refused` → `unavailable`
+- `audio_unsupported` → `unavailable`

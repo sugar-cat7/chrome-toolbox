@@ -24,6 +24,8 @@ import {
   STUB_BENIGN,
   STUB_GENRE,
   STUB_PLAMO_PREFIX,
+  STUB_TRANSCRIPT,
+  withoutAudio,
   withPlamo,
   type LlamaStub,
   type StubChat,
@@ -159,6 +161,72 @@ describe('llama.cpp stub', () => {
   const codeOf = (result: Result<unknown>): string =>
     result.ok ? 'ok' : result.error.internalCode;
 
+  test('answers input_audio chats with numbered transcript lines', async () => {
+    const ask = () =>
+      client.chat({
+        messages: [
+          { role: 'system', content: 'Transcribe.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Context line.' },
+              { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+            ],
+          },
+        ],
+      });
+    const first = await ask();
+    const second = await ask();
+    expect(first.ok && first.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
+    expect(second.ok && second.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
+    expect(STUB_TRANSCRIPT).toBe('Stub speech');
+  });
+
+  test('records audio parts: the count, and the text parts joined by a newline', async () => {
+    const seen: (StubChat | undefined)[] = [];
+    stub.respond = (request) => {
+      seen.push(request.chat);
+      return defaultResponder(request);
+    };
+    await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+            { type: 'text', text: 'b' },
+          ],
+        },
+      ],
+    });
+    await client.chat(genrePrompt({}));
+    expect(seen[0]?.audio).toBe(1);
+    expect(seen[0]?.messages).toEqual([{ role: 'user', content: 'a\nb' }]);
+    expect(seen[1]?.audio).toBe(0);
+  });
+
+  test('props reports a projector and 2 slots', async () => {
+    expect(await client.props()).toEqual({ ok: true, value: { totalSlots: 2, audio: true } });
+  });
+
+  test('withoutAudio reports no audio in props and rejects input_audio with 400', async () => {
+    stub.respond = withoutAudio(defaultResponder);
+    expect(await client.props()).toEqual({ ok: true, value: { totalSlots: 2, audio: false } });
+    const audio = await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } }],
+        },
+      ],
+      tellRefusal: true,
+    });
+    expect(codeOf(audio)).toBe('audio_unsupported');
+    const text = await client.chat(genrePrompt({}));
+    expect(text.ok && parseGenre(text.value.text)).toBe(STUB_GENRE);
+  });
+
   test('withPlamo lists the model and answers the request plamoTranslateRequest builds', async () => {
     stub.respond = withPlamo(defaultResponder);
     expect(await client.models()).toEqual({
@@ -177,6 +245,7 @@ describe('llama.cpp stub', () => {
     kwargs: Record<string, unknown> = {},
   ): StubChat => ({
     messages: [{ role: 'user', content: 'Okay chat' }],
+    audio: 0,
     model: PLAMO_TRANSLATE_MODEL,
     temperature: 0,
     stop: [...PLAMO_STOP],

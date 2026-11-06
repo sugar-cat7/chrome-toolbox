@@ -12,8 +12,14 @@ import { createQueue, type Queue } from './queue.ts';
 
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 export type ChatMessage = Readonly<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+/** One part of a multi-part message (OpenAI `content` array); `data` is WAV as plain base64. */
+export type ChatContentPart =
+  | Readonly<{ type: 'text'; text: string }>
+  | Readonly<{ type: 'input_audio'; input_audio: Readonly<{ data: string; format: 'wav' }> }>;
+/** A user message made of parts, e.g. text plus audio; `ChatMessage` stays text-only. */
+export type ChatPartsMessage = Readonly<{ role: 'user'; content: readonly ChatContentPart[] }>;
 export type ChatRequest = Readonly<{
-  messages: readonly ChatMessage[];
+  messages: readonly (ChatMessage | ChatPartsMessage)[];
   model?: string;
   maxTokens?: number;
   temperature?: number;
@@ -49,7 +55,8 @@ export type ChatReply = Readonly<{
 }>;
 export const connectionStatusSchema = z.strictObject({ models: z.array(z.string()) });
 export type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
-export type ServerProps = Readonly<{ totalSlots: number }>;
+/** `audio` is `modalities.audio` (an audio projector is loaded); undefined when not reported. */
+export type ServerProps = Readonly<{ totalSlots: number; audio: boolean | undefined }>;
 export type LlamaClient = {
   health(this: void, signal?: AbortSignal): Promise<Result<void>>;
   models(this: void, signal?: AbortSignal): Promise<Result<string[]>>;
@@ -73,7 +80,14 @@ export type LlamaClient = {
 // llama-server answers 200 {"status":"ok"} once a model is loaded and 503 while loading.
 const healthSchema = z.object({ status: z.literal('ok') });
 const modelsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
-const propsSchema = z.object({ total_slots: z.int().check(z.nonnegative()) });
+const propsSchema = z.object({
+  total_slots: z.int().check(z.nonnegative()),
+  modalities: z.optional(z.object({ audio: z.optional(z.boolean()) })),
+});
+// What llama-server answers (HTTP 400) to input_audio when no audio projector is loaded.
+const audioUnsupportedSchema = z.object({
+  error: z.object({ message: z.string().check(z.includes('audio input is not supported')) }),
+});
 const chatSchema = z.object({
   choices: z
     .array(
@@ -153,7 +167,18 @@ export function createLlamaClient({
     );
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!response.ok) return response;
-    if (!response.value.ok) return Err(failure(tellRefusal ? 'model_refused' : 'network_failed'));
+    if (!response.value.ok) {
+      // The body is read only to tell the no-projector 400; every other answer ignores it.
+      if (response.value.status === 400) {
+        const text = await capture(() => response.value.text(), 'response_invalid');
+        const parsed = text.ok
+          ? captureSync((): unknown => JSON.parse(text.value), 'response_invalid')
+          : text;
+        if (parsed.ok && decode(audioUnsupportedSchema, parsed.value).ok)
+          return Err(failure('audio_unsupported'));
+      }
+      return Err(failure(tellRefusal ? 'model_refused' : 'network_failed'));
+    }
     const body = await capture((): Promise<unknown> => response.value.json(), 'response_invalid');
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!body.ok) return body;
@@ -172,7 +197,9 @@ export function createLlamaClient({
   > {
     const path = model === undefined ? '/props' : `/props?model=${encodeURIComponent(model)}`;
     const result = await request(propsSchema, path, { method: 'GET' }, signal);
-    return result.ok ? Ok({ totalSlots: result.value.total_slots }) : result;
+    return result.ok
+      ? Ok({ totalSlots: result.value.total_slots, audio: result.value.modalities?.audio })
+      : result;
   }
   async function status(signal?: AbortSignal): Promise<Result<ConnectionStatus>> {
     const alive = await health(signal);
