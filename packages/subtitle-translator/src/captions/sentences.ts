@@ -1,5 +1,5 @@
 import { contextHash } from '../page-context.ts';
-import { cutText, type Cue } from './tracks.ts';
+import { cutText, isKorean, type Cue } from './tracks.ts';
 
 /**
  * Where cues join into one sentence: a gap of 700 ms ends it, and so does reaching 6,000 ms or
@@ -14,6 +14,28 @@ type Span = { startMs: number; endMs: number; text: string };
 
 /** A sentence-ending mark, then any closing quotes or brackets. */
 const SENTENCE_END = /[.?!。？！][”’"')\]」』]*$/u;
+
+/** Kanji, kana and CJK punctuation (by script extension), and fullwidth forms such as ！？（）. */
+const CJK_END = /[\p{scx=Han}\p{scx=Hira}\p{scx=Kana}\uFF01-\uFF60]$/u;
+const CJK_START = /^[\p{scx=Han}\p{scx=Hira}\p{scx=Kana}\uFF01-\uFF60]/u;
+const HANGUL_END = /\p{sc=Hangul}$/u;
+const HANGUL_START = /^\p{sc=Hangul}/u;
+
+/**
+ * What goes between two cue texts joined into one sentence:
+ * - a space when the character before or after the join is Hangul: Korean spaces its words, and
+ *   a cue ends between words, whatever the track's language;
+ * - a space on a Korean track (`ko`), also between hanja or kana;
+ * - nothing when the character before or after the join is a kanji, a kana, CJK punctuation or a
+ *   fullwidth form: Chinese and Japanese put no space between words, nor next to a Latin word;
+ * - a space otherwise.
+ * Cue texts are trimmed (`parseJson3` trims them and `spansOf` again), so a space already at the
+ * edge of a cue never decides the join.
+ */
+function separator(before: string, after: string, korean: boolean): string {
+  if (korean || HANGUL_END.test(before) || HANGUL_START.test(after)) return ' ';
+  return CJK_END.test(before) || CJK_START.test(after) ? '' : ' ';
+}
 
 /**
  * A trimmed text cut into pieces of at most 200 UTF-16 units: at the last space that fits, or at
@@ -53,13 +75,16 @@ function spansOf(cue: Cue): Span[] {
 }
 
 /**
- * The sentences of a track's cues, in time order. Cues join with a space; a sentence ends after a
- * cue that ends with `.?!。？！` (closing quotes or brackets may follow), before a cue that starts
- * 700 ms or more after it ends, once it spans 6,000 ms, and before a cue that would take it past
- * 200 characters (so a sentence that reaches 200 ends there). Each cue is trimmed first, and one
- * longer than 200 characters is cut into pieces, at spaces where it can be.
+ * The sentences of a track's cues, in time order. Cues join with a space, or without one where
+ * Chinese or Japanese text meets the join (`separator`; pass the track's `languageCode` so that a
+ * Korean track keeps its spaces). A sentence ends after a cue that ends with `.?!。？！` (closing
+ * quotes or brackets may follow), before a cue that starts 700 ms or more after it ends, once it
+ * spans 6,000 ms, and before a cue that would take it past 200 characters (so a sentence that
+ * reaches 200 ends there). Each cue is trimmed first, and one longer than 200 characters is cut
+ * into pieces, at spaces where it can be.
  */
-export function toSentences(cues: readonly Cue[]): Sentence[] {
+export function toSentences(cues: readonly Cue[], languageCode?: string): Sentence[] {
+  const korean = languageCode !== undefined && isKorean(languageCode);
   const sentences: Sentence[] = [];
   let current: Span | undefined;
   const close = (): void => {
@@ -70,10 +95,11 @@ export function toSentences(cues: readonly Cue[]): Sentence[] {
   };
   const ordered = [...cues].sort((a, b) => a.startMs - b.startMs);
   for (const span of ordered.flatMap(spansOf)) {
+    const gap = current === undefined ? '' : separator(current.text, span.text, korean);
     if (
       current !== undefined &&
       (span.startMs - current.endMs >= SENTENCE_LIMITS.gapMs ||
-        current.text.length + 1 + span.text.length > SENTENCE_LIMITS.chars)
+        current.text.length + gap.length + span.text.length > SENTENCE_LIMITS.chars)
     )
       close();
     current =
@@ -82,7 +108,7 @@ export function toSentences(cues: readonly Cue[]): Sentence[] {
         : {
             startMs: current.startMs,
             endMs: Math.max(current.endMs, span.endMs),
-            text: `${current.text} ${span.text}`,
+            text: `${current.text}${gap}${span.text}`,
           };
     if (
       SENTENCE_END.test(current.text) ||

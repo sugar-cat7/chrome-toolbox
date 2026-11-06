@@ -152,6 +152,8 @@ const primary = (languageCode: string): string =>
 
 /** Whether a caption language is Japanese (`ja`, `ja-JP`): such a track is shown as it is. */
 export const isJapanese = (languageCode: string): boolean => primary(languageCode) === 'ja';
+/** Whether a caption language is Korean (`ko`, `ko-KR`), whose words are spaced. */
+export const isKorean = (languageCode: string): boolean => primary(languageCode) === 'ko';
 
 /**
  * The track to translate. The spoken language is the auto-generated track's, because YouTube

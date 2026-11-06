@@ -66,6 +66,71 @@ describe('caption sentences', () => {
     expect(toSentences(cues).map((sentence) => sentence.source)).toEqual(sentences);
   });
 
+  it.each([
+    {
+      name: 'zh: 漢字の間は空けない',
+      lang: 'zh-Hans',
+      cues: [c(0, 900, '我们今天'), c(900, 2000, '去打游戏。')],
+      sentences: ['我们今天去打游戏。'],
+    },
+    {
+      name: 'ja: かなと漢字、句読点の間は空けない',
+      lang: 'ja',
+      cues: [c(0, 700, 'よし、今日は'), c(700, 1400, 'ダンジョンに'), c(1400, 2000, '行くぞ！')],
+      sentences: ['よし、今日はダンジョンに行くぞ！'],
+    },
+    {
+      name: 'ko: ハングルの語の間は空ける',
+      lang: 'ko',
+      cues: [c(0, 900, '안녕하세요'), c(900, 2000, '여러분 반가워요.')],
+      sentences: ['안녕하세요 여러분 반가워요.'],
+    },
+    {
+      name: 'ko: 韓国語のトラックでは漢字どうしの間も空ける',
+      lang: 'ko',
+      cues: [c(0, 900, '오늘은 漢字'), c(900, 2000, '學習 시간.')],
+      sentences: ['오늘은 漢字 學習 시간.'],
+    },
+    {
+      name: 'ハングルの隣は、言語が分からなくても空ける',
+      lang: undefined,
+      cues: [c(0, 900, '오늘은 漢字'), c(900, 2000, '공부.')],
+      sentences: ['오늘은 漢字 공부.'],
+    },
+    {
+      name: 'en: 空白で区切る',
+      lang: 'en',
+      cues: [c(0, 900, 'Okay chat,'), c(900, 2000, "we're going in.")],
+      sentences: ["Okay chat, we're going in."],
+    },
+    {
+      name: 'en と ja が混ざる: 日本語の隣だけ空けない',
+      lang: 'ja',
+      cues: [
+        c(0, 500, 'Nice'),
+        c(500, 1000, 'ナイス'),
+        c(1000, 1500, 'GG'),
+        c(1500, 2000, 'everyone「おつ」'),
+        c(2000, 2600, 'bye.'),
+      ],
+      sentences: ['NiceナイスGG everyone「おつ」bye.'],
+    },
+    {
+      name: 'ja: 全角の括弧の隣も空けない',
+      lang: 'ja',
+      cues: [c(0, 900, 'やった（笑）'), c(900, 2000, 'GG.')],
+      sentences: ['やった（笑）GG.'],
+    },
+    {
+      name: '空けずに続けた 200 文字は 1 文に入る',
+      lang: 'ja',
+      cues: [c(0, 100, chars(100, 'あ')), c(100, 200, chars(100, 'い')), c(200, 300, 'う')],
+      sentences: [`${chars(100, 'あ')}${chars(100, 'い')}`, 'う'],
+    },
+  ])('toSentences joins CJK without a space: $name', ({ lang, cues, sentences }) => {
+    expect(toSentences(cues, lang).map((sentence) => sentence.source)).toEqual(sentences);
+  });
+
   it('keeps the time span of the cues and names each sentence by its start and source', () => {
     expect(toSentences([c(500, 900, 'Okay chat,'), c(900, 2000, "we're going in.")])).toEqual([
       {
