@@ -137,7 +137,9 @@
     - 処理しない状態が 10 分続いたら、取得をやめる。
     - Task 13 の確認で、操作なしに取り直せると分かっても、この方式は変えない（結果は記録だけする）。
 - 音声の取得:
-  - 開始にはユーザーの操作が要る。ショートカット `Alt+Shift+S` と、サイドパネルの「音声で字幕を開始」から始める。どの操作で `tabCapture.getMediaStreamId` が通るかは、Task 13 で確かめる。
+  - 開始にはユーザーの操作が要る。ショートカット `Alt+Shift+S` と、ツールバーのアイコンから始める（ユーザーの決定、2026-11-09。判断 S46）。
+    - アイコンで始まるのは、字幕トラックの経路が何も出さない YouTube の視聴ページ（ライブ、字幕トラックなし、取得元に音声を選んでいる）だけ。ほかではサイドパネルを開くだけ。取得中のタブでもう一度押すと止める。
+    - サイドパネルは止めるだけで、開始のボタンはない。Task 13 の Step 0 で、パネルのボタンでは `tabCapture.getMediaStreamId` が通らないと分かった（`openPanelOnActionClick` でパネルを開いても、タブは「呼び出された」ことにならない）。
   - 同時に取得するのは 1 タブだけ。別のタブで開始したら、前のタブを止める。
   - 取得した音声は `AudioContext.destination` に戻し、タブの音を消さない。
   - AudioContext は端末の標本化周波数のままにする。16 kHz にすると、視聴者が聞く音が劣化するため。16 kHz mono への変換は AudioWorklet で行う。
@@ -200,7 +202,8 @@
 - 無音や BGM だけの長い区間 → 区切りを出さず、ASR を呼ばず、バッファも伸びない（Task 11 でテスト）。
 - 1.5 秒を超えて話し続ける → 強制の区切りは、最後の 500 ms のうちいちばん静かなフレームで切り、切った後ろの音は次の区切りに入る。音声は失われない（Task 11 でテスト）。
 - 字幕が枠 0 を使っている → comment-assistant は、コメントの枠に同時に 1 本しか送らない。枠 0 を処理中と最後に見てから 15 秒たてば、2 本に戻る。`/slots` が答えないサーバーでは、今までどおり 2 本（Task 17 でテスト）。
-- 取得中にタブを閉じた、サイトを離れた、別のタブで始めた → MediaStream の track、AudioContext、offscreen をすべて解放する（Task 13・Task 15 でテスト）。
+- 取得中にタブを閉じた、サイトを離れた、別のタブで始めた → MediaStream の track、AudioContext、offscreen をすべて解放する（Task 13・Task 15 でテスト）。別のタブの開始が断られた（投影器なし）ときは、前のタブの取得はそのまま（Task 13 でテスト）。
+- 取得中のタブを裏にした → Chrome は取得中のページを `visible` のままにするので、background がタブの切り替え（`tabs.onActivated`）から away にする（Task 13 でテスト。最小化と覆われたウィンドウは Task 16 で確かめる）。
 - 取得中に service worker が止まって再び起動した → 取得とライブの処理は続き、止める条件も効く（Task 13 でテスト）。
 - 長時間の視聴 → ヒープのデータ部分が 1.10 倍以内（Task 15 でテスト）。
 
@@ -1868,9 +1871,9 @@ it('language tally follows the majority of the last 20 lines', () => {
 
 - Create: `packages/subtitle-translator/src/entrypoints/offscreen/index.html`、`main.ts`
 - Create: `packages/subtitle-translator/src/audio/capture.ts`、`src/sessions.ts`
-- Modify: `src/protocol.ts`（`audio/*`、`subs/lines`、`subs/status`）、`src/runtime.ts`、`src/entrypoints/background.ts`、`src/entrypoints/youtube.content.ts`
+- Modify: `src/protocol.ts`（`audio/*`、`subs/lines`、`subs/status`）、`src/runtime.ts`、`src/entrypoints/background.ts`、`src/watch-page.ts`（`youtube.content.ts` から呼ばれる）、`src/overlay/source.ts`（ピルの文言）
 - Modify: `wxt.config.ts`
-  - `permissions` に `tabCapture` と `offscreen` を足す。
+  - `permissions` に `tabCapture`、`offscreen`、`activeTab` を足す。`activeTab` は、呼び出されたタブの URL を見るため（content script の matches では URL は見えない。Step 0）。インストール時の警告は増えない。youtube.com のホスト権限は足さない（判断 S43）。
   - `commands` に `toggle-audio` を足す。`suggested_key: { default: 'Alt+Shift+S' }`、`description: '音声で字幕を開始／停止'`
 - Modify: `tools/errors/catalog.json`
   - `capture_failed` → `unavailable`
@@ -1896,39 +1899,49 @@ it('language tally follows the majority of the last 20 lines', () => {
   - 受け取るメッセージ（宛先 `offscreen`。送り手がこの拡張の service worker であることを確かめる）:
     - `audio/start`: `{ tabId, streamId, settings: { baseUrl, models }, config: LiveConfig }`
       - すぐに `startCapture` で stream id を使う（stream id は使わないと数秒で切れるため）。投影器の確認は background が先に済ませている（下の `Sessions.start`。判断 S7）。
-    - `audio/config`: `{ config: LiveConfig }`
+    - `audio/config`: `{ config: LiveConfig }`。サーバーの URL とモデル名は運ばない。取得中にそれらを変えたときは、次の開始から効く。
     - `audio/front`: `{ front: FrontState }`。変わるたびに `pipeline.mode(front.state)` を呼ぶ（away だけでなく）。ライブの処理は away の後、次の `active` か `pause` まで区切りを捨て、active に戻ると新しい文を始める（Task 12）。
       - active → `discard()`（VAD の `reset`。止めている間に、床の窓が 0 で埋まるため）、`pipeline.mode('active')`、入力をつなぐ。
       - pause → `pipeline.mode('pause')` を `flush()` より先に呼ぶ（away の後でも、flush で閉じた区切りが流れるように）。それから `flush()` し、入力を切る。
       - away → 入力を切って `discard()` し、`pipeline.mode('away')`。
+      - 今と同じ `state` の `audio/front` は何もしない（`reason` だけ変わったもの、起動し直した background が送り直したもの）。
     - `audio/reset`: SPA の遷移のとき。`pipeline.reset()` と `discard()`。
     - `audio/stop`: `{}`
     - `audio/state`: `{}` → `SessionState`
   - 送るメッセージ（宛先 `background`）:
     - `audio/lines`: `{ tabId, lines: LiveLine[] }`
-    - `audio/status`: `{ tabId, status: PillState }`
-    - `audio/idle`: `{ tabId }`。active でない状態が 600,000 ms 続いたとき。
+    - `audio/status`: `{ tabId, status: AudioStatus }`。`AudioStatus = { state: 'active' | 'pause' | 'away' | 'stopped' | 'error'; message?: string }`。ソースと表示は視聴ページが足す。
+    - `audio/idle`: `{ tabId }`。active でない状態が 600,000 ms 続いたとき。background が受け取らなかったら、同じ取得のまま active でなければ、さらに 600,000 ms 後に送り直す。
     - `audio/failed`: `{ tabId, code }`。取得中に `audio_unsupported` などで続けられなくなったとき。
       - `createLivePipeline` の `onFailure` につなぐ。`code` が `audio_unsupported`（取得の途中で投影器がなくなった。HTTP 400）なら `audio/failed` を送り、background が取得を止めてサイドパネルで案内する。ほかの失敗は数えるだけ（`LiveStats.failed`）。
   - `SessionState = Readonly<{ tabId: number; startedAt: number; front: FrontState; stats: LiveStats; translator: TranslatorStatus }>`（`TranslatorStatus` は Task 8）
   - LLM の client は offscreen の中で作る。ASR と翻訳とも `timeoutMs: 8_000` で、キューは `concurrency: 1`。待ちの上限と期限は Task 12 のライブの処理が受け持つ。
   - 訳は Task 8 の `createLineTranslator({ client, config: () => ({ translator: config.translator, model: settings.models.translate }) })` でつくり、ライブの処理の `translate` には、その `ja` だけを返す関数を渡す。`audio/state` の `translator` は、その `status()`。
 - background の `sessions.ts`:
-  - `createSessions(deps: { tabCapture; offscreen: { has(): Promise<boolean>; create(): Promise<Result<void>>; close(): Promise<Result<void>> }; session: StorageArea /* chrome.storage.session */; send: (message: unknown) => Promise<Result<unknown>>; tabs; settings; glossary; pages; fronts: TabFronts /* Task 10 */; timers }): Sessions`
+  - `createSessions(deps: { tabCapture: { getMediaStreamId(targetTabId: number, done: (streamId: string | undefined, error: string | undefined) => void): void }; offscreen: { has(): Promise<Result<boolean>>; create(): Promise<Result<void>>; close(): Promise<Result<void>> }; session: StorageArea & { remove(key: string): Promise<void> } /* chrome.storage.session */; storage: StorageEvents /* chrome.storage.local の変更 */; send: (message: unknown) => Promise<unknown> /* runtime.sendMessage。宛先は足す */; tabs; settings: SettingsStore; subtitles: SubtitleSettingsStore; glossary; pages; fronts: TabFronts /* Task 10 */; fetch; now }): Sessions`
+    - `getMediaStreamId` はコールバックの形で呼び、`runtime.lastError.message` を `error` に渡す。リポジトリの規約で reject を扱えず、`capture` は文言を捨てるため。
   - `Sessions`:
     - `start(tabId: number, streamId?: string): Promise<Result<void>>`
-      1. 別のタブで取得中なら、それを `replaced` で止める。
-      2. background の LLM client で `props({ model: models.asr })` を呼ぶ（ルーターがモデルを読み込む）。`audio: false` なら `audio_unsupported` を返す。stream id は取らず、offscreen も作らない（判断 S7）。`audio: undefined`（サーバーが返さない）は続ける。
-      3. `streamId` がなければ（ショートカットのとき）、`tabCapture.getMediaStreamId({ targetTabId })` を呼ぶ。拡張が呼び出されていないエラーは `capture_not_invoked` にする。
-      4. offscreen を作る（`reasons: ['USER_MEDIA']`）。
-      5. `audio/start` を送る。
-      6. `storage.session` の `capture` に `{ tabId, startedAt }` を書く。
+      1. background の LLM client で `props({ model: models.asr })` を呼ぶ（ルーターがモデルを読み込む）。`audio: false` なら `audio_unsupported` を返す。stream id は取らず、offscreen も作らない（判断 S7）。`audio: undefined`（サーバーが返さない）は続ける。
+      2. `LiveConfig` を読む（設定、文脈、用語集）。
+      3. 別のタブで取得中なら、ここで初めて `replaced` で止める。1 と 2 で断られた開始は、前のタブの取得を止めない。
+      4. `streamId` がなければ、`tabCapture.getMediaStreamId({ targetTabId })` を呼ぶ。拡張が呼び出されていないエラー（`has not been invoked`）は `capture_not_invoked`、ほかは `capture_failed` にする。stream id は 8〜10 秒で切れる（Step 0 (f)）。
+      5. offscreen がなければ作る（`reasons: ['USER_MEDIA']`）。
+      6. `audio/start` を送る。断られたら offscreen を閉じる。
+      7. `storage.session` の `capture` に `{ tabId, startedAt }` を書く。
     - `stop(tabId: number, reason: 'user' | 'tab-closed' | 'left-site' | 'idle' | 'replaced' | 'failed'): Promise<Result<void>>`
       - `audio/stop` を送り、offscreen を閉じ、`storage.session` を消す。タブには `subs/status`（stopped）を送る。
+    - `current(): Promise<Result<{ tabId; startedAt } | undefined>>`: 取得中のタブ（起動し直した後は、戻した後の値）。
+    - `page(tabId, info)`: `subs/page` を受ける（pages に記録してから、取得中のタブなら下の SPA の遷移の処理）。
+    - `lines(tabId, lines)`、`status(tabId, status)`: offscreen の `audio/lines` と `audio/status` を、取得中のタブのトップフレームに `subs/lines`、`subs/status` で回す。
+    - `idle(tabId)`、`failed(tabId, code)`: `audio/idle`、`audio/failed` を受けて止める。
+    - `toggle()`: `toggle-audio`（下）。
+    - `action(tab: { id; url? })`: ツールバーのアイコン（下。判断 S46）。
     - `dispose(): void`: listener をすべて外す。
   - 止める条件:
     - `tabs.onRemoved` → `tab-closed`
-    - `tabs.onUpdated`（`status` が `loading` か `complete`）で、取得中のタブの `url` が見えない、または `https://www.youtube.com/` でない → `left-site`。content script の matches は youtube だけなので、ほかのサイトの URL は見えない。
+    - `tabs.onUpdated`（`status` が `loading` か `complete`）で、取得中のタブの `url` が見えない、または `https://www.youtube.com/` でない → `left-site`。URL は `activeTab` で見える（取得を始めた操作でタブが呼び出されるため）。同じサイトの中の遷移（`pushState` も `loading` を出す）では見えたままで、別のサイトに移ると見えなくなる（Step 0）。
+    - `tabs.onUpdated` と `tabs.onActivated` は、取得中だけ聞く（どのタブの更新でも service worker が起きるため）。起動したときは、起こしたイベントを落とさないように一度足し、`storage.session` に取得がないと分かったら外す。
     - `audio/idle` → `idle`
     - 別のタブの `start` → `replaced`
     - `audio/failed` → `failed`
@@ -1937,12 +1950,23 @@ it('language tally follows the majority of the last 20 lines', () => {
   - 取得中のタブの前面の状態を、`audio/front` で回す。
     - `fronts.onFront`（Task 10 の `tabFronts`）を購読し、取得中のタブの変化だけを回す。`dispose` で購読を外す。
     - `start` では、`audio/start` の後に `fronts.get(tabId)` の今の状態を 1 度送る。報告のないタブは away（`UNKNOWN_FRONT`）として扱い、何も処理しない。
+    - 取得中のタブが、そのウィンドウの前面のタブでないあいだは、ページの報告に関わらず `{ state: 'away', reason: 'hidden' }` を送る。Chrome は取得中のページを裏でも `visible` のままにするので、視聴ページは裏になったことを報告できない（Step 0 (d)）。`tabs.onActivated` と `tabs.get(tabId).active` で見る。
     - offscreen は `audio/front` に従う（下の active、pause、away）。届くまでは away の扱い。
     - service worker が起動し直した後も、`fronts` は `storage.session` から読める。
   - `audio/lines` はタブのトップフレームに `subs/lines` で、`audio/status` は `subs/status` で回す。
   - service worker が起動し直したときは、`storage.session` の `capture` と、`runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` から状態を戻す。
-- `commands` の `toggle-audio`: 今のウィンドウの前面のタブを見る。取得中なら `stop('user')`、YouTube の視聴ページなら `start(tabId)`。
+- `commands` の `toggle-audio`: 最後にフォーカスのあったウィンドウの前面のタブを見る（`lastFocusedWindow`）。取得中なら `stop('user')`、YouTube の視聴ページなら `start(tabId)`。開始が断られたら、ピルに理由を出す（`subs/status` の `error`）。
+- ツールバーのアイコン（ユーザーの決定、2026-11-09。判断 S46）:
+  - `sidePanel.setPanelBehavior({ openPanelOnActionClick: false })` にして、`action.onClicked` を受ける。`openPanelOnActionClick` で開くと、タブが呼び出されず取得できない（Step 0 (a)）。
+  - 受けたら、何も await しないうちに `sidePanel.open({ tabId })` を呼ぶ（ユーザーの操作として扱われるうちに）。それから `Sessions.action` に渡す。
+  - 取得中のタブなら止める（パネルは開いたまま）。
+  - タブの URL の動画と、そのタブが `subs/page` で報告した動画が同じで、`pickSource`（取得中でないとして）が字幕トラックを選ばない（ライブ、字幕トラックなし、取得元に音声を選んでいる）ときだけ始める。報告がない、動画が違う、URL が見えないときは始めない。
+  - ほかでは、パネルを開くだけ。
+  - `Alt+Shift+S` は今までどおり、視聴ページなら始め、取得中なら止める。
 - content script: `subs/lines` を live view に、`subs/status` をボタンの状態に渡す。音声の経路のときは feeder を止める（取得元はそのタブだけ音声になる）。
+  - 受けるのは、宛先が `content` で、送り手がこの拡張（`sender.id`）のものだけ。
+  - `stopped` か `error` で音声の経路をやめ、字幕トラックがあればその経路に戻る。`error` の `message` は、次の動画までピルに出す。
+  - 取得中であることは、同じタブの SPA の遷移の後も覚えておく。読み込み直したページは、`subs/page` への返事として background から `subs/status` を受ける。
 
 - [ ] **Step 0: スパイク（使い捨て。実機で確かめる）**
   - headed の Chrome for Testing で、`--load-extension` で読み込んで確かめる。いつも使う Chrome でも、「パッケージ化されていない拡張機能を読み込む」で確かめる。
@@ -1958,6 +1982,7 @@ it('language tally follows the majority of the last 20 lines', () => {
     - (f) stream id を取ってから `getUserMedia` で使うまで、何秒あいても通るか（1 s、5 s、15 s）。ルーターがモデルを読み込み直すと、`props` に最大 13 s かかる。
   - 結果を `docs/adoption.md` に記録する。
   - (b) が通っても、取得の保ち方は変えない（ユーザーの決定、2026-11-05。判断 S8）。結果は記録だけする。
+  - 結果（2026-11-09、`docs/adoption.md` の Task 13 の節）: (a) パネルのボタンは、アイコンでパネルを開いた後もだめ。`action.onClicked` を受けるアイコンは通る。ショートカットは CDP のキー入力では確かめられない（Task 16）。(b) 通る。(c) `chrome.runtime` だけ、`fetch` は届く。(d) ミュートでも裏でも音は取れ、取得中のページは裏でも `visible` のまま。`--mute-audio` では無音。(e) 48 kHz、ページから offscreen まで約 50 ms。(f) 8 秒は通り、10 秒は切れる。
   - (f) の結果もコントローラーに知らせる。サイドパネルの経路では、パネルを開いたときの `subs/capability` でモデルが読み込まれ、その答えが出るまでボタンを押せない（Task 14）ので、`start` の `props` はふつう待たない。ショートカットの経路は、`props` の後に stream id を取るので切れない。
   - (a) で通らない操作は、サイドパネルの案内（Task 14）から外す。
 - [ ] **Step 1: 失敗するテストを書く**
@@ -2013,6 +2038,32 @@ it('ignores messages that are not addressed to the offscreen document', async ()
 it('translates live lines with the line translator chosen in the config and reports its status', async () => {
   /* config.translator 'plamo'、偽の fetch の /v1/models に PLaMo なし → 訳は Gemma へ。audio/state の translator.fallback.latest は 'not_listed'、lines.not_listed は 1 */
 });
+it('reports idle again ten minutes later when the background did not take the report', async () => {
+  /* audio/idle に失敗を返す → 600,000 ms 後にもう一度。active になった、止まった後は送らない */
+});
+// sessions.test.ts（判断 S46 と、開始の順）
+it('keeps the capture of a tab when another tab cannot start', async () => {
+  /* 別のタブの開始が audio_unsupported → 前のタブは取得したまま。audio/stop 0 回 */
+});
+it.each(['ライブ', '字幕トラックなし', '/live/ の URL', '取得元に音声'])(
+  'starts the audio of a watch page whose captions would show nothing: %s',
+  async () => {
+    /* action({ id, url }) → 取得が始まる */
+  },
+);
+it.each(['字幕トラックあり', '報告なし', '別の動画', 'URL が見えない', '視聴ページでない'])(
+  'only opens the panel on %s',
+  async () => {
+    /* 呼び出し 0 件 */
+  },
+);
+it('stops the capture on a second click on the captured tab', async () => {
+  /* ... */
+});
+// runtime.test.ts
+it('opens the side panel before anything is awaited', async () => {
+  /* onClicked の listener を呼んだ直後（await の前）に sidePanel.open({ tabId }) */
+});
 ```
 
 - [ ] **Step 2: 失敗を確認する**
@@ -2026,7 +2077,7 @@ it('translates live lines with the line translator chosen in the config and repo
 - [ ] **Step 4: 通ることを確認する**
   - Run: `pnpm errors:generate && pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
   - Expected: PASS
-- [ ] **Step 5: 実機で 1 回だけ通して確かめる（手動。投影器のあるサーバーで）**
+- [ ] **Step 5: 実機で 1 回だけ通して確かめる（手動。投影器のあるサーバーで）。2026-11-09 時点のルーターには投影器がない（R61）ので、Task 16 で行う。ビルドした拡張の offscreen の経路は、スタブのサーバーで通した（`docs/adoption.md`）。**
   - 英語の動画で `Alt+Shift+S` を押し、原語と日本語の行が出ること、タブの音が鳴り続けることを確かめる。
   - 一時停止、裏のタブ、タブを閉じる、の 3 つで、サーバーへのリクエストが止まることを、サーバーのログで確かめる。
 - [ ] **Step 6: Commit**
@@ -2044,7 +2095,7 @@ it('translates live lines with the line translator chosen in the config and repo
 
 **Interfaces:**
 
-- Consumes: Task 0 の `PLAMO_LICENSE_URL`、`PLAMO_TRANSLATE_MODEL`、Task 5 の設定と用語集、Task 8 の `TranslatorStatus`、Task 10 の `tabFronts` と `subs/display`（background のキュー）、Task 13 の `SessionState`
+- Consumes: Task 0 の `PLAMO_LICENSE_URL`、`PLAMO_TRANSLATE_MODEL`、Task 5 の設定と用語集、Task 8 の `TranslatorStatus`、Task 10 の `tabFronts` と `subs/display`（background のキュー）、Task 13 の `SessionState`、`Sessions.current()`、`Sessions.stop`、`AudioStatus`
 - `PanelPort`（comment-assistant の `panel.ts` と同じ作り。`watch` を呼ぶまで何も登録しない）:
 
   ```ts
@@ -2062,13 +2113,13 @@ it('translates live lines with the line translator chosen in the config and repo
     capability(
       this: void,
     ): Promise<Result<{ audio: boolean | undefined; plamo: boolean | undefined }>>;
-    startAudio(this: void): Promise<Result<void>>;
-    stopAudio(this: void): Promise<Result<void>>;
+    stopAudio(this: void): Promise<Result<void>>; // 取得中のタブを止める（Sessions.stop(tabId, 'user')）
     watch(this: void, changed: () => void): () => void;
   };
   ```
 
-  - `startAudio` は、Task 13 の Step 0 で通った方式で呼ぶ。パネルのボタンで通るなら、クリックの処理の中で `tabCapture.getMediaStreamId({ targetTabId })` を呼び、`audio/start` `{ tabId, streamId }` を送る。
+  - パネルからは音声を始めない（判断 S46）。Task 13 の Step 0 で、パネルのボタンでは `tabCapture.getMediaStreamId` が通らないと分かった。始めるのはツールバーのアイコンと `Alt+Shift+S`（Task 13）。
+  - 取得中かどうかと、そのタブは `Sessions.current()` を、取得の状態は `AudioStatus`（offscreen の `audio/status` が最後に伝えたもの）と `SessionState` を、`subs/tab-state` で読む。
   - `watch` は、別のタブが前面になったとき、表示中のタブが読み込みを終えたとき、`subs/state-changed`（宛先 `panel`）を受けたときに `changed` を呼ぶ。
   - パネルは `subtitles` の設定を丸ごと保存しない。丸ごと保存すると、その間にプレイヤーのボタンやショートカットで変わった表示を上書きするため。
     - 表示は `subs/display` で送る（`page` からの経路を足す）。Task 10 の background のキューを通る。
@@ -2091,8 +2142,8 @@ it('translates live lines with the line translator chosen in the config and repo
      - 4 つのラジオボタン: 日本語のみ／原語と日本語／原語のみ／オフ
      - 案内: 「プレイヤーの右上のボタンか Alt+Shift+J でも切り替えられます」
   3. **音声**
-     - 「音声で字幕を開始」／「停止」ボタン。案内: 「Alt+Shift+S でも開始・停止できます」
-     - 「音声で字幕を開始」は、パネルを開いたときの `capability` の答えが出るまでと、`audio === false` のときは押せない（判断 S7）。
+     - 取得中のタブでは「停止」ボタン。開始のボタンはない（判断 S46）。
+     - 案内: 「ツールバーのアイコンか Alt+Shift+S で開始」（アイコンで始まるのは、字幕トラックの経路が何も出さない視聴ページだけ）
      - 音声入力の可否:
        - 「音声入力: 使えます」
        - 「音声入力が使えません。llama.cpp のプリセットで mmproj を有効にして、サーバーを再起動してください（docs/llama-server.md）」
@@ -2120,18 +2171,19 @@ it('translates live lines with the line translator chosen in the config and repo
   - 使い方（表示の切り替え、ショートカット、音声の開始と止まる条件）
   - 投影器の有効にし方とメモリ（Task 4 の値）
   - 字幕の翻訳モデル: 既定は Gemma。PLaMo 3 Translate 2B は任意で、利用者が自分で入れる（docs/llama-server.md）。PLaMo Community License の要点（個人と非商用は登録なしで無料、商用は事前の登録と売上の条件、訳を他人に渡すときは「Built with PLaMo」と PLaMo の出力であることの表示）。ルーターにないときと HTTP のエラーのときは Gemma で訳すこと。このリポジトリには PLaMo の出力を入れていないこと。
-  - 権限（`tabCapture`、`offscreen`、`storage`、`sidePanel`）
+  - 権限（`tabCapture`、`offscreen`、`activeTab`、`storage`、`sidePanel`）
   - プライバシー（音声は保存しない。保存するのは設定と用語集だけ）
   - テストの手順
 
 - [ ] **Step 1: 失敗するテストを書く**
 
 ```ts
-it('starts audio from the button and then shows the stop button', async () => {
-  /* Testing Library。startAudio が 1 回、ボタンが「停止」に変わる */
+it('stops the captured tab from the button and shows the start guide otherwise', async () => {
+  /* Testing Library。取得中のタブ: 「停止」で stopAudio が 1 回。取得していないタブ: 開始のボタンはなく、
+     「ツールバーのアイコンか Alt+Shift+S で開始」 */
 });
 it('explains a missing projector with the llama-server.md guidance', async () => {
-  /* capability → { audio: false, plamo: undefined }。「音声で字幕を開始」は押せない */
+  /* capability → { audio: false, plamo: undefined }。mmproj の案内が出る */
 });
 it('shows Built with PLaMo and the license link only while PLaMo is chosen', async () => {
   /* translator 'gemma' → どちらもない。ラジオで PLaMo → subtitles.save に translator 'plamo'、
@@ -2216,6 +2268,7 @@ it('ignores runtime messages that are not addressed to the panel before decoding
   - 期待する一覧を、名前の順の `['@chrome-toolbox/comment-assistant', '@chrome-toolbox/subtitle-translator']` にする。
   - ③ page-translator の計画（Task 11）も同じ名前で `'@chrome-toolbox/page-translator'` を足す。③ のブランチを rebase して衝突したら、一覧は両方を名前の順に残す。
 - Playwright Test には `test.each` がない。行ごとのテストは、行の配列を `for` で回して `test(...)` を呼ぶ（判断 S23）。
+- 音声の経路の E2E は、Playwright が既定で付ける `--mute-audio` を外して起動する（`ignoreDefaultArgs: ['--mute-audio']`、または `realVisibility` の起動の引数から外す）。付けたままだと、取得した音声が無音になる（Task 13 Step 0 (d)）。音を出さずにパイプラインを動かすには `--disable-audio-output` を使う。
 
 **Interfaces:**
 
@@ -2228,8 +2281,8 @@ it('ignores runtime messages that are not addressed to the panel before decoding
 
 - [ ] **Step 0: 確かめる**
   - (a) E2E で本物の `tabCapture` を使えるか。headless の Chrome for Testing 156 で、次を順に試す。
-    1. サイドパネルのページ（タブで開いたもの）のボタンを、Playwright でクリックする。
-    2. CDP で拡張のアクションを起動してから、ショートカットの経路を使う。
+    1. サイドパネルのページ（タブで開いたもの）のボタンを、Playwright でクリックする。Task 13 の Step 0（headed）では通らなかった。
+    2. CDP で拡張のアクションを起動する。Task 13 の Step 0（headed）では、`--enable-unsafe-extension-debugging` と種類が `tab` の target で `Extensions.triggerAction` を呼ぶと `action.onClicked` が届き、タブが呼び出された。判断 S46 の後は、これが本番のアイコンの経路そのもの。
        - アクションの起動を補助の関数にするときは、`packages/extension-core/testing/playwright.ts` の `triggerAction(context: BrowserContext, page: Page): Promise<void>`（CDP の `Extensions.triggerAction`）にする。③ page-translator の Task 1 も同じ名前と形で使う。先に入った方を使い、後の方は足さない（判断 S32）。
   - (b) どちらもだめなら、次の代わりの方式にする。
     - `tools/quality/extension-browser.ts` に、e2e 用のビルド（`wxt build --mode e2e`）を足す。対象は `starter.e2eBuild: true` のパッケージだけ。
@@ -2341,6 +2394,12 @@ test('SOAK_MINUTES of audio subtitles keeps heap and long tasks within budget', 
   - 拡張をビルドし、headed の Chromium にログインせずに読み込む。comment-assistant も読み込む。
   - サーバーは `--parallel 3`。プリセットの `[gemma4-e4b]` で、Task 4 で決めた投影器を有効にする。
   - 用語集に、配信者の名前など固有名詞を 3 つ入れる（訳は空にする）。
+- [ ] **Step 1b: 取得の始め方と止まり方（Task 13 の Step 0 で、自動では確かめられなかったもの）**
+  - ユーザーと一緒に、いつも使う Chrome で「パッケージ化されていない拡張機能を読み込む」から読み込んで確かめる。
+  - 本物のツールバーのクリックで、ライブ（または字幕トラックのない動画）の取得が始まり、もう一度のクリックで止まること。字幕トラックのある動画では、パネルが開くだけであること。
+  - `Alt+Shift+S` で取得が始まり、もう一度で止まること（CDP のキー入力では Chrome のショートカットに届かなかった）。
+  - 取得中のウィンドウを最小化したとき、ほかのウィンドウで覆ったときに、処理が止まるか（取得中のページは裏のタブでも `visible` のまま。裏のタブは `tabs.onActivated` で away にしているが、ウィンドウの最小化と覆いは扱っていない）。止まらなければ、`windows.onFocusChanged` などで away にするかをコントローラーに相談する。
+  - Task 13 の Step 5: 英語の動画で取得し、原語と日本語の行が出ることと、タブの音が鳴り続けることを確かめる。一時停止、裏のタブ、タブを閉じる、の 3 つで、サーバーへのリクエストが止まることを、サーバーのログで確かめる。
 - [ ] **Step 2: 配信ごとに 8 分ずつ確かめる**
   - (a) 英語のライブ配信（必須）。音声の経路。
   - (b) スペイン語、韓国語、インドネシア語のどれかのライブ配信。なければ、字幕トラックのないアーカイブを音声の経路で使う。
