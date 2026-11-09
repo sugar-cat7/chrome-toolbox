@@ -1757,6 +1757,7 @@ it('flush closes the open segment when it is long enough', () => {
   - `createLivePipeline(deps: { asr: AsrClient; translate: (input: LineInput & { signal: AbortSignal }) => Promise<Result<string>>; config: () => LiveConfig; emit: (line: LiveLine) => void; now: () => number; timers: Timers }): LivePipeline`
   - `LivePipeline`:
     - `push(segment: Segment & { endedAt: number }): void`
+      - `endedAt` は「受け取った時刻 − `trailingSilenceMs` − `carriedMs`」。長さで切った区切りは、切った後ろの音（最大 480 ms、Task 11 の `carriedMs`）を受け取り済みなので、それも引く（判断 S45）。
     - `mode(kind: 'active' | 'pause' | 'away'): void`
     - `reset(): void`: SPA の遷移のとき。言語、文脈、開いた文を捨てる。
     - `stats(): LiveStats`
