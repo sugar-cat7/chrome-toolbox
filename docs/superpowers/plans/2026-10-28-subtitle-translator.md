@@ -1274,8 +1274,8 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
   - `LineInput = Readonly<{ source: string; sourceLang: string; previous: readonly string[]; context: string; glossary: readonly GlossaryEntry[]; signal?: AbortSignal }>`
     - Task 12 のライブの処理の `translate` が受け取る形と同じ。`glossary` は `toPromptGlossary` を通したもの。
   - `FallbackReason = 'not_listed' | 'refused' | 'language'`
-  - `TranslatorStatus = Readonly<{ chosen: SubtitleTranslator; fallback?: Readonly<{ reason: FallbackReason; lines: number }> }>`
-    - `fallback` は、PLaMo を選んでいる間に Gemma で訳した行があるときだけ付く。`reason` は直近の理由、`lines` はその行の数。どちらも、インスタンスを作ったときと `chosen` が変わったときに消す。
+  - `TranslatorStatus = Readonly<{ chosen: SubtitleTranslator; fallback?: Readonly<{ latest: FallbackReason; lines: Readonly<Record<FallbackReason, number>> }> }>`
+    - `fallback` は、PLaMo を選んでいる間に Gemma で訳した行があるときだけ付く。`latest` は直近の理由、`lines` は理由ごとの、Gemma で訳せた行の数（判断 S44。理由の違う行を 1 つの数にまとめない）。どちらも、インスタンスを作ったときと `chosen` が変わったときに消す。
   - `createLineTranslator(deps: { client: LlamaClient; config: () => Readonly<{ translator: SubtitleTranslator; model: string }> }): LineTranslator`
     - `config().model` は extension-core の設定の `models.translate`。
   - `LineTranslator = { translate(this: void, input: LineInput): Promise<Result<Readonly<{ ja: string; by: SubtitleTranslator }>>>; status(this: void): TranslatorStatus }`
@@ -1297,6 +1297,8 @@ it('answers subs/translate only for a YouTube top frame and uses that tab page c
 - `createSubtitleTranslator`（Task 7）を直す:
   - deps に `subtitles: () => Promise<Result<SubtitleSettings>>` を足す。1 文ずつ `createLineTranslator` で訳す（`config` は直近に読んだ `subtitles.translator` と `models.translate`）。
   - キャッシュのキーの先頭に、訳したモデル（`by`）と `\u0000` を足す。引くときは、選んでいる `translator` のキーで引く。Gemma に切り替えた行は `gemma` のキーで入る（判断 S20）。
+    - キャッシュの値は `CaptionCacheEntry = Readonly<{ ja: string; chosen: SubtitleTranslator }>`（`chosen` は訳したときに選んでいた翻訳）。
+    - `plamo` のキーで見つからないときは `gemma` のキーも引き、`chosen` が `plamo` の値（PLaMo を選んでいる間に Gemma に切り替えた行）なら、それを使う。同じ行を繰り返すたびに PLaMo と Gemma に送り直さないため。Gemma を選んでいる間に訳した行は、PLaMo には出さない。
   - `status(this: void): TranslatorStatus` を足す。Task 14 のサイドパネルが `subs/tab-state` で読む。
   - `src/runtime.ts` は、background の `createSubtitleTranslator` に `subtitleSettingsStore(storage.local).load` を渡す。
 - `docs/llama-server.md`:
@@ -1322,7 +1324,7 @@ it.each([
   { name: '予約トークンを含む行', source: 'gg <|plamo:tag|> ez', reason: 'refused' },
   { name: '対応していない言語', sourceLang: 'pt', reason: 'language' },
 ])('falls back to Gemma for the line: $name', async (row) => {
-  /* by 'gemma'、Gemma へのチャット 1 回、status.fallback は { reason, lines: 1 } */
+  /* by 'gemma'、Gemma へのチャット 1 回、status.fallback は { latest: reason, lines: { [reason]: 1、ほかは 0 } } */
 });
 it('tries PLaMo again on the next line after a refusal', async () => {
   /* 1 行目 503 → Gemma、2 行目 200 → by 'plamo' */
@@ -1978,7 +1980,7 @@ it('ignores messages that are not addressed to the offscreen document', async ()
   /* target が panel や background のもの、ほかの送り手のもの */
 });
 it('translates live lines with the line translator chosen in the config and reports its status', async () => {
-  /* config.translator 'plamo'、偽の fetch の /v1/models に PLaMo なし → 訳は Gemma へ。audio/state の translator.fallback.reason は 'not_listed' */
+  /* config.translator 'plamo'、偽の fetch の /v1/models に PLaMo なし → 訳は Gemma へ。audio/state の translator.fallback.latest は 'not_listed'、lines.not_listed は 1 */
 });
 ```
 
@@ -2058,10 +2060,10 @@ it('translates live lines with the line translator chosen in the config and repo
      - PLaMo を選んでいる間だけ、次を出す。
        - 「Built with PLaMo」（英語のまま）と、リンク「PLaMo Community License」（`PLAMO_LICENSE_URL`。`target="_blank"`、`rel="noreferrer"`）
        - 案内: 「PLaMo は llama.cpp のサーバーに別に入れます（docs/llama-server.md）」
-     - Gemma に切り替えたことの表示（PLaMo を選んでいるときだけ）:
-       - `capability.plamo === false`、または `fallback.reason === 'not_listed'`: 「サーバーに plamo-3-translate-2b がないため、Gemma で訳しています」
-       - `fallback.reason === 'refused'`: 「PLaMo がエラーを返した {lines} 行を Gemma で訳しました」
-       - `fallback.reason === 'language'`: 「PLaMo が対応していない言語の {lines} 行を Gemma で訳しました」
+     - Gemma に切り替えたことの表示（PLaMo を選んでいるときだけ）。数が 1 以上の理由ごとに 1 行ずつ出し、`fallback.latest` の行を先にする（判断 S44）:
+       - `capability.plamo === false`、または `fallback.lines.not_listed > 0`: 「サーバーに plamo-3-translate-2b がないため、Gemma で訳しています」
+       - `fallback.lines.refused > 0`: 「PLaMo がエラーを返した {lines.refused} 行を Gemma で訳しました」
+       - `fallback.lines.language > 0`: 「PLaMo が対応していない言語の {lines.language} 行を Gemma で訳しました」
   7. **用語集**（配信者ごと）
      - 配信者の名前を見出しにする。
      - 原文と訳の組を、足したり消したりできる。訳が空なら「原文のまま」。
@@ -2096,20 +2098,28 @@ it.each([
   {
     name: 'サーバーにない',
     capability: { plamo: false },
-    text: 'サーバーに plamo-3-translate-2b がないため、Gemma で訳しています',
+    texts: ['サーバーに plamo-3-translate-2b がないため、Gemma で訳しています'],
   },
   {
     name: 'エラー',
-    fallback: { reason: 'refused', lines: 3 },
-    text: 'PLaMo がエラーを返した 3 行を Gemma で訳しました',
+    fallback: { latest: 'refused', lines: { not_listed: 0, refused: 3, language: 0 } },
+    texts: ['PLaMo がエラーを返した 3 行を Gemma で訳しました'],
   },
   {
     name: '対応していない言語',
-    fallback: { reason: 'language', lines: 2 },
-    text: 'PLaMo が対応していない言語の 2 行を Gemma で訳しました',
+    fallback: { latest: 'language', lines: { not_listed: 0, refused: 0, language: 2 } },
+    texts: ['PLaMo が対応していない言語の 2 行を Gemma で訳しました'],
+  },
+  {
+    name: '理由が 2 つ（直近を先に）',
+    fallback: { latest: 'refused', lines: { not_listed: 0, refused: 1, language: 1 } },
+    texts: [
+      'PLaMo がエラーを返した 1 行を Gemma で訳しました',
+      'PLaMo が対応していない言語の 1 行を Gemma で訳しました',
+    ],
   },
 ])('says that lines fell back to Gemma: $name', async (row) => {
-  /* translator 'plamo'。音声の経路のタブでは session.translator を使う */
+  /* translator 'plamo'。音声の経路のタブでは session.translator を使う。texts だけが、この順に出る */
 });
 it.each(DISPLAY_MODES)('saves the display mode %s', async (mode) => {
   /* ... */
