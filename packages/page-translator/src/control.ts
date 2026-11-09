@@ -1,3 +1,4 @@
+import { z } from 'zod/mini';
 import { capture, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import type { StorageArea } from '@chrome-toolbox/extension-core';
 import { MAX_SELECTION, type PageCommand } from './protocol.ts';
@@ -24,6 +25,15 @@ export const COMMAND_ID = 'translate-selection';
  * and the service worker may stop while the prompt waits, so the request outlives both.
  */
 const ASKED_KEY = 'pageAlwaysAsked';
+/**
+ * How long the popup's request waits for Chrome's grant. Answering the prompt takes seconds; a
+ * request the viewer denied must not stay open, or a later grant of the same host made another
+ * way (the options page's llama.cpp address, Chrome's site access menu) would add it to the
+ * always list and take it off the never list.
+ */
+export const ASKED_FOR_MS = 2 * 60_000;
+/** The waiting request: the site's pattern and when it was asked (`now`, ms since the epoch). */
+const askedSchema = z.strictObject({ pattern: z.string(), at: z.number() });
 
 /** The part of `chrome.scripting` the background uses; tests pass a fake with this shape. */
 export type ScriptingApi = {
@@ -99,7 +109,10 @@ export type Control = {
    * Chrome's prompt: the site is added at once when Chrome already grants it, else on `granted`.
    */
   ask(this: void, pattern: string): Promise<Result<void>>;
-  /** Chrome granted `origins`: the site the popup asked for, if among them, is added. */
+  /**
+   * Chrome granted `origins`: the site the popup asked for, if among them and asked for at most
+   * `ASKED_FOR_MS` ago, is added. An older request is dropped instead.
+   */
   granted(this: void, origins: readonly string[]): Promise<Result<void>>;
 };
 
@@ -121,7 +134,14 @@ function cutSelection(text: string): string {
   return text.slice(0, last >= 0xd800 && last <= 0xdbff ? MAX_SELECTION - 1 : MAX_SELECTION);
 }
 
-export function createControl(api: ControlApi): Control {
+/**
+ * `now` is the wall clock (ms since the epoch): a request outlives the service worker that took
+ * it, so a clock that restarts with it would not do.
+ */
+export function createControl(
+  api: ControlApi,
+  { now = (): number => Date.now() }: { now?: () => number } = {},
+): Control {
   const store = pageSettingsStore(api.storage.local);
 
   /**
@@ -252,7 +272,7 @@ export function createControl(api: ControlApi): Control {
     // Only one site's pattern: a wildcard or a page would let the script into other pages.
     if (!site.ok || site.value.pattern !== pattern) return Err(failure('input_invalid'));
     const asked = await capture(
-      () => api.storage.session.set({ [ASKED_KEY]: pattern }),
+      () => api.storage.session.set({ [ASKED_KEY]: { pattern, at: now() } }),
       'storage_failed',
     );
     if (!asked.ok) return asked;
@@ -263,9 +283,14 @@ export function createControl(api: ControlApi): Control {
   async function granted(origins: readonly string[]): Promise<Result<void>> {
     const stored = await capture(() => api.storage.session.get(ASKED_KEY), 'storage_failed');
     if (!stored.ok) return stored;
-    const pattern = stored.value[ASKED_KEY];
-    // Another grant (a LAN llama.cpp host from the options page) adds no site.
-    if (typeof pattern !== 'string' || !origins.includes(pattern)) return Ok(undefined);
+    const asked = askedSchema.safeParse(stored.value[ASKED_KEY]);
+    if (!asked.success) return Ok(undefined);
+    const { pattern, at } = asked.data;
+    // Too old: the viewer denied or left the prompt. The request is dropped, whatever was granted.
+    if (now() - at > ASKED_FOR_MS)
+      return capture(() => api.storage.session.remove(ASKED_KEY), 'storage_failed');
+    // Another grant (a LAN llama.cpp host from the options page) adds no site; the request waits.
+    if (!origins.includes(pattern)) return Ok(undefined);
     const site = siteOf(pattern);
     return site.ok ? join(site.value) : site;
   }

@@ -4,6 +4,7 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
 import {
   ALWAYS_SCRIPT_ID,
+  ASKED_FOR_MS,
   COMMAND_ID,
   createControl,
   MENU_ID,
@@ -201,6 +202,60 @@ describe('always translated sites', () => {
     const control = createControl(fakeChrome([FORUM]).api);
     expect(await control.forget([WIKI, LLAMA])).toEqual(Ok(undefined));
     expect(await loadPage()).toMatchObject({ always: [FORUM], never: ['bank.fixture.test'] });
+  });
+});
+
+describe('the popup asking for an always site', () => {
+  /** A control whose clock the test sets (`clock.now`, in ms). */
+  function asking(): {
+    chrome: ReturnType<typeof fakeChrome>;
+    control: ReturnType<typeof createControl>;
+    clock: { now: number };
+  } {
+    const chrome = fakeChrome();
+    const clock = { now: 1_000_000 };
+    return { chrome, clock, control: createControl(chrome.api, { now: () => clock.now }) };
+  }
+
+  it('joins a site granted within 2 minutes of the request', async () => {
+    await savePage({ never: ['wiki.fixture.test', 'bank.fixture.test'] });
+    const { chrome, control, clock } = asking();
+    expect(ASKED_FOR_MS).toBe(120_000);
+    expect(await control.ask(WIKI)).toEqual(Ok(undefined));
+    // Another grant on the way (a LAN llama.cpp host) leaves the request waiting.
+    clock.now += 60_000;
+    chrome.granted.add(LLAMA);
+    expect(await control.granted([LLAMA])).toEqual(Ok(undefined));
+    clock.now += ASKED_FOR_MS - 60_000;
+    chrome.granted.add(WIKI);
+    expect(await control.granted([WIKI])).toEqual(Ok(undefined));
+    expect(await loadPage()).toMatchObject({ always: [WIKI], never: ['bank.fixture.test'] });
+    // Used once: nothing waits any more.
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+  });
+
+  it('ignores a grant more than 2 minutes after the request, and drops the request', async () => {
+    await savePage({ never: ['wiki.fixture.test'] });
+    const { chrome, control, clock } = asking();
+    // The viewer denied the prompt; later the same host is granted another way (the options
+    // page's llama.cpp address, Chrome's site access menu).
+    expect(await control.ask(WIKI)).toEqual(Ok(undefined));
+    clock.now += ASKED_FOR_MS + 1;
+    chrome.granted.add(WIKI);
+    expect(await control.granted([WIKI])).toEqual(Ok(undefined));
+    expect(await loadPage()).toMatchObject({ always: [], never: ['wiki.fixture.test'] });
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+    // A grant that matches nothing still finds nothing waiting.
+    expect(await control.granted([WIKI])).toEqual(Ok(undefined));
+    expect(await loadPage()).toMatchObject({ always: [], never: ['wiki.fixture.test'] });
+  });
+
+  it('reads a waiting request that is not its own as none', async () => {
+    await fakeBrowser.storage.session.set({ pageAlwaysAsked: WIKI });
+    const { chrome, control } = asking();
+    chrome.granted.add(WIKI);
+    expect(await control.granted([WIKI])).toEqual(Ok(undefined));
+    expect(await loadPage()).toMatchObject({ always: [] });
   });
 });
 
