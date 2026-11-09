@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { BrowserContext, Worker } from '@playwright/test';
+import type { Worker } from '@playwright/test';
 import { expect, test, triggerAction } from '@chrome-toolbox/extension-core/testing';
 import { PAGE_SCRIPT } from '../../src/control.ts';
 import {
+  EXTENSION_PATH,
   fingerprint,
   NO_SERVER,
   ping,
   progressOf,
+  reloadExtension,
   servePage,
   startTranslation,
   tabIdOf,
@@ -19,10 +21,7 @@ import {
 // What the extension may touch at install, and how it gets into a page later: only when the
 // viewer presses the toolbar button (activeTab), into the tab's top frame.
 
-const extensionPath = path.resolve(
-  process.env.STARTER_EXTENSION_PATH ?? path.join(import.meta.dirname, '../../dist/chrome-mv3'),
-);
-const manifestPath = path.join(extensionPath, 'manifest.json');
+const manifestPath = path.join(EXTENSION_PATH, 'manifest.json');
 const PLAIN = 'https://wiki.fixture.test/plain';
 const plainHtml = `<!doctype html>
 <html lang="en">
@@ -45,20 +44,6 @@ const inject = (serviceWorker: Worker, tabId: number): Promise<string> =>
         ),
     { tabId, file: PAGE_SCRIPT },
   );
-
-/**
- * Loads the unpacked directory again, which reloads the extension (same id): the page scripts
- * already in pages are orphaned, and the tabs' activeTab grants are gone. The new service worker.
- */
-async function reloadExtension(context: BrowserContext): Promise<Worker> {
-  const browser = context.browser();
-  if (browser === null) throw new Error('the browser is not connected over CDP');
-  const session = await browser.newBrowserCDPSession();
-  const reloaded = context.waitForEvent('serviceworker');
-  await session.send('Extensions.loadUnpacked', { path: extensionPath });
-  await session.detach();
-  return reloaded;
-}
 
 test('the manifest asks for no site access at install', async () => {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;

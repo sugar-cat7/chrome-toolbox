@@ -38,6 +38,7 @@
     "wxt": "catalog:"
   },
   "starter": {
-    "runtime": "extension"
+    "runtime": "extension",
+    "soak": true
   }
 }
