@@ -1,15 +1,7 @@
 import { browser } from 'wxt/browser';
 import type { ScriptPublicPath } from 'wxt/utils/inject-script';
 import { Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
-import {
-  connectionPort,
-  createQueue,
-  llmHandlers,
-  settingsStore,
-  type ConnectionPort,
-  type HostPermissions,
-  type StorageArea,
-} from '@chrome-toolbox/extension-core';
+import { createQueue, llmHandlers, settingsStore } from '@chrome-toolbox/extension-core';
 import {
   COMMAND_ID,
   createControl,
@@ -21,22 +13,6 @@ import {
 import { pageProtocol, type PageProtocolHandlers } from './protocol.ts';
 import { pageSettingsStore } from './settings.ts';
 import { createPageTranslator } from './translator.ts';
-
-/** The extension APIs the options page uses; tests pass a fake with this shape. */
-export type PanelApi = {
-  storage: { local: StorageArea };
-  permissions: HostPermissions;
-  runtime: { sendMessage(message: unknown): Promise<unknown> };
-};
-
-/** Options page adapter: settings in extension storage, inference through the service worker. */
-export function optionsPort(api: PanelApi = browser): ConnectionPort {
-  return connectionPort({
-    settings: settingsStore(api.storage.local),
-    permissions: api.permissions,
-    send: (message) => api.runtime.sendMessage(message),
-  });
-}
 
 /** The part of `runtime.MessageSender` that names the sending page and frame. */
 type Sender = Readonly<{

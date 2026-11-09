@@ -6,7 +6,7 @@ import { defaultSettings, PLAMO_TRANSLATE_MODEL } from '@chrome-toolbox/extensio
 import { STUB_PAGE_PREFIX, STUB_PLAMO_PREFIX } from '@chrome-toolbox/extension-core/testing';
 import { claimPage } from '../../src/content/claim.ts';
 import { injectPage, PAGE_SCRIPT, type ScriptingApi } from '../../src/control.ts';
-import { optionsPort, senderKind, startBackground, type PanelApi } from '../../src/runtime.ts';
+import { senderKind, startBackground } from '../../src/runtime.ts';
 import { defaultPageSettings } from '../../src/settings.ts';
 import { fakeBackground } from './chrome.ts';
 import { gate, llama } from './llama.ts';
@@ -85,29 +85,6 @@ describe('extension runtime wiring', () => {
     expect(fakeBrowser.runtime.onMessage.hasListeners()).toBe(false);
     expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(false);
     expect(fakeBrowser.storage.local.onChanged.hasListeners()).toBe(false);
-  });
-
-  it('saves the options page URL in extension storage before asking the background', async () => {
-    const send = vi.fn<PanelApi['runtime']['sendMessage']>(async () =>
-      Ok({ models: ['stub-model'] }),
-    );
-    const port = optionsPort({
-      storage: fakeBrowser.storage,
-      permissions: { contains: async () => true, request: async () => false },
-      runtime: { sendMessage: send },
-    });
-    expect(await port.load()).toEqual(Ok('http://127.0.0.1:18083'));
-    expect(await port.check('http://127.0.0.1:8081/')).toEqual(Ok({ models: ['stub-model'] }));
-    expect(send).toHaveBeenCalledWith({
-      type: 'llm/status',
-      payload: { baseUrl: 'http://127.0.0.1:8081' },
-    });
-    expect(await fakeBrowser.storage.local.get('settings')).toEqual({
-      settings: {
-        llamaBaseUrl: 'http://127.0.0.1:8081',
-        models: { translate: 'gemma4-e4b', clef: 'clef-flash', asr: 'gemma4-e4b' },
-      },
-    });
   });
 
   it.each([
