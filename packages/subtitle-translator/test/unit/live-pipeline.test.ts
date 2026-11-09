@@ -242,6 +242,27 @@ describe('live pipeline', () => {
     ]);
   });
 
+  it('applies a translation only to the version it translated: nothing grows a sentence under it', async () => {
+    const t = start();
+    await t.say('en\tOkay chat', { durationMs: 800 });
+    // The next segment of the same sentence waits: one request at a time, the translation first.
+    t.push({ durationMs: 900, gapBeforeMs: 200 });
+    expect(t.log).toEqual(['asr:800', 'translate:Okay chat']);
+    vi.advanceTimersByTime(400);
+    await t.translateNext();
+    expect(t.log).toEqual(['asr:800', 'translate:Okay chat', 'asr:900']);
+    await t.hear('en\twe are going in.');
+    vi.advanceTimersByTime(600);
+    await t.translateNext();
+    const done = t.lines.filter((line) => line.state === 'done');
+    expect(done.map((line) => [line.source, line.ja])).toEqual([
+      ['Okay chat', '訳:Okay chat'],
+      ['Okay chat we are going in.', '訳:Okay chat we are going in.'],
+    ]);
+    // Each Japanese latency runs from its own version's speech end (both ended at START).
+    expect(t.stats()).toMatchObject({ jaP50Ms: 400, jaP95Ms: 1000 });
+  });
+
   it.each<{ name: string; first: [string, Speech?][]; next: [string, Speech?] }>([
     {
       name: '700ms の間',
@@ -417,6 +438,19 @@ describe('live pipeline', () => {
     await t.say('en\twe are going in.');
     expect(t.rows().at(-1)).toEqual([1, 'we are going in.', 'pending', true, undefined]);
     expect(t.translateCalls[1]?.input.previous).toEqual(['Okay chat']);
+  });
+
+  it('away keeps the translation an open sentence already shows when it closes it', async () => {
+    const t = start();
+    await t.say('en\tOkay chat');
+    await t.translateNext();
+    t.pipeline.mode('away');
+    expect(t.rows()).toEqual([
+      [0, 'Okay chat', 'pending', false, undefined],
+      [0, 'Okay chat', 'done', false, '訳:Okay chat'],
+      [0, 'Okay chat', 'done', true, '訳:Okay chat'],
+    ]);
+    expect(t.stats()).toMatchObject({ dropped: 0, skipped: 0 });
   });
 
   it('starts a new sentence after a pause: the gap across it is unknown', async () => {

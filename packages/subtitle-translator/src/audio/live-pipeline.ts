@@ -367,15 +367,21 @@ export function createLivePipeline(deps: {
 
   function translated(job: TranslationJob, result: Result<string>): void {
     const { sentence } = job;
-    if (result.ok) {
-      sentence.state = 'done';
-      sentence.ja = result.value;
-      jaLatency.record(now() - job.endedAt);
-    } else {
-      counts.failed += 1;
-      sentence.state = 'failed';
+    if (!result.ok) counts.failed += 1;
+    // Only the version it translated takes the result (no stale `ja`, no latency of an old
+    // version). With one request at a time a sentence cannot grow under its running translation;
+    // the check matters only if the queue ever runs more than one.
+    const current =
+      job.source === sentence.source &&
+      !translationsWaiting.some((other) => other.sentence === sentence);
+    if (current) {
+      if (result.ok) {
+        sentence.state = 'done';
+        sentence.ja = result.value;
+        jaLatency.record(now() - job.endedAt);
+      } else sentence.state = 'failed';
+      emit(lineOf(sentence));
     }
-    emit(lineOf(sentence));
     if (!result.ok) deps.onFailure?.(result.error);
   }
 
@@ -458,7 +464,12 @@ export function createLivePipeline(deps: {
       if (run.job.kind === 'asr') counts.dropped += 1;
       else touched.push(run.job.sentence);
     }
-    for (const sentence of touched) skip(sentence);
+    for (const sentence of touched) {
+      counts.skipped += 1;
+      // A sentence that already shows a translation keeps it; only the dropped request counts.
+      // (A sentence waiting for its translation has none today: a new version clears it.)
+      if (sentence.ja === undefined) sentence.state = 'skipped';
+    }
     lead = noLead();
     arm();
     return touched;
