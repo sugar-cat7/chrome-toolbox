@@ -642,8 +642,8 @@ describe('segmentsOf and the scanner', () => {
     do {
       sliceStart = ticks;
     } while (clock.runNext());
-    expect(slices.length).toBeGreaterThanOrEqual(2);
-    expect(Math.max(...slices.map((slice) => slice.ticks))).toBeLessThanOrEqual(800);
+    // Each slice stops at 8 ms, 800 lines, also inside the one block.
+    expect(slices.map((slice) => slice.ticks)).toEqual([800, 800, 400]);
     const segments = slices.flatMap((slice) => slice.segments);
     expect(segments.map(source)).toEqual(
       Array.from({ length: 2000 }, (_, i) => `Line ${i} of the guide.`),

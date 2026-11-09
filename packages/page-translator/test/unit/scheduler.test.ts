@@ -8,6 +8,7 @@ import {
   PAGE_TIMING,
   type Scheduler,
 } from '../../src/content/scheduler.ts';
+import { scanCursor, type Segment } from '../../src/content/segment.ts';
 import { createWriter, type Writer } from '../../src/content/writer.ts';
 import {
   progressSchema,
@@ -26,6 +27,8 @@ import {
 /** What the fake server puts before each text it translates. */
 const TRANSLATED = '訳:';
 const FLUSH = PAGE_TIMING.mutationFlushMs;
+/** Global Constraints: a scan works at most 8 ms before it yields to the page. */
+const SLICE_MS = 8;
 /**
  * Lets the scheduler go on. A zero-delay timer set while fake timers run fires 1 ms later, so the
  * scan slices and the observer's reports each take a millisecond here.
@@ -114,17 +117,20 @@ function recordingTimers(): { timers: Timers; delays: number[] } {
   };
 }
 
-/** A writer that counts its writes and releases, and lists what it released. */
+/** A writer that counts its writes and releases, and lists what it released, with its text then. */
 function countingWriter(writer: Writer): {
   writer: Writer;
   counts: { write: number; release: number };
   released: (Element | ShadowRoot)[];
+  releasedText: (string | null)[];
 } {
   const counts = { write: 0, release: 0 };
   const released: (Element | ShadowRoot)[] = [];
+  const releasedText: (string | null)[] = [];
   return {
     counts,
     released,
+    releasedText,
     writer: {
       ...writer,
       write: (segment, pieces, mode) => {
@@ -134,6 +140,7 @@ function countingWriter(writer: Writer): {
       release: (block) => {
         counts.release += 1;
         released.push(block);
+        releasedText.push(block.textContent);
         writer.release(block);
       },
     },
@@ -434,6 +441,9 @@ describe('createScheduler', () => {
     expect(paragraph.textContent).toBe(
       `${TRANSLATED}Counter value is ${TRANSLATED}thirteen ${TRANSLATED}now`,
     );
+    // The writer holds exactly the paragraphs done: the old one was given back, not kept apart.
+    expect(writer.size()).toBe(scheduler.progress().done);
+    expect(scheduler.progress()).toMatchObject({ found: 1, tracked: 1, done: 1 });
     scheduler.stop();
     writer.restore({ sliced: false });
     expect(paragraph.textContent).toBe('Counter value is thirteen now');
@@ -503,13 +513,13 @@ describe('createScheduler', () => {
     await answer(calls, 0);
     expect(must(first).textContent).toBe(`${TRANSLATED}${line(1)}`);
     counted.released.length = 0;
-    host.attachShadow({ mode: 'open' }).innerHTML = '<p data-n="2">Late shadow words.</p>';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<p data-n="2">Late shadow words.</p>';
     scheduler.start();
     await next();
     expect(calls.map(sourcesOf)).toEqual([[line(1)], ['Late shadow words.']]);
-    // The translated paragraph was not given back and made again.
-    expect(counted.released.length).toBeGreaterThan(0);
-    expect(counted.released).not.toContain(first);
+    // Only the containers holding no paragraph yet are made again; the translated one is kept.
+    expect(counted.released).toEqual([document.body, host, shadow, shadow.querySelector('p')]);
     expect(must(first).textContent).toBe(`${TRANSLATED}${line(1)}`);
   });
 
@@ -602,8 +612,56 @@ describe('createScheduler', () => {
       expect(asked).toBe(retried ? 2 : 1);
       expect(scheduler.progress().failed).toBe(retried ? 0 : 2);
       expect(scheduler.progress().notice).toBeUndefined();
+      // Each send counts an attempt: the third failure is the last.
+      await vi.advanceTimersByTimeAsync(400_000);
+      expect(asked).toBe(retried ? PAGE_TIMING.attempts : 1);
+      expect(scheduler.progress()).toMatchObject({ failed: 2, done: 0 });
+      expect(scheduler.progress().notice).toBe(retried ? 'unreachable' : undefined);
     },
   );
+
+  it('clears unreachable once a request goes through, keeping the failed paragraphs counted', async () => {
+    // The choice: `notice` tells whether llama.cpp answers now; the paragraphs that failed stay
+    // in `failed` (原文のまま) until the page is translated again.
+    paragraphs(3);
+    nearOnly((n) => n <= 2);
+    let down = true;
+    const { scheduler } = start({
+      translate: (request) =>
+        Promise.resolve(down ? Err(failure('network_failed')) : replyTo(request)),
+    });
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(scheduler.progress()).toMatchObject({ failed: 2, notice: 'unreachable' });
+    down = false;
+    nearOnly(() => true);
+    io.update();
+    await next();
+    expect(scheduler.progress()).toMatchObject({ failed: 2, done: 1 });
+    expect(scheduler.progress().notice).toBeUndefined();
+  });
+
+  it('gives a changed block back before reading it again', async () => {
+    document.body.innerHTML = '<p data-n="1">Counter value is <b>twelve</b> now</p>';
+    const paragraph = must(document.querySelector('p'));
+    const bold = must(paragraph.querySelector('b')?.firstChild);
+    assert.instanceOf(bold, Text);
+    nearOnly(() => true);
+    const counted = countingWriter(createWriter(document));
+    const { calls } = start({ writer: counted.writer });
+    await next();
+    await answer(calls, 0);
+    counted.released.length = 0;
+    counted.releasedText.length = 0;
+    bold.data = 'thirteen';
+    await vi.advanceTimersByTimeAsync(AFTER_FLUSH);
+    // Released once, while the rest of it still showed the translation…
+    expect(counted.released).toEqual([paragraph]);
+    expect(counted.releasedText).toEqual([
+      `${TRANSLATED}Counter value is thirteen ${TRANSLATED}now`,
+    ]);
+    // …so the scan after it read the original text.
+    expect(sourcesOf(calls[1])).toEqual(['Counter value is thirteen now']);
+  });
 
   it('fails only the paragraph whose unit came back without pieces', async () => {
     const elements = paragraphs(2);
@@ -675,6 +733,23 @@ describe('createScheduler', () => {
     await vi.advanceTimersByTimeAsync(AFTER_FLUSH);
     expect(observed()).not.toContain(late);
     expect(calls).toHaveLength(0);
+    // The page drops ten blocks (60 paragraphs): there is room again, and the flag clears.
+    const blocks = [...document.querySelectorAll('p[data-n]')].filter((p) => p !== late);
+    for (const block of blocks.slice(0, 10)) block.remove();
+    await vi.advanceTimersByTimeAsync(AFTER_FLUSH);
+    expect(scheduler.progress()).toMatchObject({ tracked: PAGE_LIMITS.tracked - 60, limit: false });
+    // A paragraph the page adds now is taken in; the one left out earlier waits for a new start.
+    const later = make(0);
+    document.body.append(later);
+    await vi.advanceTimersByTimeAsync(AFTER_FLUSH);
+    expect(observed()).toContain(later);
+    expect(observed()).not.toContain(late);
+    // A new start scans for what was left out: the room fills up (the first in page order) and
+    // the flag is set again.
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(observed()).toContain(late);
+    expect(scheduler.progress()).toMatchObject({ tracked: PAGE_LIMITS.tracked, limit: true });
   });
 
   it('stops scanning at 5,000 watched blocks and goes on when some are let go', async () => {
@@ -725,16 +800,55 @@ describe('createScheduler', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('refills the waiting list where it stopped, without sorting the page again', async () => {
+    // 1,000 near blocks: more units than the waiting list holds.
+    paragraphs(1000);
+    nearOnly(() => true);
+    const compare = vi.spyOn(Node.prototype, 'compareDocumentPosition');
+    const { scheduler, calls } = start();
+    await next();
+    await answerAll(calls);
+    expect(scheduler.progress()).toMatchObject({ done: 1000, waiting: 0 });
+    expect(calls.flatMap(sourcesOf)).toEqual(range(1, 1000).map(line));
+    // The blocks are put in page order once, as they come near (n log n), not again per batch.
+    expect(compare.mock.calls.length).toBeLessThan(2 * 1000 * Math.log2(1000));
+  });
+
   it('translates a block of many lines in turn, scanning it in slices', async () => {
     document.body.innerHTML = `<div data-n="1">${range(1, 1000).map(line).join('<br>')}</div>`;
     nearOnly(() => true);
+    // The steps a scan of the body takes: each visits one element or reads one child.
+    const cursor = scanCursor({ root: document.body, hint: undefined, nextId: () => 0 });
+    const out: Segment[] = [];
+    let steps = 1;
+    while (cursor.step(out)) steps += 1;
+    expect(out).toHaveLength(1000);
+    // A fake clock: each look at it is 1 ms later, and the scheduler looks once per step.
+    let clock = 0;
+    const spans: number[] = [];
     const { timers, delays } = recordingTimers();
-    let ticks = 0;
-    // Each look at the clock is 0.05 ms later: a slice ends after 160 of them.
-    const { scheduler, calls } = start({ timers, now: () => (ticks += 0.05) });
-    await next();
-    expect(delays.filter((ms) => ms === 0).length).toBeGreaterThan(5);
+    const sliced: Timers = {
+      set: (fn, ms) =>
+        timers.set(
+          ms !== 0
+            ? fn
+            : () => {
+                const started = clock;
+                fn();
+                // From the slice's first look at the clock to its last.
+                if (clock > started) spans.push(clock - started - 1);
+              },
+          ms,
+        ),
+      clear: (id) => timers.clear(id),
+    };
+    const { scheduler, calls } = start({ timers: sliced, now: () => (clock += 1) });
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(scheduler.progress().found).toBe(1000);
+    // Every slice stops at SLICE_MS: one zero-delay yield per 8 steps.
+    expect(delays.filter((ms) => ms === 0)).toHaveLength(Math.ceil(steps / SLICE_MS));
+    expect(spans).toHaveLength(Math.ceil(steps / SLICE_MS));
+    expect(Math.max(...spans)).toBe(SLICE_MS);
     await answerAll(calls);
     expect(calls.every((call) => call.request.units.length <= PAGE_LIMITS.batchUnits)).toBe(true);
     expect(calls.flatMap(sourcesOf)).toEqual(range(1, 1000).map(line));

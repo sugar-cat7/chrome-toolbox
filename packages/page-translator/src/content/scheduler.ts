@@ -117,14 +117,16 @@ export type SchedulerOptions = Readonly<{
 export type Scheduler = {
   /**
    * Starts: scans the page and watches it once it is visible (a hidden page waits for
-   * `visibilitychange`). Called again while running, it clears the failures and looks again at
-   * the paragraphs near the viewport.
+   * `visibilitychange`). Called again while running, it clears the failures, looks again at the
+   * paragraphs near the viewport and scans for what is not taken in yet (a shadow root attached
+   * since, paragraphs left out at the limit), leaving what is taken in as it is.
    */
   start(): void;
   /**
    * Stops at once (a second call does nothing): the observers, the timers, the listener and the
    * cache go, and the running request is aborted. The page keeps what was written: restoring it
-   * is the writer's. `start` begins again from nothing.
+   * is the writer's. `start` begins again from nothing. The page script calls it on `pagehide`
+   * (not on WXT's `ctx.onInvalidated`, P18), and before `writer.restore` (P27).
    */
   stop(): void;
   progress(): Progress;
@@ -141,6 +143,8 @@ type Paragraph = {
   pieces: (readonly string[] | undefined)[];
   state: 'pending' | 'done' | 'failed' | 'stale';
   dead: boolean;
+  /** In the left-out list: some of its units found the waiting list full. */
+  leftOut: boolean;
 };
 
 /** A block with paragraphs: whether the IntersectionObserver watches it, and how many are pending. */
@@ -195,8 +199,8 @@ type Scanning = Readonly<{ job: Job; cursor: ScanCursor }>;
  *   aborted by the background) is sent again after `retryMs`; after `attempts` its paragraphs
  *   fail (`notice: 'unreachable'`). Any other failure, and a unit that comes back without pieces,
  *   fails its paragraphs at once.
- * - At `tracked` paragraphs no new one is taken (`limit`); at `observedBlocks` watched blocks the
- *   scan waits until one is let go.
+ * - At `tracked` paragraphs no new one is taken (`limit`, cleared when removals make room); at
+ *   `observedBlocks` watched blocks the scan waits until one is let go.
  */
 export function createScheduler(options: SchedulerOptions): Scheduler {
   const { doc, writer, translate, mode, onProgress } = options;
@@ -220,8 +224,12 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   const unwatched = new Set<Element>();
   let watching = 0;
   const waiting = new Map<string, Unit>();
-  /** Units were left out at the `waiting` limit: the near blocks are read again when there is room. */
-  let overflowed = false;
+  /**
+   * Pending paragraphs of near blocks some of whose units found the waiting list full, in the
+   * order they came, from `leftHead`: each refill goes on where the last one stopped.
+   */
+  let leftOut: Paragraph[] = [];
+  let leftHead = 0;
   let flight: Flight | undefined;
   const cache = createLruCache<string, readonly string[]>({ max: PAGE_LIMITS.cache });
 
@@ -240,10 +248,14 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let flushTimer: number | undefined;
   let retryTimer: number | undefined;
 
-  let found = 0;
+  /**
+   * Paragraphs taken in, whatever their state. Each holds its original text in the writer once
+   * written, and every one forgotten is given back first (`reset`, `sweep`), so the writer holds
+   * exactly the `done` ones: this count is the only one kept, reported as `found` and `tracked`.
+   */
+  let tracked = 0;
   let done = 0;
   let failed = 0;
-  let tracked = 0;
   let limit = false;
   let notice: Progress['notice'];
   let translator: Progress['translator'];
@@ -262,7 +274,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return {
       state: running ? 'on' : 'idle',
       mode: mode(),
-      found,
+      found: tracked,
       done,
       waiting: waiting.size + (flight?.units.length ?? 0),
       failed,
@@ -358,8 +370,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   /** Forgets `paragraph` (its block's records are the caller's). */
   function kill(paragraph: Paragraph): void {
     paragraph.dead = true;
-    found -= 1;
-    tracked = Math.max(0, tracked - 1);
+    tracked -= 1;
     if (paragraph.state === 'done') done -= 1;
     else if (paragraph.state === 'failed') failed -= 1;
     unqueue(paragraph);
@@ -390,9 +401,13 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     if (paragraph.pieces.every((piece) => piece !== undefined)) complete(paragraph);
   }
 
-  /** Puts `paragraph`'s untranslated units in the waiting list (the cache first). */
-  function enqueue(paragraph: Paragraph): void {
-    if (paragraph.dead || paragraph.state !== 'pending') return;
+  /**
+   * Puts `paragraph`'s untranslated units in the waiting list (the cache first). False when the
+   * list was full for one of them: the paragraph is then in the left-out list.
+   */
+  function enqueue(paragraph: Paragraph): boolean {
+    if (paragraph.dead || paragraph.state !== 'pending') return true;
+    let full = false;
     for (const [i, unit] of paragraph.segment.units.entries()) {
       if (paragraph.pieces[i] !== undefined) continue;
       const cached = cache.get(unit.key);
@@ -406,7 +421,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         continue;
       }
       if (waiting.size >= PAGE_LIMITS.waiting) {
-        overflowed = true;
+        full = true;
         continue;
       }
       let chars = 0;
@@ -425,7 +440,15 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         waiters: new Set([paragraph]),
       });
     }
+    if (full) {
+      if (!paragraph.leftOut) {
+        paragraph.leftOut = true;
+        leftOut.push(paragraph);
+      }
+      return false;
+    }
     if (paragraph.pieces.every((piece) => piece !== undefined)) complete(paragraph);
+    return true;
   }
 
   /** Takes `segment` in, unless its container is another job's this round or the limit is met. */
@@ -448,10 +471,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       pieces: segment.units.map(() => undefined),
       state: 'pending',
       dead: false,
+      leftOut: false,
     };
     entry.paragraphs.push(paragraph);
     entry.pending += 1;
-    found += 1;
     tracked += 1;
     // A text translated before (a copy, a block the page drew again) is written at once.
     let all = true;
@@ -507,9 +530,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       for (const container of containers) writer.release(container);
     }
     for (const block of unwatched) if (!block.isConnected) unwatched.delete(block);
-    // The count follows each paragraph taken in and forgotten; the writer may hold more (a
-    // paragraph it kept apart), so it is put right here rather than at each segment.
-    tracked = Math.max(found, writer.size());
+    // Room again: paragraphs the page adds from now on are taken in (those left out before wait
+    // for a new start, which scans for them).
+    limit = tracked >= PAGE_LIMITS.tracked;
   }
 
   // --- Batches -----------------------------------------------------------------------------------
@@ -522,14 +545,28 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return false;
   }
 
-  /** Reads the near blocks again for the units left out at the `waiting` limit. */
+  /**
+   * Puts the left-out paragraphs in the waiting list while it has room, from where the last
+   * refill stopped. One no longer pending or near leaves the list: its block coming near again
+   * enqueues it again.
+   */
   function refill(): void {
-    overflowed = false;
-    for (const block of inPageOrder([...near]))
-      for (const paragraph of blocks.get(block)?.paragraphs ?? []) {
-        enqueue(paragraph);
-        if (overflowed) return;
-      }
+    while (waiting.size < PAGE_LIMITS.waiting) {
+      const paragraph = leftOut[leftHead];
+      if (paragraph === undefined) break;
+      const wait =
+        !paragraph.dead && paragraph.state === 'pending' && near.has(paragraph.segment.block);
+      if (wait && !enqueue(paragraph)) break;
+      paragraph.leftOut = false;
+      leftHead += 1;
+    }
+    if (leftHead >= leftOut.length) {
+      leftOut = [];
+      leftHead = 0;
+    } else if (leftHead > PAGE_LIMITS.waiting && 2 * leftHead > leftOut.length) {
+      leftOut = leftOut.slice(leftHead);
+      leftHead = 0;
+    }
   }
 
   /** Puts `units` back at the head of the waiting list. */
@@ -550,7 +587,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   function pump(): void {
     if (!running || !begun || !visible() || flight !== undefined || retryTimer !== undefined)
       return;
-    if (overflowed && waiting.size < PAGE_LIMITS.waiting) refill();
+    if (waiting.size < PAGE_LIMITS.waiting) refill();
     const units: Unit[] = [];
     let chars = 0;
     for (const [key, unit] of waiting) {
@@ -683,6 +720,8 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     for (let job = jobs.shift(); job !== undefined; job = jobs.shift()) {
       if (!job.root.isConnected) continue;
       const current = job;
+      // A shallow job reads its root only: it is made again here, also when it reads nothing
+      // now (skipped, or no block any more). A deep job makes each container it meets again.
       if (current.shallow) claim(current, current.root);
       const cursor = scanCursor({
         root: current.root,
@@ -690,7 +729,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         nextId,
         shallow: current.shallow,
         onShadowRoot,
-        onContainer: (container) => claim(current, container),
+        ...(current.shallow ? {} : { onContainer: (container) => claim(current, container) }),
       });
       return { job: current, cursor };
     }
@@ -736,6 +775,8 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
    */
   function rescanAll(): void {
     const root = doc.body ?? doc.documentElement;
+    // Every paragraph is taken in again: one left out at `tracked` sets the flag again.
+    limit = false;
     jobs = [];
     scanning = undefined;
     shadows.clear();
@@ -998,9 +1039,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       added = new Set();
       removed = false;
       overflow = false;
-      overflowed = false;
+      leftOut = [];
+      leftHead = 0;
       watching = 0;
-      found = 0;
       done = 0;
       failed = 0;
       tracked = 0;

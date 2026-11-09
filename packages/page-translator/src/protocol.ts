@@ -40,9 +40,12 @@ export type TranslateReply = {
 const count = z.int().check(z.minimum(0));
 /**
  * How a tab's translation goes, for the popup. Counts are paragraphs (`waiting`: units waiting
- * or asked for); `tracked` is how many paragraphs hold or will hold their original text, and
- * `limit` that new paragraphs were left untranslated at `PAGE_LIMITS.tracked`. `notice` tells
- * why paragraphs stay original (`unreachable`) or that Gemma stands in for PLaMo.
+ * or asked for). `found` is the paragraphs taken in; each holds or will hold its original text,
+ * so `tracked` is the same count, kept for the limit line: `limit` is set when a new paragraph
+ * was left untranslated at `PAGE_LIMITS.tracked`, and clears once the page has room again.
+ * `notice` tells whether llama.cpp answers now (`unreachable`: the last batch could not be sent
+ * after its retries; the paragraphs that failed stay in `failed` until the page is translated
+ * again) or that Gemma stands in for PLaMo.
  */
 export const progressSchema = z.strictObject({
   state: z.enum(['idle', 'on', 'restoring', 'restored']),
