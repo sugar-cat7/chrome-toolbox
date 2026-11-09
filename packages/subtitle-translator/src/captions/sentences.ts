@@ -12,8 +12,8 @@ export type Sentence = Readonly<{ id: string; startMs: number; endMs: number; so
 
 type Span = { startMs: number; endMs: number; text: string };
 
-/** A sentence-ending mark, then any closing quotes or brackets. */
-const SENTENCE_END = /[.?!。？！][”’"')\]」』]*$/u;
+/** A sentence-ending mark, then any closing quotes or brackets (the live pipeline uses it too). */
+export const SENTENCE_END = /[.?!。？！][”’"')\]」』]*$/u;
 
 /** Kanji, kana and CJK punctuation (by script extension), and fullwidth forms such as ！？（）. */
 const CJK_END = /[\p{scx=Han}\p{scx=Hira}\p{scx=Kana}\uFF01-\uFF60]$/u;
@@ -30,9 +30,9 @@ const HANGUL_START = /^\p{sc=Hangul}/u;
  *   fullwidth form: Chinese and Japanese put no space between words, nor next to a Latin word;
  * - a space otherwise.
  * Cue texts are trimmed (`parseJson3` trims them and `spansOf` again), so a space already at the
- * edge of a cue never decides the join.
+ * edge of a cue never decides the join. The live pipeline joins trimmed transcripts the same way.
  */
-function separator(before: string, after: string, korean: boolean): string {
+export function separator(before: string, after: string, korean: boolean): string {
   if (korean || HANGUL_END.test(before) || HANGUL_START.test(after)) return ' ';
   return CJK_END.test(before) || CJK_START.test(after) ? '' : ' ';
 }
