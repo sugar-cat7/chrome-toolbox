@@ -9,6 +9,8 @@ import {
   STUB_TOPIC,
   summaryReply,
   test,
+  withSlots,
+  type Responder,
 } from '@chrome-toolbox/extension-core/testing';
 import { filterKey } from '../../src/filters.ts';
 import {
@@ -280,6 +282,44 @@ test('lets a line into the chat only once it is judged, and keeps the chat at it
   ).toBe(before.at);
   expect(await gap()).toBeGreaterThan(100);
 });
+
+// Comments give way to subtitles (2026-11-06): while llama-server reports slot 0 processing,
+// the comment slots run one request at a time; otherwise a 3-slot server runs two.
+for (const { name, processing, most } of [
+  { name: 'slot 0 busy', processing: [0], most: 1 },
+  { name: 'slot 0 idle', processing: [], most: 2 },
+] as const) {
+  test(`runs at most ${most} comment request(s) at once on a 3-slot server with ${name}`, async ({
+    context,
+    sidePanel,
+    platform,
+    llama,
+  }) => {
+    const startedAt = Date.now();
+    let running = 0;
+    let highest = 0;
+    // A comment-slot chat takes 400 ms, so a second one would overlap the first.
+    const responder: Responder = async (request) => {
+      const slot = request.chat?.id_slot;
+      if (request.path !== '/v1/chat/completions' || slot === undefined || slot < 1)
+        return defaultResponder(request);
+      running += 1;
+      highest = Math.max(highest, running);
+      await sleep(400);
+      running -= 1;
+      return defaultResponder(request);
+    };
+    llama.respond = withSlots(responder, 3, () => processing);
+    await connect(sidePanel, llama.origin);
+    await openChat(context, platform, { video: 'fixtureLive04', rate: 10 });
+    await sleep(8_000);
+    const elapsed = Date.now() - startedAt;
+    const probes = llama.requests.filter((line) => line.startsWith('GET /slots?model=')).length;
+    expect(highest).toBe(most);
+    expect(probes).toBeGreaterThanOrEqual(1);
+    expect(probes).toBeLessThanOrEqual(Math.ceil(elapsed / 1_500) + 1);
+  });
+}
 
 test('shows originals and a connection error while llama.cpp is down, then recovers', async ({
   context,

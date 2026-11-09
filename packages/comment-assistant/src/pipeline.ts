@@ -80,6 +80,7 @@ import {
   streamCategoriesOf,
   type StreamContext,
 } from './stream-context.ts';
+import { createSubtitleYield } from './subtitle-yield.ts';
 import { summarize } from './summary.ts';
 
 /** A tab frame whose content script sent the comments; annotations go back to it. */
@@ -520,6 +521,12 @@ export function createCommentPipeline(deps: {
   commentConcurrency?: number;
   /** A comment waiting longer than this without reaching the model is skipped; 8000 ms. */
   staleAfterMs?: number;
+  /**
+   * Whether llama-server's slot 0 (the subtitles') is processing. When given, a second request
+   * on the comment slots waits for a fresh answer, and while subtitles use slot 0 the comment
+   * slots run one request at a time (`subtitle-yield.ts`). Without it comments never give way.
+   */
+  subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>;
 }): CommentPipeline {
   const { maxItems, maxBuffered } = commentLimits.batcher;
   const staleAfterMs = deps.staleAfterMs ?? STALE_AFTER_MS;
@@ -562,6 +569,13 @@ export function createCommentPipeline(deps: {
   let batchesFirst = false;
   /** Comment slots in use, by batches and by `exclusive`. */
   const busy = (): number => running.size + held.size;
+  /**
+   * Comment requests that may run at once now: the first always starts at once; a second or
+   * later one only while subtitles do not use slot 0 (batches, summaries and the genre guess
+   * alike: they all decode on the same model, ruling S38).
+   */
+  const allowed = (): number =>
+    busy() === 0 || subtitles === undefined ? concurrency : subtitles.limit(concurrency);
   /** The latest summary per channel and window, and the ones being made. */
   const summaries = createLruCache<string, MadeSummary>({ max: SUMMARY_CACHE_MAX });
   const summarizing = new Map<string, Promise<Result<Summary>>>();
@@ -1109,6 +1123,20 @@ export function createCommentPipeline(deps: {
     return true;
   }
 
+  const subtitles =
+    deps.subtitleSlotBusy === undefined
+      ? undefined
+      : createSubtitleYield({
+          probe: deps.subtitleSlotBusy,
+          now: deps.now,
+          timers: deps.timers ?? systemTimers,
+          // As `setServerSlots`: a slot may be open now.
+          changed: () => {
+            if (busy() < allowed()) batcher.flush();
+            pump();
+            deliver();
+          },
+        });
   const batcher = createBatcher<Entry>({
     ...commentLimits.batcher,
     timers: deps.timers ?? systemTimers,
@@ -1214,7 +1242,7 @@ export function createCommentPipeline(deps: {
    * `spares` (the batches took their slots already).
    */
   function grant(spares: boolean): void {
-    for (let i = 0; i < waiting.length && busy() < concurrency;) {
+    for (let i = 0; i < waiting.length && busy() < allowed();) {
       const next = waiting[i];
       if (next === undefined || (next.spare && !spares)) {
         i += 1;
@@ -1240,7 +1268,8 @@ export function createCommentPipeline(deps: {
     if (summariesFirst) grant(false);
     answerCached();
     expire();
-    while (busy() < concurrency) {
+    // Only waiting comments ask whether another batch may start.
+    while (backlog.length > 0 && busy() < allowed()) {
       const batch = takeBatch();
       if (batch.length === 0) break;
       start(batch);
@@ -1567,7 +1596,7 @@ export function createCommentPipeline(deps: {
         else keep(entry);
       }
       // A slot is free: start now rather than waiting for the batch window.
-      if (busy() < concurrency) batcher.flush();
+      if (busy() < allowed()) batcher.flush();
       // Every comment of the message waits now, so `batchOrder` sees all of them.
       pump();
       ingesting = false;
@@ -1642,13 +1671,14 @@ export function createCommentPipeline(deps: {
       if (disposed) return;
       const spare = commentConcurrencyFor(totalSlots);
       concurrency = Math.min(requested ?? spare, spare);
-      if (busy() < concurrency) batcher.flush();
+      if (busy() < allowed()) batcher.flush();
       pump();
       deliver();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      subtitles?.dispose();
       for (const controller of running.keys()) controller.abort();
       running.clear();
       started.clear();

@@ -28,6 +28,7 @@ import {
   STUB_TRANSCRIPT,
   withoutAudio,
   withPlamo,
+  withSlots,
   type LlamaStub,
   type StubChat,
 } from './llama-stub.ts';
@@ -234,6 +235,45 @@ describe('llama.cpp stub', () => {
 
   test('props reports a projector and 2 slots', async () => {
     expect(await client.props()).toEqual({ ok: true, value: { totalSlots: 2, audio: true } });
+  });
+
+  test('answers GET /slots with two idle slots by default', async () => {
+    expect(await client.slots({ model: 'stub-model' })).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: false },
+        { id: 1, processing: false },
+      ],
+    });
+    expect(stub.requests).toEqual(['GET /slots?model=stub-model']);
+  });
+
+  test('withSlots sets the slot count and reports the processing slots', async () => {
+    stub.respond = withSlots(withoutAudio(defaultResponder), 3, () => [0]);
+    expect(await client.props({ model: 'stub-model' })).toEqual({
+      ok: true,
+      value: { totalSlots: 3, audio: false },
+    });
+    expect(await client.slots({ model: 'stub-model' })).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: true },
+        { id: 1, processing: false },
+        { id: 2, processing: false },
+      ],
+    });
+    const genre = await client.chat(genrePrompt({}));
+    expect(genre.ok && parseGenre(genre.value.text)).toBe(STUB_GENRE);
+  });
+
+  test('withSlots asks which slots are processing on every request', async () => {
+    let processing: readonly number[] = [];
+    stub.respond = withSlots(defaultResponder, 2, () => processing);
+    const idle = await client.slots();
+    processing = [1];
+    const busy = await client.slots();
+    expect(idle.ok && idle.value.map((slot) => slot.processing)).toEqual([false, false]);
+    expect(busy.ok && busy.value.map((slot) => slot.processing)).toEqual([false, true]);
   });
 
   test('withoutAudio reports no audio in props and rejects input_audio with 400', async () => {

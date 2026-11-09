@@ -547,7 +547,7 @@ Reading:
 - One comment stream: within the target in every round. With MTP: ja p50 0.95 and 1.01 s, ja p95 1.86 and 2.30 s, source p95 0.85 and 1.31 s, and 18-19 batches at a p50 of 3.1-3.3 s, more than two streams finished without MTP. Without MTP: ja p95 2.59-2.61 s, 10 batches at 6.2 s.
 - The shared prefix works. In every run, each slot-0 request after the first took 193-205 prompt tokens from the slot's cache (server log): translations after a recognition and recognitions after a translation alike. Idle, a translation's prompt took 98-100 ms (p50) and a recognition's, which carries the audio, 205-225 ms.
 
-Decision (the user, 2026-11-06, "字幕中はコメントが譲る"): keep MTP. While subtitles use slot 0, the comment extension sends one batch at a time instead of two. The one-stream rows above are the expected result. The comment extension is to check slot 0 through llama-server's `GET /slots` (subtitle plan Task 17); the extensions never message each other.
+Decision (the user, 2026-11-06, "字幕中はコメントが譲る"): keep MTP. While subtitles use slot 0, the comment extension sends one batch at a time instead of two. The one-stream rows above are the expected result. The comment extension checks slot 0 through llama-server's `GET /slots` (subtitle plan Task 17); the extensions never message each other.
 
 ### Server prerequisites
 

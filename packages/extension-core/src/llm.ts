@@ -57,6 +57,8 @@ export const connectionStatusSchema = z.strictObject({ models: z.array(z.string(
 export type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
 /** `audio` is `modalities.audio` (an audio projector is loaded); undefined when not reported. */
 export type ServerProps = Readonly<{ totalSlots: number; audio: boolean | undefined }>;
+/** One slot of `GET /slots`: its `id` and whether it is generating now (`is_processing`). */
+export type SlotState = Readonly<{ id: number; processing: boolean }>;
 export type LlamaClient = {
   health(this: void, signal?: AbortSignal): Promise<Result<void>>;
   models(this: void, signal?: AbortSignal): Promise<Result<string[]>>;
@@ -68,6 +70,15 @@ export type LlamaClient = {
     this: void,
     options?: { model?: string; signal?: AbortSignal },
   ): Promise<Result<ServerProps>>;
+  /**
+   * `GET /slots` (`/slots?model=<name>` on a router): each slot's `id` and `is_processing` at
+   * this instant. Not queued behind chats. A server without the endpoint (`--no-slots`) answers
+   * an HTTP error: `network_failed`.
+   */
+  slots(
+    this: void,
+    options?: { model?: string; signal?: AbortSignal },
+  ): Promise<Result<readonly SlotState[]>>;
   status(this: void, signal?: AbortSignal): Promise<Result<ConnectionStatus>>;
   chat(this: void, request: ChatRequest): Promise<Result<ChatReply>>;
   chatJson<T>(
@@ -84,6 +95,10 @@ const propsSchema = z.object({
   total_slots: z.int().check(z.nonnegative()),
   modalities: z.optional(z.object({ audio: z.optional(z.boolean()) })),
 });
+// Only id and is_processing are read; params, next_token and the rest are dropped.
+const slotsSchema = z.array(
+  z.object({ id: z.int().check(z.nonnegative()), is_processing: z.boolean() }),
+);
 // What llama-server answers (HTTP 400) to input_audio when no audio projector is loaded.
 const audioUnsupportedSchema = z.object({
   error: z.object({ message: z.string().check(z.includes('audio input is not supported')) }),
@@ -202,6 +217,15 @@ export function createLlamaClient({
       ? Ok({ totalSlots: result.value.total_slots, audio: result.value.modalities?.audio })
       : result;
   }
+  async function slots({ model, signal }: { model?: string; signal?: AbortSignal } = {}): Promise<
+    Result<readonly SlotState[]>
+  > {
+    const path = model === undefined ? '/slots' : `/slots?model=${encodeURIComponent(model)}`;
+    const result = await request(slotsSchema, path, { method: 'GET' }, signal);
+    return result.ok
+      ? Ok(result.value.map((slot) => ({ id: slot.id, processing: slot.is_processing })))
+      : result;
+  }
   async function status(signal?: AbortSignal): Promise<Result<ConnectionStatus>> {
     const alive = await health(signal);
     if (!alive.ok) return alive;
@@ -269,5 +293,5 @@ export function createLlamaClient({
     const decoded = decode(output, parsed.value);
     return decoded.ok ? Ok({ value: decoded.value, timing: reply.value.timing }) : decoded;
   }
-  return { health, models, props, status, chat, chatJson };
+  return { health, models, props, slots, status, chat, chatJson };
 }

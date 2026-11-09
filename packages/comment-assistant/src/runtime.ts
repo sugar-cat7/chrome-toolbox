@@ -38,6 +38,7 @@ import {
   type Summary,
 } from './protocol.ts';
 import type { Site } from './sites/types.ts';
+import { slotZeroBusy } from './subtitle-yield.ts';
 import {
   createStreamContexts,
   streamCategoriesOf,
@@ -154,6 +155,12 @@ function commentPipelines({
       emit: sendAnnotations,
       onHiddenChange,
       now: () => Date.now(),
+      // Slot 0 of the model the batches use: only the subtitles' requests to that same model
+      // contend for its decoding. The subtitle extension's settings are never read (S39).
+      subtitleSlotBusy: async (signal: AbortSignal): Promise<Result<boolean>> => {
+        const slots = await client.slots({ model: models.translate, signal });
+        return slots.ok ? slotZeroBusy(slots.value) : slots;
+      },
     });
     askSlots();
     return { key, pipeline, probe };

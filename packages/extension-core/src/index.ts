@@ -23,6 +23,7 @@ export {
   type Fetch,
   type LlamaClient,
   type ServerProps,
+  type SlotState,
 } from './llm.ts';
 export {
   defineProtocol,

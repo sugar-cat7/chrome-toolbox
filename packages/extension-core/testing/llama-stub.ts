@@ -1,7 +1,7 @@
 // A local stand-in for llama.cpp's HTTP server, so extension E2E tests never depend on a real
 // model server. It runs in Node (outside src/) and speaks the formats the extensions send:
-// health, props and models, the compact comment batch, the chat summary and the genre guess
-// (`/v1/chat/completions`, prompts.ts) and Clef (`/v1/systemone`, toxicity.ts).
+// health, props, slots and models, the compact comment batch, the chat summary and the genre
+// guess (`/v1/chat/completions`, prompts.ts) and Clef (`/v1/systemone`, toxicity.ts).
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
@@ -311,12 +311,41 @@ export function withoutAudio(responder: Responder): Responder {
   };
 }
 
+/** `GET /slots` of a server with `total` slots: the slots in `processing` are generating. */
+const slotsReply = (total: number, processing: readonly number[]): StubReply => ({
+  body: Array.from({ length: total }, (_, id) => ({
+    id,
+    n_ctx: 4096,
+    is_processing: processing.includes(id),
+  })),
+});
+
 /**
- * llama.cpp as the extensions use it: a healthy server with one model and 2 slots, a comment
- * batch and summary reply built by `commentBatchReply` (a text with `BAD` or `ROUGH` is abusive)
- * and `summaryReply`, `STUB_GENRE` for a genre guess, and Clef scoring a text with `BAD` or
- * `HARSH` as abusive (0.95). Other requests get 404. In router mode every request carries a
- * `model`; the stub ignores it.
+ * Makes `responder` a server with `total` slots: `/props` reports `total_slots: total` (the
+ * rest of `responder`'s answer, such as `modalities`, is kept), and `/slots` lists slots 0 to
+ * `total - 1`, the ones `processing()` names (asked on every request) as processing. Every
+ * other request goes to `responder`.
+ */
+export function withSlots(
+  responder: Responder,
+  total: number,
+  processing: () => readonly number[] = () => [],
+): Responder {
+  return async (request) => {
+    const key = `${request.method} ${request.path}`;
+    if (key === 'GET /slots') return slotsReply(total, processing());
+    const reply = await responder(request);
+    if (key !== 'GET /props' || !isRecord(reply.body)) return reply;
+    return { ...reply, body: { ...reply.body, total_slots: total } };
+  };
+}
+
+/**
+ * llama.cpp as the extensions use it: a healthy server with one model and 2 slots (both idle in
+ * `/slots`), a comment batch and summary reply built by `commentBatchReply` (a text with `BAD`
+ * or `ROUGH` is abusive) and `summaryReply`, `STUB_GENRE` for a genre guess, and Clef scoring
+ * a text with `BAD` or `HARSH` as abusive (0.95). Other requests get 404. In router mode every
+ * request carries a `model`; the stub ignores it.
  */
 export function defaultResponder(request: StubRequest): StubReply {
   switch (`${request.method} ${request.path}`) {
@@ -324,6 +353,8 @@ export function defaultResponder(request: StubRequest): StubReply {
       return { body: { status: 'ok' } };
     case 'GET /props':
       return propsReply(true);
+    case 'GET /slots':
+      return slotsReply(2, []);
     case 'GET /v1/models':
       return { body: { object: 'list', data: [{ id: 'stub-model' }] } };
     case 'POST /v1/systemone':

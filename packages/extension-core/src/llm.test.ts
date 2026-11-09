@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod/mini';
 import type { Result } from '@chrome-toolbox/contracts';
 import { createLlamaClient, cutByMaxTokens, hostPattern, parseBaseUrl, type Fetch } from './llm.ts';
+import { createQueue } from './queue.ts';
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -298,6 +299,80 @@ describe('llama.cpp client', () => {
     const result = await client.props({ model: 'gemma4-e4b' });
     expect(calls).toEqual([{ path: '/props', search: '?model=gemma4-e4b' }]);
     expect(result.ok ? result.value : result.error.internalCode).toEqual({ totalSlots: 2 });
+  });
+
+  it.each([
+    { name: 'ルーター', model: 'gemma4-e4b', search: '?model=gemma4-e4b' },
+    { name: 'モデルなし', model: undefined, search: '' },
+  ])('slots reads id and is_processing from GET /slots: $name', async ({ model, search }) => {
+    const calls: { method: string | undefined; path: string; search: string }[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (input, init) => {
+        const url = new URL(input);
+        calls.push({ method: init?.method, path: url.pathname, search: url.search });
+        return json([
+          { id: 0, id_task: 12, n_ctx: 4096, is_processing: true, params: {} },
+          { id: 1, is_processing: false },
+        ]);
+      },
+    });
+    const result = await client.slots(model === undefined ? {} : { model });
+    expect(calls).toEqual([{ method: 'GET', path: '/slots', search }]);
+    expect(result).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: true },
+        { id: 1, processing: false },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      name: 'HTTP 501',
+      status: 501,
+      body: { error: { code: 501, message: 'not supported' } },
+      code: 'network_failed',
+    },
+    { name: '配列でない', status: 200, body: { slots: [] }, code: 'response_invalid' },
+    { name: 'is_processing がない', status: 200, body: [{ id: 0 }], code: 'response_invalid' },
+    {
+      name: '負の id',
+      status: 200,
+      body: [{ id: -1, is_processing: false }],
+      code: 'response_invalid',
+    },
+  ])('slots fails: $name', async ({ status, body, code: expected }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json(body, status),
+    });
+    expect(code(await client.slots())).toBe(expected);
+  });
+
+  it('slots does not wait behind the chat queue', async () => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      queue: createQueue({ concurrency: 1 }),
+      fetch: (input, init) =>
+        new URL(input).pathname === '/slots'
+          ? Promise.resolve(json([{ id: 0, is_processing: true }]))
+          : new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+            }),
+    });
+    const stop = new AbortController();
+    const chat = client.chat({
+      messages: [{ role: 'user', content: 'never answered' }],
+      signal: stop.signal,
+    });
+    expect(await client.slots()).toStrictEqual({
+      ok: true,
+      value: [{ id: 0, processing: true }],
+    });
+    stop.abort();
+    expect(code(await chat)).toBe('operation_cancelled');
   });
 
   it('sends stop strings only when the request has them', async () => {

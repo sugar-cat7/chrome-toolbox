@@ -29,6 +29,7 @@ export {
   summaryReply,
   withPlamo,
   withoutAudio,
+  withSlots,
   STUB_ABUSIVE,
   STUB_GENRE,
   STUB_PLAMO_PREFIX,

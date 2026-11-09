@@ -13,10 +13,10 @@ import {
   llmCategoryJudge,
   type Fetch,
   type LlamaClient,
-  type Timers,
   type ToxicityJudge,
 } from '@chrome-toolbox/extension-core';
 import { createFeedbackStore, type FeedbackStore } from '../../src/feedback.ts';
+import { fakeClock as createFakeClock, type FakeClock } from './fake-clock.ts';
 import {
   batchOrder,
   commentConcurrencyFor,
@@ -33,37 +33,7 @@ const MINUTE = 60_000;
 const target: Target = { tabId: 7, frameId: 3 };
 const channel = { site: 'youtube', channel: 'UC-test' } as const;
 
-/** Fake clock: Timers plus `now`, advanced by hand. */
-const fakeClock = (): {
-  timers: Timers;
-  now: () => number;
-  advance(ms: number): void;
-  active(): number;
-} => {
-  let time = START;
-  let nextId = 1;
-  const pending = new Map<number, { at: number; fn: () => void }>();
-  return {
-    timers: {
-      set: (fn, ms) => {
-        const id = nextId++;
-        pending.set(id, { at: time + ms, fn });
-        return id;
-      },
-      clear: (id) => void pending.delete(id),
-    },
-    now: () => time,
-    advance(ms) {
-      time += ms;
-      for (const [id, entry] of [...pending]) {
-        if (entry.at > time) continue;
-        pending.delete(id);
-        entry.fn();
-      }
-    },
-    active: () => pending.size,
-  };
-};
+const fakeClock = (): FakeClock => createFakeClock(START);
 
 type PromptComment = { id: number; lang: string; translate: boolean; text: string };
 type ChatBody = {
@@ -173,6 +143,7 @@ const setup = ({
   context = titled,
   client = (llama) => llama,
   onHiddenChange,
+  subtitleSlotBusy,
 }: {
   fetch: Fetch;
   judge?: ToxicityJudge;
@@ -182,6 +153,8 @@ const setup = ({
   context?: (site: StreamContext['site'], partition: string) => StreamContext;
   /** Wraps the llama.cpp client built on `fetch`. */
   client?: (llama: LlamaClient) => LlamaClient;
+  /** Whether the subtitles' slot 0 is processing; without it comments never give way. */
+  subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>;
 }) => {
   const clock = fakeClock();
   const emitted: { target: Target; annotations: Annotation[] }[] = [];
@@ -196,6 +169,7 @@ const setup = ({
     ...(commentConcurrency === undefined ? {} : { commentConcurrency }),
     ...(feedback === undefined ? {} : { feedback }),
     ...(onHiddenChange === undefined ? {} : { onHiddenChange }),
+    ...(subtitleSlotBusy === undefined ? {} : { subtitleSlotBusy }),
     model: 'gemma4-e4b',
     judge,
     detector: createLanguageDetector(undefined),
@@ -1142,6 +1116,111 @@ describe('comment pipeline', () => {
       expect(recorder.slots).toEqual(slots);
     },
   );
+
+  describe('giving way to subtitles on slot 0', () => {
+    type SlotProbe = (signal: AbortSignal) => Promise<Result<boolean>>;
+    it.each([
+      { name: '枠 0 が処理中', answer: Ok(true), held: [1], slots: [1, 1] },
+      { name: '枠 0 が空き', answer: Ok(false), held: [1, 2], slots: [1, 2] },
+      {
+        name: '問い合わせの失敗',
+        answer: Err(failure('network_failed')),
+        held: [1, 2],
+        slots: [1, 2],
+      },
+    ])('gives way to subtitles on a 3-slot server: $name', async ({ answer, held, slots }) => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => answer);
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      for (const [id, text] of [
+        ['1', 'first'],
+        ['2', 'second'],
+        ['3', 'third'],
+      ] as const)
+        pipeline.ingest(target, { ...channel, comments: [comment(id, text)] });
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      // What runs before the first batch answers: only it while subtitles use slot 0.
+      await vi.waitFor(() => expect(recorder.slots).toEqual(held));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(recorder.slots).toEqual(held);
+      door.open();
+      await vi.waitFor(() => expect(annotations()).toHaveLength(3));
+      expect(recorder.slots).toEqual(slots);
+      expect(subtitleSlotBusy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not ask about slot 0 while one batch at a time is enough', async () => {
+      const llama = fakeLlama(echo());
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: llama.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      for (const [n, text] of ['first', 'second', 'third'].entries()) {
+        pipeline.ingest(target, { ...channel, comments: [comment(String(n), text)] });
+        await vi.waitFor(() => expect(annotations()).toHaveLength(n + 1));
+      }
+      expect(llama.state.bodies).toHaveLength(3);
+      expect(subtitleSlotBusy).not.toHaveBeenCalled();
+    });
+
+    it('holds a summary back while a batch runs and subtitles use slot 0', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      const fn = vi.fn<(slot: number) => Promise<Result<number>>>(async (slot) => Ok(slot));
+      const summary = pipeline.exclusive(fn);
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(fn).not.toHaveBeenCalled();
+      door.open();
+      // The batch ends first; then the summary takes slot 1.
+      expect(await summary).toEqual(Ok(1));
+      expect(annotations()).toHaveLength(1);
+    });
+
+    it('lets a summary start beside a batch when slot 0 is idle', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(false));
+      const { pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      expect(await pipeline.exclusive(async (slot): Promise<Result<number>> => Ok(slot))).toEqual(
+        Ok(2),
+      );
+      door.open();
+    });
+
+    it('aborts the running probe on dispose', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const signals: AbortSignal[] = [];
+      const subtitleSlotBusy = vi.fn<SlotProbe>(
+        (signal) =>
+          new Promise<Result<boolean>>(() => {
+            signals.push(signal);
+          }),
+      );
+      const { pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      pipeline.ingest(target, { ...channel, comments: [comment('2', 'second')] });
+      await vi.waitFor(() => expect(signals).toHaveLength(1));
+      pipeline.dispose();
+      expect(signals[0]?.aborted).toBe(true);
+      door.open();
+    });
+  });
 
   it('answers a copy whose text was in flight from the cache, even after 8 s', async () => {
     const door = gate();
