@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent } from 'react';
 import { launch, type AppError, type Result } from '@chrome-toolbox/contracts';
-import type { ActiveTab, PopupPort } from '../../popup.ts';
+import { exclusionOf, type ActiveTab, type PopupPort } from '../../popup.ts';
 import type { DisplayMode, Progress } from '../../protocol.ts';
-import { isNever, siteOf, type PageSettings } from '../../settings.ts';
+import { siteOf, type PageSettings } from '../../settings.ts';
 
 const MODES: readonly Readonly<{ mode: DisplayMode; label: string }>[] = [
   { mode: 'replace', label: '置き換え' },
@@ -22,7 +22,12 @@ const TEXT = {
   denied: 'このサイトへのアクセスが許可されませんでした',
   notSaved: '設定を変えられませんでした',
   noOptions: '設定ページを開けませんでした',
+  parallel: '段落を訳せていません。llama.cpp を --parallel 2 以上で起動しているか確かめてください',
+  askChrome: 'Chrome がこのサイトへのアクセスの許可を求めます。',
+  clearsNever: 'オンにすると「このサイトでは翻訳しない」はオフになります。',
 } as const;
+/** A parent domain's never entry (`entry`) excludes the site: only the options page changes it. */
+const byParentText = (entry: string): string => `${entry} の設定で翻訳しないサイトになっています`;
 
 /**
  * The progress line of a translated page: the paragraphs translated of those found, whether some
@@ -55,6 +60,7 @@ export function App({ port }: { port: PopupPort }) {
   const [starts, setStarts] = useState(0);
   const mounted = useRef(true);
   const alwaysHint = useId();
+  const parentNote = useId();
   const modeLabel = useId();
 
   /** Reads the page settings again, after a change or one the background made. */
@@ -96,10 +102,20 @@ export function App({ port }: { port: PopupPort }) {
   const restricted = refused || site?.ok === false;
   const blocked = active === undefined || restricted;
   const known = site?.ok === true ? site.value : undefined;
-  const excluded =
-    known !== undefined && settings !== undefined && isNever(known.host, settings.never);
+  const exclusion =
+    known === undefined || settings === undefined ? undefined : exclusionOf(known, settings.never);
+  const excluded = exclusion !== undefined;
+  // A parent domain's entry covers other sites too: the popup leaves it to the options page and
+  // lifts nothing under it (P29).
+  const byParent = exclusion?.parent === true ? exclusion.entry : undefined;
+  // An always entry the never list cancels does nothing: shown off, the switches never contradict.
   const always =
-    known !== undefined && settings !== undefined && settings.always.includes(known.pattern);
+    known !== undefined &&
+    settings !== undefined &&
+    !excluded &&
+    settings.always.includes(known.pattern);
+  const switchesOff =
+    blocked || busy || known === undefined || settings === undefined || byParent !== undefined;
   const tabId = active?.id;
 
   useEffect(() => {
@@ -153,6 +169,20 @@ export function App({ port }: { port: PopupPort }) {
     apply(
       () => port.restore(target),
       () => TEXT.notRestored,
+    );
+  }
+
+  /** A link to the options page: Chrome opens it in a tab (`open_in_tab`). */
+  function openOptions(event: MouseEvent<HTMLAnchorElement>): void {
+    event.preventDefault();
+    launch(
+      async () => {
+        const opened = await port.openOptions();
+        if (mounted.current && !opened.ok) setMessage(TEXT.noOptions);
+      },
+      () => {
+        if (mounted.current) setMessage(TEXT.noOptions);
+      },
     );
   }
 
@@ -233,14 +263,15 @@ export function App({ port }: { port: PopupPort }) {
             role="switch"
             checked={always}
             aria-checked={always}
-            disabled={blocked || busy || known === undefined || settings === undefined}
-            aria-describedby={alwaysHint}
+            disabled={switchesOff}
+            aria-describedby={byParent === undefined ? alwaysHint : parentNote}
             onChange={(event) => {
-              if (known === undefined) return;
+              if (switchesOff || known === undefined || settings === undefined) return;
               const on = event.target.checked;
+              const { never } = settings;
               // Chrome asks for the site's permission during this click (setAlways).
               apply(
-                () => port.setAlways(known, on),
+                () => port.setAlways(known, on, never),
                 (error) =>
                   error.internalCode === 'host_permission_denied' ? TEXT.denied : TEXT.notSaved,
               );
@@ -248,10 +279,12 @@ export function App({ port }: { port: PopupPort }) {
             className="h-4 w-4 accent-slate-900"
           />
         </label>
-        <p id={alwaysHint} className="text-xs text-slate-600">
-          オンにすると「このサイトでは翻訳しない」はオフになります。Chrome
-          がこのサイトへのアクセスの許可を求めます。
-        </p>
+        {byParent === undefined && (
+          <p id={alwaysHint} className="text-xs text-slate-600">
+            {/* Only the site's own entry goes: a parent domain's locks both switches instead. */}
+            {excluded ? `${TEXT.clearsNever}${TEXT.askChrome}` : TEXT.askChrome}
+          </p>
+        )}
         <label className="flex items-center justify-between gap-2">
           <span>このサイトでは翻訳しない</span>
           <input
@@ -259,9 +292,10 @@ export function App({ port }: { port: PopupPort }) {
             role="switch"
             checked={excluded}
             aria-checked={excluded}
-            disabled={blocked || busy || known === undefined || settings === undefined}
+            disabled={switchesOff}
+            aria-describedby={byParent === undefined ? undefined : parentNote}
             onChange={(event) => {
-              if (known === undefined) return;
+              if (switchesOff || known === undefined) return;
               const on = event.target.checked;
               apply(
                 () => port.setNever(known, on),
@@ -271,6 +305,14 @@ export function App({ port }: { port: PopupPort }) {
             className="h-4 w-4 accent-slate-900"
           />
         </label>
+        {byParent !== undefined && (
+          <p id={parentNote} className="text-xs text-slate-600">
+            <span>{byParentText(byParent)}</span>{' '}
+            <a href="/options.html" onClick={openOptions} className="underline">
+              設定ページで変える
+            </a>
+          </p>
+        )}
       </div>
       <output aria-live="polite" className="flex flex-col gap-0.5 text-xs text-slate-700">
         {lines.map((line) => (
@@ -279,18 +321,7 @@ export function App({ port }: { port: PopupPort }) {
       </output>
       <a
         href="/options.html"
-        onClick={(event) => {
-          event.preventDefault();
-          launch(
-            async () => {
-              const opened = await port.openOptions();
-              if (mounted.current && !opened.ok) setMessage(TEXT.noOptions);
-            },
-            () => {
-              if (mounted.current) setMessage(TEXT.noOptions);
-            },
-          );
-        }}
+        onClick={openOptions}
         className="self-end text-xs text-slate-600 underline"
       >
         設定
@@ -299,11 +330,21 @@ export function App({ port }: { port: PopupPort }) {
   );
 }
 
-/** The lines the tab's progress adds: the count, the paragraph limit and the server's notice. */
+/**
+ * The lines the tab's progress adds: the count, the paragraph limit, the server's notice, and
+ * what to check when not one paragraph could be translated though llama.cpp answers (a server
+ * with one slot refuses the page's requests: `model_refused`).
+ */
 function progressLines(progress: Progress): string[] {
   const count = progressLine(progress);
+  const none =
+    count !== undefined &&
+    progress.failed > 0 &&
+    progress.done === 0 &&
+    progress.notice !== 'unreachable';
   return [
     ...(count === undefined ? [] : [count]),
+    ...(none ? [TEXT.parallel] : []),
     ...(progress.limit ? [TEXT.limit] : []),
     ...(progress.notice === 'unreachable' ? [TEXT.unreachable] : []),
     ...(progress.notice === 'plamo_missing' ? [TEXT.plamoMissing] : []),

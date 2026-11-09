@@ -3,6 +3,7 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
 import {
   defaultPageSettings,
+  excludedBy,
   isAlways,
   isNever,
   normalizeHost,
@@ -116,6 +117,21 @@ describe('sites', () => {
     { host: 'bank.example.com.', never: ['bank.example.com'], excluded: true },
   ])('isNever($host, $never)', ({ host, never, excluded }) => {
     expect(isNever(host, never)).toBe(excluded);
+  });
+
+  it.each([
+    { host: 'a.fixture.test', never: [], entry: undefined },
+    { host: 'a.fixture.test', never: ['bank.example'], entry: undefined },
+    { host: 'a.fixture.test', never: ['bank.example', 'a.fixture.test'], entry: 'a.fixture.test' },
+    { host: 'a.fixture.test.', never: ['a.fixture.test'], entry: 'a.fixture.test' },
+    { host: 'a.fixture.test', never: ['fixture.test'], entry: 'fixture.test' },
+    // Taking the host's own entry off would leave the parent's in force: the parent's is named.
+    { host: 'a.fixture.test', never: ['a.fixture.test', 'fixture.test'], entry: 'fixture.test' },
+    { host: 'b.a.fixture.test', never: ['test', 'a.fixture.test'], entry: 'test' },
+    // A name that only ends with the entry's letters is another site.
+    { host: 'afixture.test', never: ['fixture.test'], entry: undefined },
+  ])('excludedBy($host, $never) is $entry', ({ host, never, entry }) => {
+    expect(excludedBy(host, never)).toBe(entry);
   });
 
   it.each([

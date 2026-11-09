@@ -26,6 +26,30 @@ afterEach(() => {
 const PAGE = 'https://wiki.fixture.test/guide';
 const SITE = { host: 'wiki.fixture.test', pattern: 'https://wiki.fixture.test/*' } as const;
 const TAB = 7;
+/** A site under `fixture.test`, which a never entry of its parent domain can exclude (P29). */
+const A_PAGE = 'https://a.fixture.test/guide';
+const A_SITE = { host: 'a.fixture.test', pattern: 'https://a.fixture.test/*' } as const;
+/** The never lists that exclude A_SITE by a parent domain: the popup may not lift them. */
+const BY_PARENT = [
+  { name: 'a parent domain excludes it', never: ['fixture.test'] },
+  {
+    name: 'a parent domain and its own entry exclude it',
+    never: ['a.fixture.test', 'fixture.test'],
+  },
+] as const;
+/** The never lists the popup may change for A_SITE, and the lists once the site is always on. */
+const ALLOWED = [
+  {
+    name: 'its own entry excludes it',
+    never: ['bank.example', 'a.fixture.test'],
+    after: { always: [A_SITE.pattern], never: ['bank.example'] },
+  },
+  {
+    name: 'another site is excluded',
+    never: ['bank.example'],
+    after: { always: [A_SITE.pattern], never: ['bank.example'] },
+  },
+] as const;
 /** The manifest's own hosts (wxt.config.ts): Chrome refuses to take them back. */
 const REQUIRED = ['http://localhost/*', 'http://127.0.0.1/*'];
 /** The popup is an extension page: the background answers its routes. */
@@ -192,11 +216,16 @@ const storePage = (change: Partial<PageSettings>): Promise<void> =>
   fakeBrowser.storage.local.set({ page: { ...defaultPageSettings, ...change } });
 const storedPage = async (): Promise<unknown> => (await fakeBrowser.storage.local.get('page')).page;
 
-/** Renders the popup for `world`, once it has read the tab and the settings. */
-async function openPopup({ api }: World): Promise<void> {
+/**
+ * Renders the popup for `world`, once it has read the tab and the settings (the display mode
+ * waits for both) and opened the tab's progress port.
+ */
+async function openPopup({ api, connections }: World): Promise<void> {
   render(<App port={popupPort(api)} />);
-  // The display mode waits for both.
-  await waitFor(() => expect(control('置き換え').disabled).toBe(false));
+  await waitFor(() => {
+    expect(control('置き換え').disabled).toBe(false);
+    expect(connections).not.toHaveLength(0);
+  });
 }
 /** The one button, switch or radio named `name`. */
 const control = (name: string): HTMLInputElement | HTMLButtonElement => {
@@ -276,7 +305,7 @@ describe('popupPort', () => {
   it('turns always off: the site leaves the list and gives its permission back', async () => {
     const { api, calls, chrome } = world({ granted: [SITE.pattern] });
     await storePage({ always: [SITE.pattern, 'https://docs.fixture.test/*'], mode: 'pair' });
-    expect(await popupPort(api).setAlways(SITE, false)).toEqual(Ok(undefined));
+    expect(await popupPort(api).setAlways(SITE, false, [])).toEqual(Ok(undefined));
     expect(await storedPage()).toEqual({
       ...defaultPageSettings,
       always: ['https://docs.fixture.test/*'],
@@ -303,16 +332,59 @@ describe('popupPort', () => {
       settings: { ...defaultSettings, llamaBaseUrl: llama },
     });
     await storePage({ always: [site.pattern] });
-    expect(await popupPort(api).setAlways(site, false)).toEqual(Ok(undefined));
+    expect(await popupPort(api).setAlways(site, false, [])).toEqual(Ok(undefined));
     expect(await storedPage()).toEqual(defaultPageSettings);
     expect(calls).toEqual(['write page']);
   });
 
-  it('turns never off for the site and the parent domains that exclude it', async () => {
-    const { api } = world();
-    await storePage({ never: ['fixture.test', 'wiki.fixture.test', 'bank.example'] });
-    expect(await popupPort(api).setNever(SITE, false)).toEqual(Ok(undefined));
-    expect(await storedPage()).toEqual({ ...defaultPageSettings, never: ['bank.example'] });
+  it.each([
+    { name: 'a parent domain excludes it', never: ['fixture.test'], after: ['fixture.test'] },
+    {
+      name: 'a parent domain and its own entry exclude it',
+      never: ['a.fixture.test', 'fixture.test'],
+      after: ['fixture.test'],
+    },
+    {
+      name: 'its own entry excludes it',
+      never: ['bank.example', 'a.fixture.test'],
+      after: ['bank.example'],
+    },
+    { name: 'another site is excluded', never: ['bank.example'], after: ['bank.example'] },
+  ])(
+    "turns never off when $name: only the site's own entry goes (P29)",
+    async ({ never, after }) => {
+      const { api } = world({ url: A_PAGE });
+      await storePage({ never: [...never] });
+      expect(await popupPort(api).setNever(A_SITE, false)).toEqual(Ok(undefined));
+      expect(await storedPage()).toEqual({ ...defaultPageSettings, never: after });
+    },
+  );
+
+  it.each(BY_PARENT)(
+    'refuses always when $name, before anything is sent or asked (P29)',
+    async ({ never }) => {
+      const { api, calls, prompts } = world({ url: A_PAGE });
+      await storePage({ never: [...never] });
+      expect(await popupPort(api).setAlways(A_SITE, true, never)).toMatchObject(
+        Err({ internalCode: 'page_excluded' }),
+      );
+      // No message to the background, no prompt, no grant.
+      expect(calls).toEqual([]);
+      expect(prompts).toEqual([]);
+      expect(await storedPage()).toEqual({ ...defaultPageSettings, never });
+    },
+  );
+
+  it.each(ALLOWED)('asks for always when $name', async ({ never, after }) => {
+    const { api, calls, prompts } = world({ url: A_PAGE });
+    await storePage({ never: [...never] });
+    const asked = popupPort(api).setAlways(A_SITE, true, never);
+    expect(calls).toEqual(['send page/always', `request ${A_SITE.pattern}`]);
+    await prompts[0]?.answer(true);
+    expect(await asked).toEqual(Ok(undefined));
+    await vi.waitFor(async () =>
+      expect(await storedPage()).toEqual({ ...defaultPageSettings, ...after }),
+    );
   });
 
   it('turns never on with the host name as the options page writes it', async () => {
@@ -338,6 +410,10 @@ describe('popupPort', () => {
     expect(await storedPage()).toEqual({ ...defaultPageSettings, mode: 'pair' });
   });
 });
+
+/** The popup's hint when no paragraph could be translated (a server with one slot). */
+const PARALLEL_HINT =
+  '段落を訳せていません。llama.cpp を --parallel 2 以上で起動しているか確かめてください';
 
 describe('popup', () => {
   it.each([
@@ -376,6 +452,11 @@ describe('popup', () => {
       progress: { notice: 'plamo_missing' },
       text: 'PLaMo が見つからないため、Gemma で翻訳しています',
     },
+    {
+      name: '1 段落も訳せない',
+      progress: { found: 10, done: 0, failed: 10 },
+      text: PARALLEL_HINT,
+    },
   ] as const)('popup shows $name', async ({ progress, text }) => {
     const popup = world();
     await openPopup(popup);
@@ -396,6 +477,70 @@ describe('popup', () => {
       else popup.connections[0]?.post(progress);
     });
     expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it.each([
+    { name: 'some paragraphs were translated', progress: { found: 10, done: 1, failed: 9 } },
+    {
+      name: 'llama.cpp does not answer',
+      progress: { found: 10, done: 0, failed: 10, notice: 'unreachable' },
+    },
+    { name: 'nothing failed', progress: { found: 10, done: 0, failed: 0 } },
+  ] as const)('gives no --parallel hint when $name', async ({ progress }) => {
+    const popup = world();
+    await openPopup(popup);
+    act(() => popup.connections[0]?.post(progressOf(progress)));
+    await screen.findByText(/翻訳済み/u);
+    expect(screen.queryByText(PARALLEL_HINT)).toBeNull();
+  });
+
+  it.each(BY_PARENT)(
+    'locks the never switch and refuses always when $name (P29)',
+    async ({ never }) => {
+      const popup = world({ url: A_PAGE, granted: [A_SITE.pattern] });
+      await storePage({ never: [...never], always: [A_SITE.pattern] });
+      render(<App port={popupPort(popup.api)} />);
+      expect(
+        await screen.findByText('fixture.test の設定で翻訳しないサイトになっています'),
+      ).toBeTruthy();
+      expect(toggle('このサイトでは翻訳しない').checked).toBe(true);
+      expect(toggle('このサイトでは翻訳しない').disabled).toBe(true);
+      // An always entry under the parent's exclusion does nothing: the switch shows it off.
+      expect(toggle('このサイトは常に翻訳').checked).toBe(false);
+      expect(toggle('このサイトは常に翻訳').disabled).toBe(true);
+      expect(control('このページを翻訳').disabled).toBe(true);
+      expect(screen.queryByText(/オンにすると/u)).toBeNull();
+      fireEvent.click(toggle('このサイトは常に翻訳'));
+      fireEvent.click(toggle('このサイトでは翻訳しない'));
+      expect(popup.prompts).toEqual([]);
+      // The parent's entry is changed on the options page.
+      await userEvent.click(screen.getByRole('link', { name: '設定ページで変える' }));
+      expect(popup.calls.filter((call) => !call.startsWith('connect'))).toEqual(['options']);
+      expect(await storedPage()).toEqual({
+        ...defaultPageSettings,
+        never,
+        always: [A_SITE.pattern],
+      });
+    },
+  );
+
+  it.each([
+    { name: 'its own entry excludes it', never: ['a.fixture.test'], says: true, excluded: true },
+    { name: 'another site is excluded', never: ['bank.example'], says: false, excluded: false },
+  ])('says always turns never off only when $name (P29)', async ({ never, says, excluded }) => {
+    const popup = world({ url: A_PAGE });
+    // A stored always entry the never list cancels shows off: the switches never contradict.
+    await storePage({ never, always: excluded ? [A_SITE.pattern] : [] });
+    await openPopup(popup);
+    expect(toggle('このサイトでは翻訳しない').checked).toBe(excluded);
+    expect(toggle('このサイトでは翻訳しない').disabled).toBe(false);
+    expect(toggle('このサイトは常に翻訳').checked).toBe(false);
+    expect(toggle('このサイトは常に翻訳').disabled).toBe(false);
+    expect(
+      screen.queryByText(/オンにすると「このサイトでは翻訳しない」はオフになります/u) !== null,
+    ).toBe(says);
+    expect(screen.getByText(/Chrome がこのサイトへのアクセスの許可を求めます/u)).toBeTruthy();
+    expect(screen.queryByText(/の設定で翻訳しないサイトになっています/u)).toBeNull();
   });
 
   it('disables everything on a restricted page', async () => {

@@ -25,8 +25,11 @@ export type Choices = Readonly<{
   translator: PageSettings['translator'];
   /** Gemma's model name, the shared settings' `models.translate`. */
   model: string;
-  /** Host names (`readHosts`). */
-  never: readonly string[];
+  /**
+   * Host names (`readHosts`); none when the viewer did not edit the list, which keeps what is
+   * stored (the popup may have changed it while the page was open).
+   */
+  never?: readonly string[];
 }>;
 /** Both settings as saved. */
 export type Saved = Readonly<{ page: PageSettings; settings: Settings }>;
@@ -79,7 +82,7 @@ export function optionsPort(api: OptionsApi = browser): OptionsPort {
       const page = await updatePageSettings(pageSettings, (current) => ({
         ...current,
         translator,
-        never: [...never],
+        ...(never === undefined ? {} : { never: [...never] }),
       }));
       if (!page.ok) return page;
       const current = await settings.load();

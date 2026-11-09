@@ -210,6 +210,40 @@ describe('options page', () => {
     expect(field('翻訳しないサイト').value).toBe('bank.example\nmail.example');
   });
 
+  it('leaves the never list alone unless it was edited: the popup may change it meanwhile', async () => {
+    const { api } = fakeApi();
+    await storePage({ never: ['bank.example'] });
+    await openOptions(api);
+    // The popup turns never on for a site while the options page is open.
+    await storePage({ never: ['bank.example', 'a.fixture.test'] });
+    await userEvent.click(radio(PLAMO));
+    await userEvent.click(saveButton());
+    expect(await screen.findByText('設定を保存しました')).toBeTruthy();
+    expect(await stored('page')).toEqual({
+      ...defaultPageSettings,
+      translator: 'plamo',
+      never: ['bank.example', 'a.fixture.test'],
+    });
+    // The field shows the list as stored now.
+    expect(field('翻訳しないサイト').value).toBe('bank.example\na.fixture.test');
+  });
+
+  it('sends the never list again only after it is edited again', async () => {
+    const { api } = fakeApi();
+    await openOptions(api);
+    await userEvent.type(field('翻訳しないサイト'), 'bank.example');
+    await userEvent.click(saveButton());
+    expect(await screen.findByText('設定を保存しました')).toBeTruthy();
+    // The popup turns never off for that site; the viewer then changes only the translator.
+    await storePage({ never: [] });
+    await userEvent.click(radio(PLAMO));
+    await userEvent.click(saveButton());
+    await waitFor(async () =>
+      expect(await stored('page')).toEqual({ ...defaultPageSettings, translator: 'plamo' }),
+    );
+    expect(field('翻訳しないサイト').value).toBe('');
+  });
+
   it('rejects a malformed host with its line', async () => {
     const { api } = fakeApi();
     await openOptions(api);

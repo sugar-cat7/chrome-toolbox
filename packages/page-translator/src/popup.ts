@@ -10,7 +10,7 @@ import {
 } from './protocol.ts';
 import {
   defaultPageSettings,
-  isNever,
+  excludedBy,
   pageSettingsStore,
   type PageSettings,
   type PageSettingsStore,
@@ -53,21 +53,38 @@ export type PopupApi = SiteApi & {
 /** The tab the toolbar button was pressed on; `url` when `activeTab` lets the popup read it. */
 export type ActiveTab = Readonly<{ id: number; url: string | undefined }>;
 
-/** How the popup and the options page change the always and never lists. */
+/**
+ * What excludes a site: the never entry (`excludedBy`), and whether it is a parent domain's,
+ * which covers other sites too.
+ */
+export type Exclusion = Readonly<{ entry: string; parent: boolean }>;
+/** The never list's host name for `site`: without the root's trailing dot, as the options page saves it. */
+const hostOf = (site: Site): string => site.host.replace(/\.$/u, '');
+/** What in `never` excludes `site`, if anything. */
+export function exclusionOf(site: Site, never: readonly string[]): Exclusion | undefined {
+  const entry = excludedBy(site.host, never);
+  return entry === undefined ? undefined : { entry, parent: entry !== hostOf(site) };
+}
+
+/**
+ * How the popup and the options page change the always and never lists. They change only the
+ * site's own entries, never a parent domain's, which covers other sites too (P29).
+ */
 export type SiteSwitches = {
   /**
    * On: the background hears which site to add (`page/always`) and Chrome is asked for the site's
    * permission, both before anything is awaited: Chrome shows its prompt only while the click
-   * lasts, and closes the popup as it does. The background adds the site, and takes it off the
-   * never list, once Chrome grants it; the popup never writes the always list itself. A refused
-   * prompt is `host_permission_denied`.
+   * lasts, and closes the popup as it does. The background adds the site, and takes its own entry
+   * off the never list, once Chrome grants it; the popup never writes the always list itself. A
+   * refused prompt is `host_permission_denied`. A site a parent domain's entry of `never` (the
+   * list the caller shows) excludes is `page_excluded` at once: nothing is sent or asked.
    * Off: the site leaves the always list and its permission is given back, unless llama.cpp is
    * reached through that host or the manifest grants it.
    */
-  setAlways(this: void, site: Site, on: boolean): Promise<Result<void>>;
+  setAlways(this: void, site: Site, on: boolean, never: readonly string[]): Promise<Result<void>>;
   /**
    * On: the site joins the never list and leaves the always list (its permission given back as
-   * for always off). Off: the never entries that exclude the site go, its parent domains' too.
+   * for always off). Off: the site's own entry goes; a parent domain's stays.
    */
   setNever(this: void, site: Site, on: boolean): Promise<Result<void>>;
 };
@@ -148,7 +165,9 @@ export function siteSwitches(api: SiteApi, store: PageSettingsStore): SiteSwitch
     );
   }
 
-  async function askAlways(site: Site): Promise<Result<void>> {
+  async function askAlways(site: Site, never: readonly string[]): Promise<Result<void>> {
+    // Lifting a parent domain's exclusion would change other sites: no prompt, no grant.
+    if (exclusionOf(site, never)?.parent === true) return Err(failure('page_excluded'));
     // Both calls are made before the first `await`, while the viewer's click lasts.
     const told = pageProtocol.send(send, 'page/always', { pattern: site.pattern });
     const asked = capture(
@@ -177,13 +196,12 @@ export function siteSwitches(api: SiteApi, store: PageSettingsStore): SiteSwitch
     always.filter((pattern) => pattern !== site.pattern);
 
   function setNever(site: Site, on: boolean): Promise<Result<void>> {
+    const host = hostOf(site);
     if (!on)
       return write(site, (settings) => ({
         ...settings,
-        never: settings.never.filter((entry) => !isNever(site.host, [entry])),
+        never: settings.never.filter((entry) => entry !== host),
       }));
-    // The list holds host names as the options page saves them: without a trailing dot.
-    const host = site.host.replace(/\.$/u, '');
     return write(site, (settings) => ({
       ...settings,
       never: settings.never.includes(host) ? settings.never : [...settings.never, host],
@@ -192,9 +210,9 @@ export function siteSwitches(api: SiteApi, store: PageSettingsStore): SiteSwitch
   }
 
   return {
-    setAlways: (site, on) =>
+    setAlways: (site, on, never) =>
       on
-        ? askAlways(site)
+        ? askAlways(site, never)
         : write(site, (settings) => ({ ...settings, always: withoutSite(site, settings.always) })),
     setNever,
   };

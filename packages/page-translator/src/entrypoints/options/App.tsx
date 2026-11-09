@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { launch, type AppError } from '@chrome-toolbox/contracts';
+import { launch, Ok, type AppError } from '@chrome-toolbox/contracts';
 import { PLAMO_LICENSE_URL, PLAMO_TRANSLATE_MODEL } from '@chrome-toolbox/extension-core';
 import { ConnectionPanel } from '@chrome-toolbox/ui';
 import { readHosts, type OptionsPort } from '../../options.ts';
@@ -85,12 +85,14 @@ export function App({ port }: { port: OptionsPort }) {
   }, [port]);
 
   function save(): void {
-    const hosts = readHosts(never);
+    // The never list goes only when the viewer edited it: the popup may have changed the stored
+    // one since it was read, and `save` keeps what is stored otherwise.
+    const hosts = edited.current.never ? readHosts(never) : Ok(undefined);
     if (!hosts.ok) {
       setMessage(`ホスト名の形式が正しくありません: ${hosts.error.line}`);
       return;
     }
-    if (hosts.value.length > PAGE_SETTINGS_LIMITS.never) {
+    if (hosts.value !== undefined && hosts.value.length > PAGE_SETTINGS_LIMITS.never) {
       setMessage(`翻訳しないサイトは ${PAGE_SETTINGS_LIMITS.never} 件までです`);
       return;
     }
@@ -103,13 +105,19 @@ export function App({ port }: { port: OptionsPort }) {
     setMessage('');
     launch(
       async () => {
-        const saved = await port.save({ translator, model: name, never: hosts.value });
+        const saved = await port.save({
+          translator,
+          model: name,
+          ...(hosts.value === undefined ? {} : { never: hosts.value }),
+        });
         if (!mounted.current) return;
         setBusy(false);
         if (!saved.ok) {
           setMessage(explain(saved.error));
           return;
         }
+        // The field shows the list as stored now; it goes with the next save once edited again.
+        edited.current.never = false;
         setPage(saved.value.page);
         setNever(saved.value.page.never.join('\n'));
         setModel(saved.value.settings.models.translate);
@@ -134,6 +142,7 @@ export function App({ port }: { port: OptionsPort }) {
         const removed = await port.setAlways(
           site.ok ? site.value : { host: pattern, pattern },
           false,
+          page?.never ?? [],
         );
         const loaded = await port.pageSettings.load();
         if (!mounted.current) return;
