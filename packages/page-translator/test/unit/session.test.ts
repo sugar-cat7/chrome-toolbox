@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import { systemTimers, type Timers } from '@chrome-toolbox/extension-core';
+import { extensionGone, runInjection } from '../../src/content/claim.ts';
 import { OVERLAY_TAG, OVERLAY_TIMING } from '../../src/content/overlay.ts';
 import { startSession, type ProgressPort, type SessionApi } from '../../src/content/session.ts';
 import {
@@ -32,6 +34,8 @@ const HOST = 'wiki.fixture.test';
 
 let io: FakeIntersection;
 let stop: (() => void) | undefined;
+/** WXT contexts a test made: each listens on the document for the copy after it. */
+const contexts: ContentScriptContext[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -47,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   stop?.();
   stop = undefined;
+  for (const ctx of contexts.splice(0)) ctx.abort();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -724,3 +729,137 @@ describe('startSession', () => {
 function pageRequests(of: Fake): TranslateRequest[] {
   return of.requests().filter((request) => request.purpose === 'page');
 }
+
+describe('extensionGone', () => {
+  it.each([
+    { name: 'has its id', api: { runtime: { id: 'extension-id' } }, gone: false },
+    { name: 'has no id', api: { runtime: {} }, gone: true },
+    { name: 'has no runtime', api: {}, gone: true },
+    {
+      name: 'cannot read its id',
+      api: {
+        runtime: {
+          get id(): string {
+            throw new Error('Extension context invalidated.');
+          },
+        },
+      },
+      gone: true,
+    },
+  ])('is $gone when the runtime $name', ({ api, gone }) => {
+    expect(extensionGone(api)).toBe(gone);
+  });
+});
+
+describe('runInjection', () => {
+  /** The page script's options (page.content.ts) that WXT's context reads. */
+  const OPTIONS = { registration: 'runtime', noScriptStartedPostMessage: true } as const;
+  /**
+   * Injections of the page script into one isolated world (`world`), each with its own WXT
+   * context, of an extension whose runtime id is `id` (undefined once it has gone).
+   */
+  function injector(fake: Fake): {
+    inject: () => ContentScriptContext;
+    runtime: { id?: string };
+    started: () => number;
+  } {
+    const world = {};
+    const runtime: { id?: string } = { id: 'extension-id' };
+    let started = 0;
+    return {
+      runtime,
+      started: () => started,
+      inject: () => {
+        const ctx = new ContentScriptContext('page', OPTIONS);
+        contexts.push(ctx);
+        runInjection({
+          scope: world,
+          start: () => {
+            started += 1;
+            const end = startSession(document, fake.api);
+            stop = end;
+            return end;
+          },
+          gone: () => extensionGone({ runtime }),
+          onInvalidated: (listener) => {
+            ctx.onInvalidated(listener);
+          },
+        });
+        return ctx;
+      },
+    };
+  }
+
+  it('leaves the page to its session when the running extension injects again (P18)', async () => {
+    const elements = article();
+    const fake = fakeApi();
+    const { inject, started } = injector(fake);
+    const first = inject();
+    fake.command({ action: 'translate' });
+    await settle();
+    expect(lines(elements)[1]).toBe(`${TRANSLATED}Click here to run().`);
+    // The second press: its context ends the first one's, and the first session goes on.
+    inject();
+    expect(first.signal.aborted).toBe(true);
+    expect(started()).toBe(1);
+    expect(lines(elements)[1]).toBe(`${TRANSLATED}Click here to run().`);
+    expect(fake.messages.listeners.size).toBe(1);
+    expect(fake.command({ action: 'ping' })).toEqual({ ready: true });
+    const asked = fake.requests().length;
+    document.body.append(Object.assign(document.createElement('p'), { textContent: 'Late.' }));
+    await settle(1_000);
+    expect(fake.requests().length).toBeGreaterThan(asked);
+  });
+
+  it('stops and restores the exact page at once when the extension has gone (P28)', async () => {
+    const elements = article();
+    const before = fingerprint(document.documentElement);
+    const fake = fakeApi();
+    const { inject, runtime } = injector(fake);
+    inject();
+    fake.command({ action: 'translate' });
+    await settle();
+    expect(lines(elements)[1]).toBe(`${TRANSLATED}Click here to run().`);
+    // Pressed again before the update: the context that sees the update is the second one's.
+    inject();
+    // The extension reloads; its new version's copy starts on the page (another isolated world
+    // in Chrome), which ends the old copy's context.
+    delete runtime.id;
+    const asked = fake.requests().length;
+    contexts.push(new ContentScriptContext('page', OPTIONS));
+    expect(fingerprint(document.documentElement)).toBe(before);
+    expect(io.observers.every((observer) => observer.targets().length === 0)).toBe(true);
+    expect(fake.messages.listeners.size).toBe(0);
+    document.body.append(Object.assign(document.createElement('p'), { textContent: 'Late.' }));
+    await settle(1_000);
+    expect(fake.requests()).toHaveLength(asked);
+  });
+
+  it('lets go of the page even when the ended extension has no runtime left (P28)', async () => {
+    const view = must(document.defaultView);
+    const documentListeners = trackListeners(document);
+    const windowListeners = trackListeners(view);
+    const elements = article();
+    const before = fingerprint(document.documentElement);
+    const fake = fakeApi();
+    const { inject, runtime } = injector(fake);
+    inject();
+    fake.command({ action: 'translate' });
+    await settle();
+    const port = fake.connect();
+    expect(lines(elements)[1]).toBe(`${TRANSLATED}Click here to run().`);
+    delete runtime.id;
+    const dead = (): void => {
+      throw new Error('Extension context invalidated.');
+    };
+    fake.messages.api.removeListener = dead;
+    fake.connects.api.removeListener = dead;
+    fake.changes.api.removeListener = dead;
+    contexts.push(new ContentScriptContext('page', OPTIONS));
+    expect(fingerprint(document.documentElement)).toBe(before);
+    // Only the new copy's WXT context still listens, for the copy after it.
+    expect(documentListeners()).toEqual([expect.stringMatching(/:wxt:content-script-started$/u)]);
+    expect(windowListeners()).toEqual([]);
+    expect(port.posted.length).toBeGreaterThan(0);
+  });
+});

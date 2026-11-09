@@ -4,12 +4,25 @@ import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { defaultSettings } from '@chrome-toolbox/extension-core';
 import { triggerAction } from '@chrome-toolbox/extension-core/testing';
 import { PAGE_SCRIPT } from '../../src/control.ts';
+import {
+  PROGRESS_PORT,
+  progressSchema,
+  type PageCommand,
+  type Progress,
+} from '../../src/protocol.ts';
 
 /** The extension APIs the tests call in the service worker, as Chrome exposes them there. */
 export type WorkerChrome = {
   tabs: {
     query(info: { active: boolean; lastFocusedWindow: boolean }): Promise<{ id?: number }[]>;
     sendMessage(tabId: number, message: unknown, options: { frameId: number }): Promise<unknown>;
+    connect(
+      tabId: number,
+      info: { name: string; frameId: number },
+    ): {
+      onMessage: { addListener(listener: (message: unknown) => void): void };
+      disconnect(): void;
+    };
   };
   scripting: {
     executeScript(injection: {
@@ -79,6 +92,39 @@ export const ping = (serviceWorker: Worker, tabId: number): Promise<unknown> =>
         .catch((error: unknown) => (error instanceof Error ? error.message : String(error))),
     tabId,
   );
+
+/** Sends the page script in the tab's top frame `command`, as the background does. */
+export const tell = (
+  serviceWorker: Worker,
+  tabId: number,
+  command: PageCommand,
+): Promise<unknown> =>
+  serviceWorker.evaluate(
+    ({ tabId, command }) =>
+      (globalThis as unknown as { chrome: WorkerChrome }).chrome.tabs.sendMessage(
+        tabId,
+        { type: 'page/command', payload: command },
+        { frameId: 0 },
+      ),
+    { tabId, command },
+  );
+
+/** The page script's progress, as the popup's port first hears it. */
+export async function progressOf(serviceWorker: Worker, tabId: number): Promise<Progress> {
+  const heard = await serviceWorker.evaluate(
+    ({ tabId, name }) =>
+      new Promise<unknown>((resolve) => {
+        const { chrome } = globalThis as unknown as { chrome: WorkerChrome };
+        const port = chrome.tabs.connect(tabId, { name, frameId: 0 });
+        port.onMessage.addListener((message) => {
+          port.disconnect();
+          resolve(message);
+        });
+      }),
+    { tabId, name: PROGRESS_PORT },
+  );
+  return progressSchema.parse(heard);
+}
 
 /**
  * Starts translating `page` as the popup's "このページを翻訳" does. The toolbar button is pressed

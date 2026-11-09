@@ -1,15 +1,17 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Worker } from '@playwright/test';
+import type { BrowserContext, Worker } from '@playwright/test';
 import { expect, test, triggerAction } from '@chrome-toolbox/extension-core/testing';
 import { PAGE_SCRIPT } from '../../src/control.ts';
 import {
   fingerprint,
   NO_SERVER,
   ping,
+  progressOf,
   servePage,
   startTranslation,
   tabIdOf,
+  tell,
   useServer,
   type WorkerChrome,
 } from './page.ts';
@@ -43,6 +45,20 @@ const inject = (serviceWorker: Worker, tabId: number): Promise<string> =>
         ),
     { tabId, file: PAGE_SCRIPT },
   );
+
+/**
+ * Loads the unpacked directory again, which reloads the extension (same id): the page scripts
+ * already in pages are orphaned, and the tabs' activeTab grants are gone. The new service worker.
+ */
+async function reloadExtension(context: BrowserContext): Promise<Worker> {
+  const browser = context.browser();
+  if (browser === null) throw new Error('the browser is not connected over CDP');
+  const session = await browser.newBrowserCDPSession();
+  const reloaded = context.waitForEvent('serviceworker');
+  await session.send('Extensions.loadUnpacked', { path: extensionPath });
+  await session.detach();
+  return reloaded;
+}
 
 test('the manifest asks for no site access at install', async () => {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
@@ -136,20 +152,44 @@ test.describe('in a browser', () => {
     await startTranslation(context, page);
     const tabId = await tabIdOf(serviceWorker, page);
     expect(await ping(serviceWorker, tabId)).toEqual({ ready: true });
-    // Loading the same unpacked directory again reloads the extension (same id): the old page
-    // script is orphaned, and the tab's activeTab grant is gone.
-    const browser = context.browser();
-    if (browser === null) throw new Error('the browser is not connected over CDP');
-    const session = await browser.newBrowserCDPSession();
-    const reloaded = context.waitForEvent('serviceworker');
-    await session.send('Extensions.loadUnpacked', { path: extensionPath });
-    await session.detach();
-    const worker = await reloaded;
+    const worker = await reloadExtension(context);
     expect(new URL(worker.url()).host).toBe(new URL(serviceWorker.url()).host);
     expect(await ping(worker, tabId)).toContain('Receiving end does not exist');
     // Pressed again: the new copy runs in a fresh isolated world, claims the page and answers.
     await startTranslation(context, page);
     expect(await ping(worker, tabId)).toEqual({ ready: true });
+  });
+
+  test('after a reload, the new copy translates the original page once (P28)', async ({
+    context,
+    serviceWorker,
+    llama,
+  }) => {
+    await useServer(serviceWorker, llama.origin);
+    await servePage(context, PLAIN, plainHtml);
+    const page = await context.newPage();
+    await page.goto(PLAIN);
+    const before = await fingerprint(page);
+    await startTranslation(context, page);
+    await expect(page.locator('h1')).toHaveText('訳:Fixture heading');
+    // Pressed again: the second copy claims nothing, and its context is the one the reload ends.
+    await startTranslation(context, page);
+    const worker = await reloadExtension(context);
+    // Storage outlives the reload; set again, so that the new copy reaches only the stub.
+    await useServer(worker, llama.origin);
+    await startTranslation(context, page);
+    const tabId = await tabIdOf(worker, page);
+    // The old copy gave the page back as the new one started: the new one reads the original.
+    await expect
+      .poll(async () => {
+        const { state, found, done, waiting } = await progressOf(worker, tabId);
+        return state === 'on' && found > 0 && waiting === 0 && done === found;
+      })
+      .toBe(true);
+    await expect(page.locator('h1')).toHaveText('訳:Fixture heading');
+    expect(await page.locator('body').textContent()).not.toContain('訳:訳:');
+    await tell(worker, tabId, { action: 'restore' });
+    await expect.poll(() => fingerprint(page)).toBe(before);
   });
 
   test('a tab the toolbar button was not pressed on stays closed to the extension', async ({

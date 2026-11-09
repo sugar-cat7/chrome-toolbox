@@ -477,16 +477,24 @@ export function startSession(
     attached = false;
     generation += 1;
     asked += 1;
-    api.runtime.onMessage.removeListener(onMessage);
-    api.runtime.onConnect.removeListener(onConnect);
-    api.storage.local.onChanged.removeListener(onStorageChanged);
     view?.removeEventListener('pagehide', onPageHide);
     listenHover(false);
     overlay.dispose();
-    for (const port of [...ports.keys()]) {
-      drop(port);
-      port.disconnect();
-    }
+    const open = [...ports];
+    ports.clear();
+    quiet();
+    // The extension's own objects go last: one that has ended (P28) may have taken its runtime
+    // with it, whose listeners and ports are then never called again.
+    const released = captureSync(() => {
+      api.runtime.onMessage.removeListener(onMessage);
+      api.runtime.onConnect.removeListener(onConnect);
+      api.storage.local.onChanged.removeListener(onStorageChanged);
+      for (const [port, gone] of open) {
+        port.onDisconnect.removeListener(gone);
+        port.disconnect();
+      }
+    }, 'ipc_failed');
+    if (!released.ok) return;
   }
 
   /** Stops the work; with `restoreNow`, the page gets its original back at once. */
