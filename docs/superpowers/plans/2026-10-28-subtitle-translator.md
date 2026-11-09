@@ -1415,7 +1415,8 @@ it('keys the cache by the translator that produced the line', async () => {
       - `videoId: message.videoId`、`sourceLang: message.languageCode`
       - `request` は `subtitleProtocol.send(…, 'subs/translate', batch)`、`onLines` は `timeline.upsert`
     - timeline に入れるのは feeder の `onLines` だけ。feeder は、まだ訳していない文（`pending`）も日本語のトラックの文も自分で出すので、content script は文を timeline に入れない。
-    - feeder を作ったときと、同期を止めたり再開したりするたび（一時停止、終了、広告、再生）に `feeder.front(同期しているか)` を呼ぶ。Task 10 で、これを `watchFront` の状態（`state === 'active'`）に置き換える。呼ばないと、一時停止の後も 60 s 先まで batch が続く（R44）。
+    - feeder を作ったときと、同期を止めたり再開したりするたび（一時停止、終了、広告、再生）に `feeder.front(同期しているか)` を呼ぶ。呼ばないと、一時停止の後も 60 s 先まで batch が続く（R44）。
+      - Task 10 で `watchFront` の状態（`state === 'active'`）に置き換えた。`syncFrames` は `onRunning` を持たず、描くだけになった（ミュートの間も描くが、訳は送らない）。
     - 遷移したら、timeline、live view、feeder を作り直し、`subs/page` を送る。
     - `pickSource` が `none` のときは、ピルに `NO_SOURCE_MESSAGE`（または `AUDIO_HINT_MESSAGE`）を出し、feeder を作らない。翻訳の依頼は何も送らない（`subs/page` は送る）。
     - 後片付けは、すべて `ctx.onInvalidated` に登録する。
@@ -1504,7 +1505,7 @@ it('writes the pill message as text', () => {
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - `wxt.config.ts` には何も足さない。content scripts は WXT がエントリから manifest に書く。
-  - feeder は `cues` メッセージから作り（`toSentences(cues, languageCode)`、`videoId`）、作ったときと同期を止めたり再開したりするたびに `feeder.front(…)` を呼ぶ。
+  - feeder は `cues` メッセージから作り（`toSentences(cues, languageCode)`、`videoId`）、作ったときと同期を止めたり再開したりするたびに `feeder.front(…)` を呼ぶ（Task 10 で `watchFront` の状態に置き換えた）。
 - [ ] **Step 4: 通ることを確認する**
   - Run: `pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
   - Expected: PASS
@@ -1515,11 +1516,11 @@ it('writes the pill message as text', () => {
 
 **Files:**
 
-- Create: `packages/subtitle-translator/src/front.ts`
-- Modify: `src/overlay/overlay.ts`（切り替えボタン）、`src/entrypoints/youtube.content.ts`
-- Modify: `src/protocol.ts`（`subs/front`、`subs/display`）、`src/runtime.ts`、`src/entrypoints/background.ts`（コマンド）
-- Modify: `wxt.config.ts`（`commands`）
-- Test: `test/unit/front.test.ts`、`test/unit/overlay.test.ts`、`test/unit/runtime.test.ts`
+- Create: `packages/subtitle-translator/src/front.ts`、`src/tab-fronts.ts`、`src/tab-session.ts`
+- Modify: `src/overlay/overlay.ts`（切り替えボタン）、`src/overlay/frames.ts`（`onRunning` を外す）、`src/watch-page.ts`（`youtube.content.ts` はこれを呼ぶだけ）
+- Modify: `src/protocol.ts`（`subs/front`、`subs/display`）、`src/runtime.ts`（コマンドもここで登録する。`background.ts` は変えない）、`src/settings.ts`（`watchSubtitleSettings`）、`src/page-context.ts`（`tabSessionStore` を使う）
+- Modify: `wxt.config.ts`（`commands`）、`docs/adoption.md`（`commands`、`:host-context()`）
+- Test: `test/unit/front.test.ts`、`test/unit/tab-fronts.test.ts`、`test/unit/overlay.test.ts`、`test/unit/runtime.test.ts`、`test/unit/watch-page.test.ts`、`test/unit/settings.test.ts`、`test/unit/frames.test.ts`
 
 **Interfaces:**
 
@@ -1533,19 +1534,30 @@ it('writes the pill message as text', () => {
     - 表示が `off`
   - pause になる条件: 動画が一時停止か終了、またはミュート（`muted` か `volume === 0`。`volumechange` で見る）。
   - どちらでもなければ active。`waiting`（バッファ中）は見ない。
-  - 優先順位は away > pause > active。
-  - `onChange` は変わったときだけ呼ぶ。タイマーは使わない。
-- content script は、`subs/front` `{ state, reason? }` を始めたときと変わるたびに送る。background はタブごとに覚える。取得中のタブなら offscreen に回す（Task 13）。
+  - 優先順位は away > pause > active。away の理由は hidden > offscreen > ad > display-off、pause は paused > muted の順に見る。`pagehide` の理由は `hidden`（`pageshow` で戻る）。プレイヤーは、`IntersectionObserver` が最初に知らせるまで画面に出ている扱い。
+  - `onChange` は、始めたときの状態で 1 度呼び、あとは状態か理由が変わったときだけ呼ぶ。タイマーは使わない。
+- content script は、`subs/front` `{ state, reason? }` を始めたとき（設定を読んで `ready` を送るとき）と変わるたびに送る。視聴ページを離れたとき（SPA の遷移）は、最後に送った状態が away でなければ `{ state: 'away', reason: 'offscreen' }` を送る。
+- background は、タブごとの `FrontState` を `src/tab-fronts.ts` の `tabFronts(area)` に覚える。
+  - `TabFronts = { report(tabId, front): Promise<Result<void>>; get(tabId): Promise<Result<FrontState>>; forget(tabId): Promise<Result<void>>; onFront(listener: (tabId, front) => void): () => void }`
+  - メモリと `storage.session`（`subs:fronts`）に、16 タブ分。service worker が起動し直しても読める。タブを閉じたら忘れる。
+  - 報告のないタブ（忘れたタブを含む）は `UNKNOWN_FRONT`（`{ state: 'away' }`）。
+  - `onFront` は、メモリにある値と違う報告のたびに、報告の順に呼ぶ。起動し直した後の最初の報告は変化として扱う。Task 13 の取得はこれを購読する。
+  - 保存の作りは `src/tab-session.ts` の `tabSessionStore({ area, key, schema, max })`（`{ tabId, value }` の一覧を 1 つ。1 度に 1 操作。読めない一覧は空の扱い）。Task 7 の `tabPagesStore`（`subs:pages`）も同じものを使う。
 - content script は、feeder を作ったときと `FrontState` が変わるたびに `feeder.front(state === 'active')` を呼ぶ（Task 9 の、同期しているかで呼ぶ形を置き換える）。pause と away では送らず、実行中の batch の応答だけを使う。
 - 切り替えボタン:
   - Task 9 のピル（オーバーレイの右上）を `<button>` にする。
   - 表示は `字幕: 併記` など。ピルに `message` があるときは、その後ろに続けて出す。`aria-label` は「字幕の表示を切り替え（今は併記）」。
-  - 押すと `subs/display` `{ mode: nextDisplay(今のモード) }` を送る。
-  - プレイヤーの操作バーが出ている間（`:host-context(#movie_player:not(.ytp-autohide))`）と、マウスが乗っている間、フォーカスがある間だけ見せる。
-- `'subs/display'`（content から）: `{ mode: DisplayMode }` → `{}`。background が `subtitles` の設定に保存する。各タブは `storage.onChanged` で追う。
+  - 押すと `subs/display` `{ mode: nextDisplay(今のモード) }` を送る。`mountOverlay(player, { mode?, now?, onDisplay? })` の `onDisplay(次のモード)` が呼ばれ、content script が送る。表示は、background が保存して `storage.onChanged` が届いたときに変わる（押したタブも、ほかのタブと同じ経路）。
+  - プレイヤーの操作バーが出ている間（`:host-context(#movie_player:not(.ytp-autohide))`）と、フォーカスがある間だけ見せる。マウスを動かすと YouTube が操作バーを出すので、マウスの判定は持たない（`:hover` は `pointer-events: none` の間は効かない）。見えている間だけ `pointer-events: auto`。オーバーレイのほかの部分はクリックを通す。
+  - `click`、`dblclick`、Space と Enter の `keydown` はプレイヤーに届かせない（再生、一時停止、全画面にしない）。`mousedown` ではフォーカスを取らない（YouTube のキーが効き続ける）。
+  - `:host-context()` は Chrome だけが対応し、仕様からは外された（docs/adoption.md）。
+- 表示のモードは、その場で読む。`settings.ts` の `watchSubtitleSettings(area, onChange)`（`storage.local.onChanged`。消えた値と読めない値は既定）で追い、`WatchPageOptions.storage` は `StorageArea & StorageEvents`。変わったら `watchFront.displayChanged()`、feeder に今の位置をもう 1 度渡す（一時停止中に表示を戻しても、その行が出る）、描き直し、ピルの順。
+- 広告が始まったら（理由が `ad` になったら）行を消す。広告の間に来た訳は timeline に入れるが描かない。一時停止では行を残す。一時停止中に広告が終わったら、フレームが来ないので `video.currentTime * 1000` から 1 度描く。
+- `'subs/display'`（content から）: `{ mode: DisplayMode }` → `{}`。background が `subtitles` の設定の `display` だけを保存する。各タブは `storage.onChanged` で追う。
 - `commands`:
   - `cycle-display`: `suggested_key: { default: 'Alt+Shift+J' }`、`description: '字幕の表示を切り替え（日本語／併記／原語／オフ）'`
-  - background が `nextDisplay` を保存する。
+  - background が `nextDisplay` を保存する。`commands.onCommand` の listener は `startBackground` が登録する。
+  - `subs/display` とショートカットは、background の 1 つのキュー（1 度に 1 つ。読んでから `display` だけを書き換えて保存）を通る。2 回すばやく押せば 2 つ進む。
 - 表示がもたらす処理の違い:
   - `off` → away（何も処理しない）
   - `source` → 翻訳を送らない（Task 7 の feeder と Task 12 のライブの処理）
@@ -1893,7 +1905,7 @@ it('language tally follows the majority of the last 20 lines', () => {
   - LLM の client は offscreen の中で作る。ASR と翻訳とも `timeoutMs: 8_000` で、キューは `concurrency: 1`。待ちの上限と期限は Task 12 のライブの処理が受け持つ。
   - 訳は Task 8 の `createLineTranslator({ client, config: () => ({ translator: config.translator, model: settings.models.translate }) })` でつくり、ライブの処理の `translate` には、その `ja` だけを返す関数を渡す。`audio/state` の `translator` は、その `status()`。
 - background の `sessions.ts`:
-  - `createSessions(deps: { tabCapture; offscreen: { has(): Promise<boolean>; create(): Promise<Result<void>>; close(): Promise<Result<void>> }; session: StorageArea /* chrome.storage.session */; send: (message: unknown) => Promise<Result<unknown>>; tabs; settings; glossary; pages; timers }): Sessions`
+  - `createSessions(deps: { tabCapture; offscreen: { has(): Promise<boolean>; create(): Promise<Result<void>>; close(): Promise<Result<void>> }; session: StorageArea /* chrome.storage.session */; send: (message: unknown) => Promise<Result<unknown>>; tabs; settings; glossary; pages; fronts: TabFronts /* Task 10 */; timers }): Sessions`
   - `Sessions`:
     - `start(tabId: number, streamId?: string): Promise<Result<void>>`
       1. 別のタブで取得中なら、それを `replaced` で止める。
@@ -1913,7 +1925,11 @@ it('language tally follows the majority of the last 20 lines', () => {
     - `audio/failed` → `failed`
   - YouTube 内の SPA の遷移: content script の `subs/page` で `videoId` が変わったら、`audio/reset` を送り、新しい `LiveConfig`（文脈と用語集）を `audio/config` で送る。
   - 設定と用語集が変わったら（`storage.onChanged`）、`audio/config` を送る。
-  - 取得中のタブの `subs/front` を、`audio/front` で回す。
+  - 取得中のタブの前面の状態を、`audio/front` で回す。
+    - `fronts.onFront`（Task 10 の `tabFronts`）を購読し、取得中のタブの変化だけを回す。`dispose` で購読を外す。
+    - `start` では、`audio/start` の後に `fronts.get(tabId)` の今の状態を 1 度送る。報告のないタブは away（`UNKNOWN_FRONT`）として扱い、何も処理しない。
+    - offscreen は `audio/front` に従う（下の active、pause、away）。届くまでは away の扱い。
+    - service worker が起動し直した後も、`fronts` は `storage.session` から読める。
   - `audio/lines` はタブのトップフレームに `subs/lines` で、`audio/status` は `subs/status` で回す。
   - service worker が起動し直したときは、`storage.session` の `capture` と、`runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` から状態を戻す。
 - `commands` の `toggle-audio`: 今のウィンドウの前面のタブを見る。取得中なら `stop('user')`、YouTube の視聴ページなら `start(tabId)`。
@@ -1960,7 +1976,10 @@ it('maps the not-invoked error of getMediaStreamId to capture_not_invoked', asyn
   /* ... */
 });
 it('forwards front changes of the captured tab only', async () => {
-  /* 別のタブの subs/front は回さない */
+  /* fronts.onFront を通す。別のタブの変化は回さない */
+});
+it('sends the current front on start, away for a tab that reported none', async () => {
+  /* 報告のないタブ → audio/front { front: { state: 'away' } } */
 });
 it('recovers the captured tab from storage.session after a service worker restart', async () => {
   /* 起動し直した後の onRemoved で stop される */
@@ -2010,14 +2029,19 @@ it('translates live lines with the line translator chosen in the config and repo
 
 **Interfaces:**
 
-- Consumes: Task 0 の `PLAMO_LICENSE_URL`、`PLAMO_TRANSLATE_MODEL`、Task 5 の設定と用語集、Task 8 の `TranslatorStatus`、Task 13 の `SessionState`
+- Consumes: Task 0 の `PLAMO_LICENSE_URL`、`PLAMO_TRANSLATE_MODEL`、Task 5 の設定と用語集、Task 8 の `TranslatorStatus`、Task 10 の `tabFronts` と `subs/display`（background のキュー）、Task 13 の `SessionState`
 - `PanelPort`（comment-assistant の `panel.ts` と同じ作り。`watch` を呼ぶまで何も登録しない）:
 
   ```ts
   type PanelPort = {
     connection: ConnectionPort;
     settings: SettingsStore; // extension-core。models.translate と models.asr
-    subtitles: SubtitleSettingsStore;
+    subtitles: Pick<SubtitleSettingsStore, 'load'>; // 読むだけ。保存は下の display と saveSubtitles
+    display(this: void, mode: DisplayMode): Promise<Result<void>>; // subs/display
+    saveSubtitles(
+      this: void,
+      patch: Partial<Omit<SubtitleSettings, 'display'>>,
+    ): Promise<Result<void>>; // 変えた欄だけ
     glossary: GlossaryStore;
     tabState(this: void): Promise<Result<TabState | undefined>>;
     capability(
@@ -2031,8 +2055,12 @@ it('translates live lines with the line translator chosen in the config and repo
 
   - `startAudio` は、Task 13 の Step 0 で通った方式で呼ぶ。パネルのボタンで通るなら、クリックの処理の中で `tabCapture.getMediaStreamId({ targetTabId })` を呼び、`audio/start` `{ tabId, streamId }` を送る。
   - `watch` は、別のタブが前面になったとき、表示中のタブが読み込みを終えたとき、`subs/state-changed`（宛先 `panel`）を受けたときに `changed` を呼ぶ。
+  - パネルは `subtitles` の設定を丸ごと保存しない。丸ごと保存すると、その間にプレイヤーのボタンやショートカットで変わった表示を上書きするため。
+    - 表示は `subs/display` で送る（`page` からの経路を足す）。Task 10 の background のキューを通る。
+    - 取得元、話されている言語、翻訳モデルも、変えた欄だけを background に送り、同じキューで読み直した最新の値に重ねて保存する（例: `subs/settings` `{ patch }`）。パネルが持つ欄だけを書く。
 
-- `TabState = Readonly<{ tabId: number; page?: PageInfo; source: 'captions' | 'audio' | 'none'; front?: FrontState; session?: SessionState; translator: TranslatorStatus }>`
+- `TabState = Readonly<{ tabId: number; page?: PageInfo; source: 'captions' | 'audio' | 'none'; front: FrontState; session?: SessionState; translator: TranslatorStatus }>`
+  - `front` は Task 10 の `tabFronts`（`storage.session` に覚えたもの）から読む。報告のないタブは away（`UNKNOWN_FRONT`）。
   - `translator` は background の字幕トラックの訳（Task 8 の `createSubtitleTranslator().status()`）。音声の経路のタブでは、パネルは `session.translator`（offscreen の訳）を出す。
 - `'subs/capability'`（page から）→ `{ audio: boolean | undefined; plamo: boolean | undefined }`。
   - `audio`: `props({ model: models.asr })` の `audio`。
@@ -2121,8 +2149,11 @@ it.each([
 ])('says that lines fell back to Gemma: $name', async (row) => {
   /* translator 'plamo'。音声の経路のタブでは session.translator を使う。texts だけが、この順に出る */
 });
-it.each(DISPLAY_MODES)('saves the display mode %s', async (mode) => {
-  /* ... */
+it.each(DISPLAY_MODES)('sends the display mode %s with subs/display', async (mode) => {
+  /* subtitles の丸ごとの保存はしない */
+});
+it('saves only the field the viewer changed', async () => {
+  /* 取得元を変える → patch は { source } だけ。その間に変わった display は残る */
 });
 it('adds and removes glossary entries and refuses the 51st', async () => {
   /* ... */
