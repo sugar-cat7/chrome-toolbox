@@ -6,6 +6,7 @@ import {
   defaultPageSettings,
   isNever,
   pageSettingsStore,
+  parentExclusion,
   siteOf,
   type PageSettings,
   type Site,
@@ -107,11 +108,13 @@ export type Control = {
   /**
    * The popup asks to always translate the site of `pattern` (a `siteOf` pattern) before it shows
    * Chrome's prompt: the site is added at once when Chrome already grants it, else on `granted`.
+   * A site a parent domain's never entry excludes is `page_excluded`, and nothing waits (P29).
    */
   ask(this: void, pattern: string): Promise<Result<void>>;
   /**
    * Chrome granted `origins`: the site the popup asked for, if among them and asked for at most
-   * `ASKED_FOR_MS` ago, is added. An older request is dropped instead.
+   * `ASKED_FOR_MS` ago, is added. An older request is dropped instead, and so is one for a site
+   * a parent domain's never entry came to exclude meanwhile (P29).
    */
   granted(this: void, origins: readonly string[]): Promise<Result<void>>;
 };
@@ -246,13 +249,16 @@ export function createControl(
   }
 
   /**
-   * The asked site joins the always list and leaves the never list (its own entry; a parent
-   * domain's entry stays and keeps it excluded), and the request is done.
+   * The asked site joins the always list and leaves the never list (its own entry), and the
+   * request is done. Under a parent domain's entry, which covers other sites too, the site stays
+   * out: the popup refuses it (P29), and an entry added while the prompt showed has the last word.
    */
   async function join(site: Site): Promise<Result<void>> {
     const loaded = await settings();
     if (!loaded.ok) return loaded;
     const { always, never } = loaded.value;
+    if (parentExclusion(site.host, never) !== undefined)
+      return capture(() => api.storage.session.remove(ASKED_KEY), 'storage_failed');
     const saved = await store.save({
       ...loaded.value,
       always: always.includes(site.pattern) ? always : [...always, site.pattern],
@@ -265,6 +271,12 @@ export function createControl(
     const site = siteOf(pattern);
     // Only one site's pattern: a wildcard or a page would let the script into other pages.
     if (!site.ok || site.value.pattern !== pattern) return Err(failure('input_invalid'));
+    // The popup refuses a site under a parent domain's entry, but its settings may be older than
+    // the options page's: nothing waits for such a site, so no grant can add it.
+    const loaded = await settings();
+    if (!loaded.ok) return loaded;
+    if (parentExclusion(site.value.host, loaded.value.never) !== undefined)
+      return Err(failure('page_excluded'));
     const asked = await capture(
       () => api.storage.session.set({ [ASKED_KEY]: { pattern, at: now() } }),
       'storage_failed',

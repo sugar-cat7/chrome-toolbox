@@ -270,6 +270,56 @@ describe('the popup asking for an always site', () => {
     expect(await loadPage()).toMatchObject({ always: [], never: ['wiki.fixture.test'] });
   });
 
+  it('asks nothing for a site a parent domain excludes, whatever the popup showed (P29)', async () => {
+    // The popup read the settings with no exclusion; the options page adds a parent domain's entry
+    // before the viewer turns always on.
+    await savePage({ never: [] });
+    await savePage({ never: ['fixture.test'] });
+    const chrome = fakeBackground();
+    const { ask, stop } = background();
+    const site = 'https://a.fixture.test/*';
+    expect(await ask({ type: 'page/always', payload: { pattern: site } }, options)).toMatchObject({
+      ok: false,
+      error: { internalCode: 'page_excluded' },
+    });
+    // No request waits, so Chrome's grant, made from the popup's stale prompt, adds nothing.
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+    chrome.granted.add(site);
+    await chrome.permissionsAdded.trigger({ origins: [site] });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await loadPage()).toEqual({ ...defaultPageSettings, never: ['fixture.test'] });
+    expect(chrome.registry.size).toBe(0);
+    stop();
+  });
+
+  it.each([
+    { name: 'its own entry', never: ['a.fixture.test'], after: [] },
+    { name: 'another site', never: ['bank.fixture.test'], after: ['bank.fixture.test'] },
+  ])('asks for a site whose exclusion is $name', async ({ never, after }) => {
+    await savePage({ never });
+    const { chrome, control } = asking();
+    const site = 'https://a.fixture.test/*';
+    expect(await control.ask(site)).toEqual(Ok(undefined));
+    chrome.granted.add(site);
+    expect(await control.granted([site])).toEqual(Ok(undefined));
+    expect(await loadPage()).toEqual({ ...defaultPageSettings, always: [site], never: after });
+  });
+
+  it('drops the request when a parent domain is excluded while the prompt shows (P29)', async () => {
+    await savePage({ never: ['bank.fixture.test'] });
+    const { chrome, control } = asking();
+    const site = 'https://a.fixture.test/*';
+    expect(await control.ask(site)).toEqual(Ok(undefined));
+    await savePage({ never: ['bank.fixture.test', 'fixture.test'] });
+    chrome.granted.add(site);
+    expect(await control.granted([site])).toEqual(Ok(undefined));
+    expect(await loadPage()).toEqual({
+      ...defaultPageSettings,
+      never: ['bank.fixture.test', 'fixture.test'],
+    });
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+  });
+
   it('reads a waiting request that is not its own as none', async () => {
     await fakeBrowser.storage.session.set({ pageAlwaysAsked: WIKI });
     const { chrome, control } = asking();

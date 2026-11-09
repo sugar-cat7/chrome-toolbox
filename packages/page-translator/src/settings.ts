@@ -99,12 +99,21 @@ export function normalizeHost(input: string): Result<string> {
 }
 
 /**
- * The entry of `never` that excludes `host`: a parent domain's entry first (the first in the
- * list), since taking the host's own entry off leaves a parent's in force; else the host's own.
+ * The entry of `never` for a parent domain of `host` (the first in the list), if any. It covers
+ * other sites too, so lifting it for one site is the options page's to do (P29).
+ */
+export function parentExclusion(host: string, never: readonly string[]): string | undefined {
+  const name = withoutTrailingDot(host);
+  return never.find((entry) => name.endsWith(`.${entry}`));
+}
+
+/**
+ * The entry of `never` that excludes `host`: a parent domain's entry first (`parentExclusion`),
+ * since taking the host's own entry off leaves a parent's in force; else the host's own.
  */
 export function excludedBy(host: string, never: readonly string[]): string | undefined {
   const name = withoutTrailingDot(host);
-  return never.find((entry) => name.endsWith(`.${entry}`)) ?? never.find((entry) => entry === name);
+  return parentExclusion(host, never) ?? never.find((entry) => entry === name);
 }
 
 /** Whether `host` is excluded: it is an entry of `never`, or a subdomain of one. */
