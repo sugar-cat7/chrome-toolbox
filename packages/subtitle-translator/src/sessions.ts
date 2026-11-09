@@ -133,6 +133,8 @@ export type SessionsDeps = Readonly<{
   fronts: TabFronts;
   fetch: Fetch;
   now: () => number;
+  /** Told after a capture started and after one stopped: the side panel asks again (Task 14). */
+  changed: () => void;
 }>;
 
 export type Sessions = {
@@ -224,6 +226,7 @@ export function createSessions({
   fronts,
   fetch,
   now,
+  changed,
 }: SessionsDeps): Sessions {
   const queue = createQueue({ concurrency: 1, maxPending: 32 });
   let captured: Captured | undefined;
@@ -345,6 +348,7 @@ export function createSessions({
       // The page may be gone (another site): the capture is stopped all the same.
       await contentProtocol.send(toPage(tabId), 'subs/status', { status });
     }
+    changed();
     return closed.ok ? removed : closed;
   }
 
@@ -404,6 +408,7 @@ export function createSessions({
     captured = at;
     listen(true);
     follow(at);
+    changed();
     return Ok(undefined);
   }
 

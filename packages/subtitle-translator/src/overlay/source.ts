@@ -1,7 +1,8 @@
 import type { SubtitleSettings } from '../settings.ts';
 
 /** Where a page's subtitles come from: its caption track, the tab's audio, or nowhere. */
-export type SubtitleSource = 'captions' | 'audio' | 'none';
+export const SUBTITLE_SOURCES = ['captions', 'audio', 'none'] as const;
+export type SubtitleSource = (typeof SUBTITLE_SOURCES)[number];
 
 /** The pill with no source, when the viewer has not chosen audio: speech subtitles are a key away. */
 export const NO_SOURCE_MESSAGE = '字幕なし・Alt+Shift+S で音声字幕';

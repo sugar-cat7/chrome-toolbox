@@ -5,16 +5,11 @@ import { Ok } from '@chrome-toolbox/contracts';
 import { subtitleStreamPart, type Fetch } from '@chrome-toolbox/extension-core';
 import { glossaryStore } from '../../src/glossary.ts';
 import { tabPagesStore } from '../../src/page-context.ts';
+import { sidePanelPort, type PanelApi } from '../../src/panel.ts';
 import { tabFronts } from '../../src/tab-fronts.ts';
 import { defaultSubtitleSettings, subtitleSettingsStore } from '../../src/settings.ts';
-import {
-  senderKind,
-  type Sender,
-  sidePanelPort,
-  startBackground,
-  type PanelApi,
-} from '../../src/runtime.ts';
-import { addressed, isFor } from '../../src/protocol.ts';
+import { senderKind, type Sender, startBackground } from '../../src/runtime.ts';
+import { addressed, isFor, type SessionState } from '../../src/protocol.ts';
 
 /** `commands.onCommand`, which the fake browser leaves unimplemented. */
 function fakeCommands() {
@@ -437,7 +432,9 @@ describe('display and front routes', () => {
   it('refuses subs/display from another site with sender_forbidden', async () => {
     const { stop, ask } = background();
     const watch = await fakeBrowser.tabs.create({ url: youtube });
-    for (const sender of strangers(watch)) {
+    // The side panel sends it too (Task 14).
+    const panel = fakeBrowser.runtime.getURL('/sidepanel.html');
+    for (const sender of strangers(watch).filter(({ url }) => url !== panel)) {
       for (const message of [display('off'), display('dim'), { type: 'subs/display' }]) {
         expect(await ask(message, sender)).toMatchObject({
           ok: false,
@@ -737,6 +734,231 @@ describe('toolbar icon (S46)', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(chrome.streamId).not.toHaveBeenCalled();
     expect(chrome.create).not.toHaveBeenCalled();
+    stop();
+  });
+});
+
+describe('side panel routes (Task 14)', () => {
+  const panelUrl = fakeBrowser.runtime.getURL('/sidepanel.html');
+  const panelSender = (): Browser.runtime.MessageSender => ({ url: panelUrl });
+  const tabState = (tabId: number | undefined) => ({ type: 'subs/tab-state', payload: { tabId } });
+  const patch = (fields: unknown) => ({ type: 'subs/settings', payload: { patch: fields } });
+  const typeOf = (message: unknown): unknown =>
+    typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined;
+  /** How many times the service worker told the side panel to ask again. */
+  const told = (send: Mock<(message: unknown) => Promise<unknown>>): number =>
+    send.mock.calls.filter(
+      ([message]) => isFor('panel', message) && typeOf(message) === 'subs/state-changed',
+    ).length;
+
+  it('answers the state of a tab from what its watch page reported', async () => {
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const other = await fakeBrowser.tabs.create({ url: 'https://example.com/' });
+    expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
+    const muted = { state: 'pause', reason: 'muted' } as const;
+    expect(await ask({ type: 'subs/front', payload: muted }, topFrame(watch))).toEqual(Ok({}));
+    expect(await ask(tabState(watch.id), panelSender())).toEqual(
+      Ok({
+        tabId: watch.id,
+        page: page.payload.info,
+        source: 'captions',
+        front: muted,
+        translator: { chosen: 'gemma' },
+      }),
+    );
+    // A tab without a watch page: no page, and away like any tab that reported nothing.
+    expect(await ask(tabState(other.id), panelSender())).toEqual(
+      Ok({
+        tabId: other.id,
+        source: 'none',
+        front: { state: 'away' },
+        translator: { chosen: 'gemma' },
+      }),
+    );
+    // With the audio chosen as the source, a tab that is not captured has none.
+    await subtitleSettingsStore(fakeBrowser.storage.local).save({
+      ...defaultSubtitleSettings,
+      source: 'audio',
+      translator: 'plamo',
+    });
+    expect(await ask(tabState(watch.id), panelSender())).toMatchObject({
+      ok: true,
+      value: { source: 'none', translator: { chosen: 'plamo' } },
+    });
+    expect(await ask(tabState(undefined), panelSender())).toMatchObject({
+      ok: false,
+      error: { internalCode: 'input_invalid' },
+    });
+    stop();
+  });
+
+  it('gives the status of the caption translator with its lines translated by Gemma', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<Fetch>(async (input) =>
+        input.endsWith('/v1/models')
+          ? Response.json({ data: [{ id: 'gemma4-e4b' }] })
+          : Response.json({
+              choices: [{ message: { content: '訳:一行\n' }, finish_reason: 'stop' }],
+            }),
+      ),
+    );
+    await subtitleSettingsStore(fakeBrowser.storage.local).save({
+      ...defaultSubtitleSettings,
+      translator: 'plamo',
+    });
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    expect(await ask(translate('Okay chat.'), topFrame(watch))).toEqual(
+      Ok({ lines: [{ id: '0:a', ja: '訳:一行', state: 'done' }] }),
+    );
+    expect(await ask(tabState(watch.id), panelSender())).toMatchObject({
+      ok: true,
+      value: {
+        translator: {
+          chosen: 'plamo',
+          fallback: { latest: 'not_listed', lines: { not_listed: 1, refused: 0, language: 0 } },
+        },
+      },
+    });
+    stop();
+  });
+
+  it("reads the captured tab's session from the offscreen document, stops it from the panel and tells the panel", async () => {
+    const chrome = fakeCapture();
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube, active: true });
+    const other = await fakeBrowser.tabs.create({ url: youtube });
+    const session: SessionState = {
+      tabId: watch.id ?? -1,
+      startedAt: 5,
+      front: { state: 'active' },
+      stats: { segments: 3, silent: 1, dropped: 0, expired: 0, skipped: 0, failed: 0, lang: 'en' },
+      translator: { chosen: 'gemma' },
+    };
+    chrome.toOffscreen.mockImplementation(async (message) =>
+      Ok(typeOf(message) === 'audio/state' ? session : {}),
+    );
+    chrome.stub(
+      fakeBrowser.tabs,
+      'query',
+      vi.fn<(info: unknown) => Promise<unknown[]>>(async () => [watch]),
+    );
+    expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
+    // A watch page that reported its page: the panel asks again.
+    expect(told(chrome.toOffscreen)).toBe(1);
+    commands.press('toggle-audio');
+    await vi.waitFor(() => {
+      expect(told(chrome.toOffscreen)).toBe(2);
+    });
+    expect(await ask(tabState(watch.id), panelSender())).toEqual(
+      Ok({
+        tabId: watch.id,
+        page: page.payload.info,
+        source: 'audio',
+        front: { state: 'away' },
+        session,
+        translator: { chosen: 'gemma' },
+      }),
+    );
+    // Another tab is not the captured one: nothing stops.
+    expect(await ask({ type: 'subs/stop', payload: { tabId: other.id } }, panelSender())).toEqual(
+      Ok({}),
+    );
+    expect(chrome.close).not.toHaveBeenCalled();
+    expect(await ask({ type: 'subs/stop', payload: { tabId: watch.id } }, panelSender())).toEqual(
+      Ok({}),
+    );
+    expect(chrome.close).toHaveBeenCalledOnce();
+    expect(told(chrome.toOffscreen)).toBe(3);
+    expect(await ask(tabState(watch.id), panelSender())).toEqual(
+      Ok({
+        tabId: watch.id,
+        page: page.payload.info,
+        source: 'captions',
+        front: { state: 'away' },
+        translator: { chosen: 'gemma' },
+      }),
+    );
+    stop();
+  });
+
+  it('tells whether the server takes audio input for models.asr and lists PLaMo', async () => {
+    const asked: string[] = [];
+    let server: { audio?: boolean; models?: string[] } = {
+      audio: false,
+      models: ['gemma4-e4b', 'plamo-3-translate-2b'],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<Fetch>(async (input) => {
+        const url = new URL(input);
+        asked.push(`${url.pathname}${url.search}`);
+        if (url.pathname === '/props' && server.audio !== undefined)
+          return Response.json({ total_slots: 3, modalities: { audio: server.audio } });
+        if (url.pathname === '/v1/models' && server.models !== undefined)
+          return Response.json({ data: server.models.map((id) => ({ id })) });
+        return new Response('', { status: 503 });
+      }),
+    );
+    const { stop, ask } = background();
+    const capability = { type: 'subs/capability', payload: {} };
+    expect(await ask(capability, panelSender())).toEqual(Ok({ audio: false, plamo: true }));
+    expect([...asked].sort()).toEqual(['/props?model=gemma4-e4b', '/v1/models']);
+    server = { audio: true, models: ['gemma4-e4b'] };
+    expect(await ask(capability, panelSender())).toEqual(Ok({ audio: true, plamo: false }));
+    // A server that answers neither: both unknown.
+    server = {};
+    expect(await ask(capability, panelSender())).toEqual(Ok({}));
+    stop();
+  });
+
+  it('saves only the fields the panel changed, over a display a watch page changed meanwhile', async () => {
+    const store = subtitleSettingsStore(fakeBrowser.storage.local);
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    expect(await ask(display('off'), topFrame(watch))).toEqual(Ok({}));
+    expect(await ask(patch({ source: 'audio' }), panelSender())).toEqual(Ok({}));
+    expect(await store.load()).toEqual(
+      Ok({ ...defaultSubtitleSettings, display: 'off', source: 'audio' }),
+    );
+    expect(await ask(patch({ sourceLang: 'ko', translator: 'plamo' }), panelSender())).toEqual(
+      Ok({}),
+    );
+    // The panel's display goes through the same queue as the player button's.
+    expect(await ask(display('ja'), panelSender())).toEqual(Ok({}));
+    const saved = { display: 'ja', source: 'audio', sourceLang: 'ko', translator: 'plamo' };
+    expect(await store.load()).toEqual(Ok(saved));
+    // The display is not a field of the patch, and every value is checked.
+    for (const fields of [{ display: 'off' }, { source: 'tv' }, { sourceLang: 'xx' }])
+      expect(await ask(patch(fields), panelSender())).toMatchObject({
+        ok: false,
+        error: { internalCode: 'input_invalid' },
+      });
+    expect(await store.load()).toEqual(Ok(saved));
+    stop();
+  });
+
+  it('takes the side panel routes only from extension pages', async () => {
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const messages = [
+      tabState(watch.id),
+      { type: 'subs/capability', payload: {} },
+      patch({ source: 'audio' }),
+      { type: 'subs/stop', payload: { tabId: watch.id } },
+    ];
+    for (const sender of [
+      topFrame(watch),
+      ...strangers(watch).filter(({ url }) => url !== panelUrl),
+    ])
+      for (const message of messages)
+        expect(await ask(message, sender)).toMatchObject({
+          ok: false,
+          error: { internalCode: 'sender_forbidden' },
+        });
+    expect(await fakeBrowser.storage.local.get('subtitles')).toEqual({});
     stop();
   });
 });

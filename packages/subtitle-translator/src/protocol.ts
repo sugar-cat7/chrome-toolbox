@@ -13,8 +13,14 @@ import { FRONT_REASONS, FRONT_STATES } from './front.ts';
 import { GLOSSARY_LIMITS, glossaryEntrySchema } from './glossary.ts';
 import { PAGE_LIMITS } from './limits.ts';
 import type { FallbackReason } from './line-translator.ts';
+import { SUBTITLE_SOURCES } from './overlay/source.ts';
 import { pageInfoSchema } from './page-context.ts';
-import { DISPLAY_MODES, SOURCE_LANGUAGE_CODES, SUBTITLE_TRANSLATORS } from './settings.ts';
+import {
+  DISPLAY_MODES,
+  SOURCE_LANGUAGE_CODES,
+  SUBTITLE_TRANSLATORS,
+  subtitleSettingsSchema,
+} from './settings.ts';
 
 /** Who a message is for: every receiver drops what is not for it before validating. */
 export type Target = 'background' | 'offscreen' | 'panel' | 'content';
@@ -179,6 +185,48 @@ export const sessionStateSchema = z.strictObject({
 export type SessionState = Readonly<z.infer<typeof sessionStateSchema>>;
 
 /**
+ * What the side panel shows of a tab: the page it reported, where its subtitles come from, whether
+ * it has its video in front (`UNKNOWN_FRONT`, away, when it reported nothing), the capture of its
+ * audio when it is the captured tab, and the service worker's caption translator.
+ */
+export const tabStateSchema = z.strictObject({
+  tabId: tabIdSchema,
+  page: z.exactOptional(pageInfoSchema),
+  source: z.enum(SUBTITLE_SOURCES),
+  front: frontStateSchema,
+  session: z.exactOptional(sessionStateSchema),
+  translator: translatorStatusSchema,
+});
+export type TabState = Readonly<z.infer<typeof tabStateSchema>>;
+
+/**
+ * Whether the server takes audio input for `models.asr` (`/props` `modalities.audio`) and lists
+ * PLaMo (`/v1/models`); a key is left out when the server did not tell.
+ */
+export const capabilitySchema = z.strictObject({
+  audio: z.exactOptional(z.boolean()),
+  plamo: z.exactOptional(z.boolean()),
+});
+
+/** The subtitle settings the side panel changes, one field at a time; the display is not one. */
+export const subtitlePatchSchema = z.strictObject({
+  source: z.exactOptional(subtitleSettingsSchema.shape.source),
+  sourceLang: z.exactOptional(subtitleSettingsSchema.shape.sourceLang),
+  translator: z.exactOptional(subtitleSettingsSchema.shape.translator),
+});
+
+/**
+ * Service worker → the side panel (target `panel`), after a capture started or stopped and after a
+ * watch page reported its page: the panel asks for its tab's state again. It needs no answer.
+ */
+export const stateChangedSchema = z.strictObject({
+  type: z.literal('subs/state-changed'),
+  payload: empty,
+  target: z.literal('panel'),
+});
+export const STATE_CHANGED_MESSAGE = { type: 'subs/state-changed', payload: {} } as const;
+
+/**
  * The messages the offscreen document answers, sent by the service worker (target `offscreen`).
  * `audio/start` uses the stream id at once; the capture follows `audio/front` (away until the first).
  */
@@ -228,11 +276,19 @@ export const subtitleProtocolSpec = {
   },
   /** From a watch page's top frame, at the start and on each change: whether it is in front. */
   'subs/front': { request: frontStateSchema, response: z.strictObject({}) },
-  /** From a watch page's top frame (the player button): the display mode to save. */
+  /** From a watch page's top frame (the player button) or the side panel: the display to save. */
   'subs/display': {
     request: z.strictObject({ mode: z.enum(DISPLAY_MODES) }),
     response: z.strictObject({}),
   },
+  /** From the side panel: what it shows of a tab. */
+  'subs/tab-state': { request: z.strictObject({ tabId: tabIdSchema }), response: tabStateSchema },
+  /** From the side panel, on open and on 更新: what the server can do for the subtitles. */
+  'subs/capability': { request: empty, response: capabilitySchema },
+  /** From the side panel: the fields it changed, saved over the latest subtitle settings. */
+  'subs/settings': { request: z.strictObject({ patch: subtitlePatchSchema }), response: empty },
+  /** From the side panel: stop the capture of the tab, if it is the captured one. */
+  'subs/stop': { request: z.strictObject({ tabId: tabIdSchema }), response: empty },
   /** From the offscreen document: lines of the captured tab, for its top frame. */
   'audio/lines': {
     request: z.strictObject({ tabId: tabIdSchema, lines: liveLinesSchema }),

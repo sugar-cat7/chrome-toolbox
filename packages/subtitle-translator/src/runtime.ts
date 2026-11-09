@@ -1,31 +1,33 @@
 import { browser, type Browser } from 'wxt/browser';
 import { capture, Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
 import {
-  connectionPort,
   createLlamaClient,
   createLruCache,
   createQueue,
   llmHandlers,
+  PLAMO_TRANSLATE_MODEL,
   settingsStore,
-  type ConnectionPort,
   type Fetch,
-  type HostPermissions,
   type SettingsStore,
-  type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
+import type { TranslatorStatus } from './line-translator.ts';
+import { pickSource } from './overlay/source.ts';
 import { tabPagesStore, type PageInfo, type TabPageStore } from './page-context.ts';
 import {
   nextDisplay,
   subtitleSettingsStore,
-  type DisplayMode,
   type SubtitleSettings,
   type SubtitleSettingsStore,
 } from './settings.ts';
 import {
+  addressed,
+  offscreenProtocol,
+  STATE_CHANGED_MESSAGE,
   subtitleProtocol,
   type SubtitleMessageType,
   type SubtitleProtocolHandlers,
+  type TabState,
   type TranslateRequest,
   type TranslateResponse,
 } from './protocol.ts';
@@ -37,22 +39,6 @@ import {
   type CaptionCacheEntry,
   type CaptionTranslator,
 } from './translate.ts';
-
-/** The extension APIs a side panel uses; tests pass a fake with this shape. */
-export type PanelApi = {
-  storage: { local: StorageArea };
-  permissions: HostPermissions;
-  runtime: { sendMessage(message: unknown): Promise<unknown> };
-};
-
-/** Side panel adapter: settings in extension storage, inference through the service worker. */
-export function sidePanelPort(api: PanelApi = browser): ConnectionPort {
-  return connectionPort({
-    settings: settingsStore(api.storage.local),
-    permissions: api.permissions,
-    send: (message) => api.runtime.sendMessage(message),
-  });
-}
 
 /** The part of `runtime.MessageSender` that names the sending page and frame. */
 export type Sender = Readonly<{
@@ -88,7 +74,14 @@ export function senderKind(sender: Sender): SenderKind {
  * `sender_forbidden` before it is validated.
  */
 const ROUTES = {
-  page: ['llm/status'],
+  page: [
+    'llm/status',
+    'subs/tab-state',
+    'subs/capability',
+    'subs/display',
+    'subs/settings',
+    'subs/stop',
+  ],
   content: ['subs/page', 'subs/translate', 'subs/front', 'subs/display'],
   offscreen: ['audio/lines', 'audio/status', 'audio/idle', 'audio/failed'],
   other: [],
@@ -133,6 +126,8 @@ function captionTranslation({
     request: TranslateRequest,
     page: PageInfo | undefined,
   ): Promise<Result<TranslateResponse>>;
+  /** The translator's status; undefined until the first request made it. */
+  status(this: void): TranslatorStatus | undefined;
   /** Cancels the waiting requests. */
   dispose(this: void): void;
 } {
@@ -161,7 +156,7 @@ function captionTranslation({
     }
     return active.translator.translate(request, page);
   }
-  return { translate, dispose: () => queue.clear() };
+  return { translate, status: () => active?.translator.status(), dispose: () => queue.clear() };
 }
 
 /** The shortcut (`commands` in wxt.config.ts) that steps the display: ja → both → source → off. */
@@ -177,11 +172,13 @@ function audioSessions({
   fronts,
   subtitles,
   fetch,
+  changed,
 }: {
   pages: TabPageStore;
   fronts: TabFronts;
   subtitles: SubtitleSettingsStore;
   fetch: Fetch;
+  changed: () => void;
 }): Sessions {
   return createSessions({
     tabCapture: {
@@ -223,15 +220,21 @@ function audioSessions({
     fronts,
     fetch,
     now: () => Date.now(),
+    changed,
   });
 }
 
 /**
- * Saves the display mode in the subtitle settings, which every tab follows. One change at a time:
- * two quick presses of the shortcut step twice.
+ * Changes the subtitle settings, which every tab follows: each change is made over the settings
+ * read again just before, one change at a time, so the display from the player button or the
+ * shortcut and the side panel's fields never undo one another, and two quick presses of the
+ * shortcut step twice.
  */
-function displaySwitch(subtitles: SubtitleSettingsStore): {
-  change(this: void, next: (mode: DisplayMode) => DisplayMode): Promise<Result<SubtitleSettings>>;
+function settingsChanges(subtitles: SubtitleSettingsStore): {
+  change(
+    this: void,
+    next: (settings: SubtitleSettings) => SubtitleSettings,
+  ): Promise<Result<SubtitleSettings>>;
   dispose(this: void): void;
 } {
   const queue = createQueue({ concurrency: 1, maxPending: 4 });
@@ -240,10 +243,23 @@ function displaySwitch(subtitles: SubtitleSettingsStore): {
       queue.run(async (): Promise<Result<SubtitleSettings>> => {
         const loaded = await subtitles.load();
         if (!loaded.ok) return loaded;
-        return subtitles.save({ ...loaded.value, display: next(loaded.value.display) });
+        return subtitles.save(next(loaded.value));
       }),
     dispose: () => queue.clear(),
   };
+}
+
+/** A router that loads the speech model again answers `/props` within 13 s (measured). */
+const CAPABILITY_TIMEOUT_MS = 15_000;
+
+/** Delivers a message to the open extension pages; none listening is no failure. */
+function broadcast(message: unknown): void {
+  launch(
+    async () => {
+      await browser.runtime.sendMessage(message);
+    },
+    () => undefined,
+  );
 }
 
 /** Registers the service worker's message router and returns its cleanup. */
@@ -259,15 +275,85 @@ export function startBackground(): () => void {
   // (Task 13) follows its changes with `fronts.onFront`, the side panel (Task 14) reads it.
   const fronts = tabFronts(browser.storage.session);
   const subtitles = subtitleSettingsStore(browser.storage.local);
-  const display = displaySwitch(subtitles);
+  const settings = settingsStore(browser.storage.local);
+  const changes = settingsChanges(subtitles);
+  /** Tells an open side panel to ask for its tab's state again. */
+  const announce = (): void => broadcast(addressed('panel', STATE_CHANGED_MESSAGE));
   // The tab whose audio is captured (one at a time), kept in storage.session too.
-  const sessions = audioSessions({ pages, fronts, subtitles, fetch: fetcher });
+  const sessions = audioSessions({ pages, fronts, subtitles, fetch: fetcher, changed: announce });
   const captions = captionTranslation({
-    settings: settingsStore(browser.storage.local),
+    settings,
     subtitles,
     glossary: glossaryStore(browser.storage.local),
     fetch: fetcher,
   });
+  /**
+   * What the side panel shows of a tab. Its source is the audio while it is the captured tab, and
+   * otherwise what its watch page would pick (`pickSource`); without a page, none. On the audio
+   * path the panel shows the offscreen translator (`session.translator`), elsewhere this one: the
+   * caption translator's status, or the chosen translator before its first request.
+   */
+  async function tabState(tabId: number): Promise<Result<TabState>> {
+    const [page, front, chosen, current] = await Promise.all([
+      pages.get(tabId),
+      fronts.get(tabId),
+      subtitles.load(),
+      sessions.current(),
+    ]);
+    if (!page.ok) return page;
+    if (!front.ok) return front;
+    if (!chosen.ok) return chosen;
+    if (!current.ok) return current;
+    const capturing = current.value?.tabId === tabId;
+    // The captured tab's session, from the offscreen document; one that cannot tell (closing
+    // during a stop) leaves the tab without it.
+    const state = capturing
+      ? await offscreenProtocol.send(
+          (message) => browser.runtime.sendMessage(addressed('offscreen', message)),
+          'audio/state',
+          {},
+        )
+      : undefined;
+    const session = state?.ok === true && state.value.tabId === tabId ? state.value : undefined;
+    const shown = page.value;
+    const source = pickSource({
+      setting: chosen.value.source,
+      tracks: shown?.tracks ?? 0,
+      live: shown?.live ?? false,
+      capturing,
+    });
+    return Ok({
+      tabId,
+      ...(shown === undefined ? {} : { page: shown }),
+      source,
+      front: front.value,
+      ...(session === undefined ? {} : { session }),
+      translator: captions.status() ?? { chosen: chosen.value.translator },
+    });
+  }
+  /**
+   * Whether the server takes audio input for `models.asr` and lists PLaMo, asked at once; what it
+   * does not tell is left out. Asking `/props` for the speech model makes a router load it, so a
+   * capture started soon after does not wait for it.
+   */
+  async function capability(): Promise<Result<{ audio?: boolean; plamo?: boolean }>> {
+    const loaded = await settings.load();
+    if (!loaded.ok) return loaded;
+    const client = createLlamaClient({
+      baseUrl: loaded.value.llamaBaseUrl,
+      fetch: fetcher,
+      timeoutMs: CAPABILITY_TIMEOUT_MS,
+    });
+    const [props, models] = await Promise.all([
+      client.props({ model: loaded.value.models.asr }),
+      client.models(),
+    ]);
+    const audio = props.ok ? props.value.audio : undefined;
+    return Ok({
+      ...(audio === undefined ? {} : { audio }),
+      ...(models.ok ? { plamo: models.value.includes(PLAMO_TRANSLATE_MODEL) } : {}),
+    });
+  }
   /** The handlers for one message; the content routes answer for the sender's tab. */
   function handlersFor(sender: Sender): SubtitleProtocolHandlers {
     const tabId = sender.tab?.id;
@@ -281,7 +367,10 @@ export function startBackground(): () => void {
       'subs/page': async ({ info }): Promise<Result<Record<string, never>>> => {
         if (tabId === undefined) return forbidden();
         // A new video in the captured tab resets the pipeline with its context.
-        return answer(sessions.page(tabId, info));
+        const kept = await answer(sessions.page(tabId, info));
+        // The side panel may show this tab: its page, source and streamer changed.
+        announce();
+        return kept;
       },
       'audio/lines': ({ tabId: captured, lines }) => answer(sessions.lines(captured, lines)),
       'audio/status': ({ tabId: captured, status }) => answer(sessions.status(captured, status)),
@@ -298,9 +387,16 @@ export function startBackground(): () => void {
         return kept.ok ? Ok({}) : kept;
       },
       'subs/display': async ({ mode }): Promise<Result<Record<string, never>>> => {
-        const saved = await display.change(() => mode);
+        const saved = await changes.change((current) => ({ ...current, display: mode }));
         return saved.ok ? Ok({}) : saved;
       },
+      'subs/tab-state': ({ tabId: shown }) => tabState(shown),
+      'subs/capability': () => capability(),
+      'subs/settings': async ({ patch }): Promise<Result<Record<string, never>>> => {
+        const saved = await changes.change((current) => ({ ...current, ...patch }));
+        return saved.ok ? Ok({}) : saved;
+      },
+      'subs/stop': ({ tabId: shown }) => answer(sessions.stop(shown, 'user')),
     };
   }
   /**
@@ -311,7 +407,10 @@ export function startBackground(): () => void {
     if (command === CYCLE_DISPLAY)
       launch(
         async () => {
-          await display.change(nextDisplay);
+          await changes.change((current) => ({
+            ...current,
+            display: nextDisplay(current.display),
+          }));
         },
         () => undefined,
       );
@@ -392,7 +491,7 @@ export function startBackground(): () => void {
     browser.action.onClicked.removeListener(onAction);
     queue.clear();
     captions.dispose();
-    display.dispose();
+    changes.dispose();
     sessions.dispose();
   };
 }

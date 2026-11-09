@@ -121,6 +121,8 @@ function setup({
   };
   const fronts = tabFronts(fakeBrowser.storage.session);
   const pages = tabPagesStore(fakeBrowser.storage.session);
+  /** Told after each start and stop of a capture (the side panel asks again). */
+  const changed = vi.fn<() => void>();
   const make = (): Sessions =>
     createSessions({
       tabCapture: {
@@ -163,10 +165,12 @@ function setup({
       fronts,
       fetch,
       now: () => 1_000,
+      changed,
     });
   return {
     calls,
     state,
+    changed,
     tabs,
     fronts,
     pages,
@@ -381,6 +385,27 @@ describe('stopping a capture', () => {
       Ok(event === 'start:other' ? { tabId: OTHER, startedAt: 1_000 } : undefined),
     );
     expect(h.statuses(CAPTURED)).toEqual(told);
+  });
+
+  it('tells the side panel after a capture starts and after it stops, and after nothing else', async () => {
+    const h = setup();
+    await h.pages.report(CAPTURED, PAGE);
+    const sessions = kept(h.make());
+    expect(await sessions.current()).toEqual(Ok(undefined));
+    expect(h.changed).not.toHaveBeenCalled();
+    expect(await sessions.start(CAPTURED)).toEqual(Ok(undefined));
+    expect(h.changed).toHaveBeenCalledOnce();
+    // Starting the captured tab again, stopping another tab and a refused start change nothing.
+    expect(await sessions.start(CAPTURED)).toEqual(Ok(undefined));
+    expect(await sessions.stop(OTHER, 'user')).toEqual(Ok(undefined));
+    h.state.audio = false;
+    expect(await sessions.start(OTHER)).toMatchObject({ ok: false });
+    expect(h.changed).toHaveBeenCalledOnce();
+    h.tabs.onRemoved.fire(CAPTURED);
+    await vi.waitFor(() => {
+      expect(h.changed).toHaveBeenCalledTimes(2);
+    });
+    expect(await sessions.current()).toEqual(Ok(undefined));
   });
 
   it('ignores the stop conditions of a tab it does not capture', async () => {
