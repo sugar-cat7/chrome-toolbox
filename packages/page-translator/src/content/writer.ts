@@ -63,10 +63,10 @@ export type Writer = {
    *   whitespace. When several nodes make one text token (`pieceOf`), the first gets the piece
    *   and the others only their own whitespace. An empty piece keeps the node's text, so a link
    *   never empties.
-   * - `pair`: the text stays; a `<pt-ja>` box with the translation goes right after the
-   *   paragraph's `last` node (never inside a link), after the boxes of the segments before it
-   *   that share that node. A paragraph in or under a button, a summary or a link gets no box
-   *   (P26).
+   * - `pair`: the text stays; a `<pt-ja>` box with the translation (`translationOf`: the pieces,
+   *   the kept elements' text and the spaces, in token order) goes right after the paragraph's
+   *   `last` node (never inside a link), after the boxes of the segments before it that share
+   *   that node. A paragraph in or under a button, a summary or a link gets no box (P26).
    * Earlier paragraphs this one takes nodes from, and the block's paragraphs whose nodes all left
    * the page, are given back (see `release`), so no node is left with a stale write.
    * A selection whose end is in a rewritten node keeps its relative place there (`mapOffset`).
@@ -98,9 +98,9 @@ export type Writer = {
   originalText(element: Element): string | undefined;
   /**
    * The translation this writer holds for the paragraph holding `element` (see `segmentOf`), for
-   * a tooltip where no box shows it (P26): the pieces of each translated paragraph of that block
-   * in token order, joined as `originalText` joins the originals (a line between paragraphs, up
-   * to 300 characters), the segments one paragraph fell back to without a space.
+   * a tooltip where no box shows it (P26): each translated paragraph of that block as its box
+   * would show it (`translationOf`), joined as `originalText` joins the originals (a line between
+   * paragraphs, up to 300 characters), the segments one paragraph fell back to without a space.
    */
   translationText(element: Element): string | undefined;
   /**
@@ -117,7 +117,7 @@ type Paragraph = {
   readonly segment: Segment;
   /** What each node of the segment holds in `replace`. */
   readonly replaced: readonly string[];
-  /** What its `<pt-ja>` box shows. */
+  /** What its `<pt-ja>` box shows (`translationOf`). */
   readonly translation: string;
   mode: DisplayMode;
   /** Whether it is in a shadow root (its block is the host) rather than in the block itself. */
@@ -166,6 +166,25 @@ const isShadowRoot = (node: Node): node is ShadowRoot =>
 const squash = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const leadOf = (text: string): string => text.slice(0, text.length - text.trimStart().length);
 const trailOf = (text: string): string => text.slice(text.trimEnd().length);
+
+/**
+ * How a paragraph reads translated, for its box and its tooltip: its tokens in order, a text
+ * token its piece, a kept element (a `translate="no"` name, `code`, `kbd`, `samp`) its own text
+ * and a space one space, markers nothing; spaces squashed, so an empty piece leaves no double
+ * one.
+ */
+function translationOf(segment: Segment, pieces: readonly string[]): string {
+  let text = '';
+  let index = 0;
+  for (const token of segment.tokens) {
+    if (token.t === 'text') {
+      text += pieces[index] ?? '';
+      index += 1;
+    } else if (token.t === 'keep') text += token.text;
+    else if (token.t === 'space') text += ' ';
+  }
+  return squash(text);
+}
 
 /** Whether `a` comes before `b` in document order. */
 const precedes = (a: Node, b: Node): boolean =>
@@ -552,7 +571,7 @@ export function createWriter(
       const paragraph: Paragraph = {
         segment,
         replaced: replacedOf(segment, pieces, originals),
-        translation: pieces.join(''),
+        translation: translationOf(segment, pieces),
         mode,
         inShadow: parent !== null && isShadowRoot(parent),
         boxed: takesBox(block),

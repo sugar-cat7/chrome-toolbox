@@ -159,6 +159,15 @@ for (const mode of DISPLAY_MODES) {
       await expect(page.locator('h1 > pt-ja')).toHaveText(
         `${STUB_PAGE_PREFIX}Vesper the Tidebound`,
       );
+      // The box reads as the paragraph does: its spaces, its kept name (`translate="no"`) and its
+      // key (`kbd`) are there. (The stub keeps the space a piece starts with: `訳: lantern`.)
+      const P = STUB_PAGE_PREFIX;
+      await expect(page.locator('p.lead > pt-ja')).toHaveText(
+        `${P}Vesper the Tidebound is the third boss of the ${P}Sunken Choir${P}. She guards the Glimmerdeep ${P} lantern and attacks with waves of cold water.`,
+      );
+      await expect(page.locator('main > p').nth(1).locator(':scope > pt-ja')).toHaveText(
+        `${P}Phase 2 begins at 50% HP. Roll ${P}backward ${P} to dodge the light attack, then press R2 ${P} to counter.`,
+      );
       // The row's box goes after its links, which keep their places along the row (the row may
       // grow taller for the box).
       const along = (links: readonly Box[]): Omit<Box, 'top'>[] =>

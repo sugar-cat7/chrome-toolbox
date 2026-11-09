@@ -271,7 +271,48 @@ describe('createWriter', () => {
     // After the link the paragraph ends with, never inside it.
     expect(p.lastChild).toBe(must(box));
     expect(must(box).previousSibling).toBe(link);
-    expect(shown(must(box))).toBe('川に沿って進む');
+    // The space next to the link is kept, as in the page.
+    expect(shown(must(box))).toBe('川に沿って 進む');
+  });
+
+  it('shows kept names and code in the box and its spaces, in token order', () => {
+    const p = must(
+      mount(
+        '<p>She guards the <span translate="no">Glimmerdeep</span> lantern, then types <code>/dodge-roll</code> to escape.</p>',
+      ).firstElementChild,
+    );
+    const segment = only(p);
+    expect(segment.tokens).toEqual([
+      { t: 'text', text: 'She guards the' },
+      { t: 'space' },
+      { t: 'keep', n: 1, text: 'Glimmerdeep' },
+      { t: 'space' },
+      { t: 'text', text: 'lantern, then types' },
+      { t: 'space' },
+      { t: 'keep', n: 2, text: '/dodge-roll' },
+      { t: 'space' },
+      { t: 'text', text: 'to escape.' },
+    ]);
+    const writer = createWriter(document);
+    expect(
+      writer.write(segment, ['彼女が守る', 'ランタン。そして入力する', 'で逃げる。'], 'pair'),
+    ).toBe(true);
+    const expected = '彼女が守る Glimmerdeep ランタン。そして入力する /dodge-roll で逃げる。';
+    expect(shown(must(boxesIn(p)[0]))).toBe(expected);
+    expect(writer.translationText(p)).toBe(expected);
+  });
+
+  it('gives kept text and spaces in the tooltip of a paragraph with no box, and none twice', () => {
+    const button = must(
+      mount(
+        '<button type="button">Press <kbd>R2</kbd> to block, then <samp>OK</samp> shows</button>',
+      ).firstElementChild,
+    );
+    const writer = createWriter(document);
+    // An empty piece leaves no double space.
+    expect(writer.write(only(button), ['押す', '', '表示'], 'pair')).toBe(true);
+    expect(boxesIn(button)).toEqual([]);
+    expect(writer.translationText(button)).toBe('押す R2 OK 表示');
   });
 
   it('keeps the boxes of one paragraph in document order after its last node', () => {
@@ -676,8 +717,8 @@ describe('createWriter', () => {
     expect(button.textContent).toBe('Post the comment');
     expect(boxesIn(button)).toEqual([]);
     // Joined in token order, from the block or from an element inside the paragraph.
-    expect(writer.translationText(button)).toBe('投稿コメントを');
-    expect(writer.translationText(must(button.querySelector('span')))).toBe('投稿コメントを');
+    expect(writer.translationText(button)).toBe('投稿 コメントを');
+    expect(writer.translationText(must(button.querySelector('span')))).toBe('投稿 コメントを');
   });
 
   it('gives the translation of replaced paragraphs, joined as the original text is', () => {
@@ -694,8 +735,8 @@ describe('createWriter', () => {
     expect(writer.write(must(version), ['バージョン 1.3 で体力が下がった。'], 'replace')).toBe(
       true,
     );
-    expect(writer.translationText(roll)).toBe('後ろに転がって避ける');
-    expect(writer.translationText(must(roll.querySelector('a')))).toBe('後ろに転がって避ける');
+    expect(writer.translationText(roll)).toBe('後ろに 転がって 避ける');
+    expect(writer.translationText(must(roll.querySelector('a')))).toBe('後ろに 転がって 避ける');
     expect(writer.translationText(note)).toBe('パッチノート：\nバージョン 1.3 で体力が下がった。');
   });
 
