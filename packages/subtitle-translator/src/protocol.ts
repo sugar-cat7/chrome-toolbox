@@ -2,6 +2,7 @@ import { z } from 'zod/mini';
 import {
   defineProtocol,
   llmProtocolSpec,
+  subtitleLimit,
   type ProtocolHandlers,
 } from '@chrome-toolbox/extension-core';
 import { SENTENCE_LIMITS } from './captions/sentences.ts';
@@ -57,6 +58,34 @@ export const translateResponseSchema = z.strictObject({
     .check(z.maxLength(TRANSLATE_LIMITS.sentences)),
 });
 export type TranslateResponse = z.infer<typeof translateResponseSchema>;
+
+/** Code points, as `subtitleLimit` counts them. */
+function codePoints(text: string): number {
+  let count = 0;
+  for (const _point of text) count += 1;
+  return count;
+}
+
+/**
+ * A line of the audio path as the overlay shows it: a sentence, again under the same id as it
+ * grows and when its translation comes. `endedAt` is when the speech of its last segment ended
+ * (`performance.timeOrigin + performance.now()`, ms); `final` once the sentence is closed. A
+ * Japanese line carries its source as `ja`.
+ */
+export const liveLineSchema = z
+  .strictObject({
+    sentenceId,
+    lang: z.string().check(z.maxLength(CAPTION_LIMITS.languageCode), z.regex(LANGUAGE_CODE)),
+    source,
+    ja: z.optional(z.string().check(z.maxLength(TRANSLATE_LIMITS.ja))),
+    state: z.enum(['pending', 'done', 'skipped', 'failed']),
+    endedAt: z.number().check(z.nonnegative()),
+    final: z.boolean(),
+  })
+  .check(
+    z.refine((line) => line.ja === undefined || codePoints(line.ja) <= subtitleLimit(line.source)),
+  );
+export type LiveLine = Readonly<z.infer<typeof liveLineSchema>>;
 
 /** The messages the service worker answers; each task adds its own. */
 export const subtitleProtocolSpec = {
