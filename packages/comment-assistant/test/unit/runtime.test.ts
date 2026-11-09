@@ -1458,7 +1458,7 @@ describe('extension runtime wiring', () => {
       );
       // What runs before the first batch answers: only it while subtitles use slot 0.
       await vi.waitFor(() => expect(chats()).toEqual(held));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      for (let i = 0; i < 50; i += 1) await Promise.resolve();
       expect(chats()).toEqual(held);
       open();
       await vi.waitFor(() => expect(chats()).toHaveLength(2));

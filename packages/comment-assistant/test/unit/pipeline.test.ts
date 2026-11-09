@@ -99,6 +99,11 @@ const hangingLlama = () => {
   return { state, fetch };
 };
 /** A door that holds requests until opened. */
+/** Lets everything already queued on microtasks run, to check that something did not happen. */
+const flushMicrotasks = async (): Promise<void> => {
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+};
+
 const gate = () => {
   let open: () => void = () => undefined;
   const opened = new Promise<void>((resolve) => {
@@ -1144,7 +1149,7 @@ describe('comment pipeline', () => {
       await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
       // What runs before the first batch answers: only it while subtitles use slot 0.
       await vi.waitFor(() => expect(recorder.slots).toEqual(held));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flushMicrotasks();
       expect(recorder.slots).toEqual(held);
       door.open();
       await vi.waitFor(() => expect(annotations()).toHaveLength(3));
@@ -1177,11 +1182,31 @@ describe('comment pipeline', () => {
       const fn = vi.fn<(slot: number) => Promise<Result<number>>>(async (slot) => Ok(slot));
       const summary = pipeline.exclusive(fn);
       await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flushMicrotasks();
       expect(fn).not.toHaveBeenCalled();
       door.open();
       // The batch ends first; then the summary takes slot 1.
       expect(await summary).toEqual(Ok(1));
+      expect(annotations()).toHaveLength(1);
+    });
+
+    it('holds the genre guess back while a batch runs and subtitles use slot 0', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      const fn = vi.fn<(slot: number) => Promise<Result<number>>>(async (slot) => Ok(slot));
+      const guess = pipeline.exclusive(fn, 'guess', { spare: true });
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      await flushMicrotasks();
+      expect(fn).not.toHaveBeenCalled();
+      door.open();
+      // The batch ends first; then the guess takes the highest free comment slot.
+      expect(await guess).toEqual(Ok(2));
       expect(annotations()).toHaveLength(1);
     });
 

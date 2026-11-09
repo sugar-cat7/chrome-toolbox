@@ -14,6 +14,7 @@ import {
   play,
   recordChats,
   serveWatch,
+  settled,
   TONES,
   watchUrl,
   type RowChange,
@@ -143,23 +144,24 @@ test('seeking restarts the prefetch at the new position', async ({
   await expect.poll(async () => (await overlay.read()).ja).toBe(`${STUB_JA}Fixture line 1.`);
   // The minute ahead was translated; nothing waits.
   await expect.poll(() => chats.length).toBeGreaterThanOrEqual(25);
-  await sleep(1_000);
-  const before = chats.length;
+  const before = await settled(chats);
   const seekMs = 400_000;
   await page.locator('video').evaluate((video: HTMLVideoElement, to) => {
     video.currentTime = to / 1000;
   }, seekMs);
 
   // The line shown after the seek is the one at the new position, translated.
-  const expected = cues.find((cue) => cue.startMs <= seekMs + 2_000 && cue.endMs > seekMs + 2_000);
   await expect
     .poll(async () => (await overlay.read()).ja, { timeout: 10_000 })
     .toMatch(/^訳:Fixture line \d+\.$/u);
   const shown = (await overlay.read()).source;
-  expect(startOf.get(shown) ?? 0, `${shown} after a seek to ${seekMs} ms`).toBeGreaterThanOrEqual(
+  const shownStart = startOf.get(shown) ?? 0;
+  expect(shownStart, `${shown} after a seek to ${seekMs} ms`).toBeGreaterThanOrEqual(
     seekMs - FEEDER_LIMITS.behindMs,
   );
-  expect(expected).toBeDefined();
+  expect(shownStart, `${shown} after a seek to ${seekMs} ms`).toBeLessThanOrEqual(
+    seekMs + FEEDER_LIMITS.aheadMs,
+  );
   // The prefetch went on from the new position: every sentence asked for after the seek is in
   // the range around it.
   await expect.poll(() => chats.length - before).toBeGreaterThanOrEqual(20);

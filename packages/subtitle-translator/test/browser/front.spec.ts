@@ -80,7 +80,7 @@ for (const { name, act } of [
 
     const undo = await ACTS[act](watch, context);
     // What was already with the model, or waiting for it on a pause, finishes first.
-    const left = await settled(chats);
+    const left = act === 'pause' ? await settled(chats) : chats.length;
     await sleep(QUIET_MS);
     expect(chats.length, `model requests in ${QUIET_MS} ms after ${act}`).toBe(left);
 
