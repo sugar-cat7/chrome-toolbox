@@ -82,23 +82,28 @@ export type Progress = z.infer<typeof progressSchema>;
 
 /** Longest selected text a `selection` command carries (spec §8); a longer one is cut. */
 export const MAX_SELECTION = 2000;
-/** `text` within MAX_SELECTION UTF-16 units; a character the limit would split is left out. */
-export function cutSelection(text: string): string {
-  if (text.length <= MAX_SELECTION) return text;
+/**
+ * `text` within MAX_SELECTION UTF-16 units, a character the limit would split left out; `cut`
+ * when anything was left out.
+ */
+export function cutSelection(text: string): Readonly<{ text: string; cut: boolean }> {
+  if (text.length <= MAX_SELECTION) return { text, cut: false };
   const last = text.charCodeAt(MAX_SELECTION - 1);
-  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? MAX_SELECTION - 1 : MAX_SELECTION);
+  const end = last >= 0xd800 && last <= 0xdbff ? MAX_SELECTION - 1 : MAX_SELECTION;
+  return { text: text.slice(0, end), cut: true };
 }
 
 /**
  * What the background asks the page script in a tab's top frame: answer that it runs (`ping`),
  * translate the page, restore its original text, or translate the selection (`text` when the
- * context menu gave it).
+ * context menu gave it, `cut` when it was longer: `cutSelection`).
  */
 export const pageCommandSchema = z.union([
   z.strictObject({ action: z.enum(['ping', 'translate', 'restore']) }),
   z.strictObject({
     action: z.literal('selection'),
     text: z.optional(z.string().check(z.maxLength(MAX_SELECTION))),
+    cut: z.optional(z.boolean()),
   }),
 ]);
 export type PageCommand = z.infer<typeof pageCommandSchema>;

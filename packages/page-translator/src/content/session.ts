@@ -12,7 +12,6 @@ import { needsPageTranslation, pageLangHint } from '../language.ts';
 import {
   cutSelection,
   MAX_REQUEST_UNITS,
-  MAX_SELECTION,
   pageCommandMessageSchema,
   pageProtocol,
   PROGRESS_PORT,
@@ -358,10 +357,10 @@ export function startSession(
 
   /**
    * Translates the selection in the bubble: the page's own (`getSelection`), or else `given`
-   * (the context menu's, for a selection in a frame), its spaces squashed, at most
-   * `MAX_SELECTION` long. It goes at once, apart from the page's batches.
+   * (the context menu's, for a selection in a frame; `givenCut` when the background cut it), its
+   * spaces squashed, at most `MAX_SELECTION` long. It goes at once, apart from the page's batches.
    */
-  function translateSelection(given: string | undefined): void {
+  function translateSelection(given: string | undefined, givenCut: boolean): void {
     const selection = doc.getSelection();
     const chosen = squash(selection?.toString() ?? '');
     const text = chosen === '' ? squash(given ?? '') : chosen;
@@ -372,10 +371,9 @@ export function startSession(
       overlay.bubble(rect, { kind: 'message', text: TEXT.noSelection });
       return;
     }
-    // The context menu's text comes cut to the limit (control.ts): one that reaches it was longer.
-    const cut =
-      text.length > MAX_SELECTION || (chosen === '' && (given ?? '').length >= MAX_SELECTION);
-    const source = cutSelection(text).trim();
+    const limited = cutSelection(text);
+    const cut = limited.cut || (chosen === '' && givenCut);
+    const source = limited.text.trim();
     if (!needsPageTranslation(source, pageLangHint(doc))) {
       overlay.bubble(rect, { kind: 'message', text: TEXT.japanese });
       return;
@@ -410,7 +408,7 @@ export function startSession(
         restore();
         break;
       case 'selection':
-        translateSelection(payload.text);
+        translateSelection(payload.text, payload.cut ?? false);
         break;
     }
     sendResponse({});

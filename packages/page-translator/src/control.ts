@@ -297,7 +297,7 @@ export function createControl(
         tabId,
         text === undefined
           ? { action: 'selection' }
-          : { action: 'selection', text: cutSelection(text) },
+          : { action: 'selection', ...cutSelection(text) },
       ),
     syncAlways,
     forget,

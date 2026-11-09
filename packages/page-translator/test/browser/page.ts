@@ -21,9 +21,11 @@ export type WorkerChrome = {
       info: { name: string; frameId: number },
     ): {
       onMessage: { addListener(listener: (message: unknown) => void): void };
+      onDisconnect: { addListener(listener: () => void): void };
       disconnect(): void;
     };
   };
+  runtime: { lastError?: { message?: string } };
   scripting: {
     executeScript(injection: {
       target: { tabId: number; frameIds: number[] };
@@ -109,16 +111,25 @@ export const tell = (
     { tabId, command },
   );
 
-/** The page script's progress, as the popup's port first hears it. */
+/**
+ * The page script's progress, as the popup's port first hears it. A tab where no page script
+ * takes the port (none injected, or an orphaned one) fails at once with Chrome's reason, rather
+ * than waiting for the test's timeout.
+ */
 export async function progressOf(serviceWorker: Worker, tabId: number): Promise<Progress> {
   const heard = await serviceWorker.evaluate(
     ({ tabId, name }) =>
-      new Promise<unknown>((resolve) => {
+      new Promise<unknown>((resolve, reject) => {
         const { chrome } = globalThis as unknown as { chrome: WorkerChrome };
         const port = chrome.tabs.connect(tabId, { name, frameId: 0 });
         port.onMessage.addListener((message) => {
           port.disconnect();
           resolve(message);
+        });
+        // Not called after this side's own `disconnect`, only when the page's end went first.
+        port.onDisconnect.addListener(() => {
+          const reason = chrome.runtime.lastError?.message ?? 'the page script closed the port';
+          reject(new Error(`no progress from tab ${tabId} on ${name}: ${reason}`));
         });
       }),
     { tabId, name: PROGRESS_PORT },

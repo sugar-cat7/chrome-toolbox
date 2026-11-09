@@ -265,7 +265,7 @@ describe('createOverlay', () => {
     expect(added).not.toHaveBeenCalled();
     ui.bubble(selection, { kind: 'loading' });
     ui.tooltip(paragraph, '原文：Roll backward.');
-    expect(added.mock.calls.length).toBeGreaterThan(0);
+    expect(added.mock.calls.map(([type]) => type).toSorted()).toEqual(['keydown', 'pointerdown']);
     ui.dispose();
     vi.advanceTimersByTime(10_000);
     expect(hostOf()).toBeUndefined();

@@ -26,6 +26,8 @@ import {
 
 /** What the fake server puts before each text it translates. */
 const TRANSLATED = '訳:';
+/** The bubble's note under a translation of a selection that was cut. */
+const CUT_NOTE = '（先頭の 2,000 文字だけを訳しました）';
 /** The popup's progress comes at most this often. */
 const PROGRESS_MS = 250;
 /** jsdom's location (vitest.config.ts): a made-up wiki. */
@@ -327,7 +329,15 @@ describe('startSession', () => {
     const translating = fakeApi(always());
     start(translating);
     await settle();
-    expect(pageRequests(translating).length).toBeGreaterThan(0);
+    // Four short paragraphs: one batch.
+    expect(pageRequests(translating).map(textsOf)).toEqual([
+      [
+        'Made-up Guide',
+        'Click here to run().',
+        'Roll backward to dodge the light attack.',
+        'Post the comment',
+      ],
+    ]);
     expect(lines(elements)).toEqual([
       `${TRANSLATED}Made-up Guide`,
       `${TRANSLATED}Click here to run().`,
@@ -642,26 +652,59 @@ describe('startSession', () => {
     expect(bubbleText()).toContain(translation.join(''));
   });
 
-  it('reads the menu text when the page has no selection, and says when it was cut', async () => {
+  it.each([
+    { name: 'exactly 2,000 characters', length: MAX_SELECTION, cut: false },
+    { name: 'cut by the background', length: MAX_SELECTION, cut: true },
+    { name: 'cut before a split character', length: MAX_SELECTION - 1, cut: true },
+  ])('reads the menu text when the page has no selection: $name', async ({ length, cut }) => {
     const fake = fakeApi();
     start(fake);
-    const text = 'Roll backward. '.repeat(200).slice(0, MAX_SELECTION);
-    fake.command({ action: 'selection', text });
+    const text = 'Roll backward. '.repeat(200).slice(0, length);
+    fake.command({ action: 'selection', text, cut });
     await settle();
     expect(fake.requests().flatMap(textsOf).join(' ')).toBe(text.trim());
-    expect(bubbleText()).toContain('（先頭の 2,000 文字だけを訳しました）');
+    expect(bubbleText()?.includes(CUT_NOTE)).toBe(cut);
   });
 
-  it('cuts a long page selection to 2,000 characters and says so', async () => {
+  it.each([
+    {
+      name: 'exactly 2,000 characters',
+      text: 'x'.repeat(MAX_SELECTION),
+      asked: MAX_SELECTION,
+      cut: false,
+    },
+    {
+      name: '2,001 characters',
+      text: 'x'.repeat(MAX_SELECTION + 1),
+      asked: MAX_SELECTION,
+      cut: true,
+    },
+    {
+      name: 'a character split at the limit',
+      text: `${'x'.repeat(MAX_SELECTION - 1)}😀`,
+      asked: MAX_SELECTION - 1,
+      cut: true,
+    },
+  ])('cuts the page selection to 2,000 characters: $name', async ({ text, asked, cut }) => {
     const fake = fakeApi();
     start(fake);
-    select('Roll backward. '.repeat(200).trim());
+    select(text);
     fake.command({ action: 'selection' });
     await settle();
-    const asked = fake.requests().flatMap(textsOf).join(' ');
-    expect(asked.length).toBeLessThanOrEqual(MAX_SELECTION);
-    expect(asked.length).toBeGreaterThan(MAX_SELECTION - 20);
-    expect(bubbleText()).toContain('（先頭の 2,000 文字だけを訳しました）');
+    expect(fake.requests().flatMap(textsOf).join('')).toBe('x'.repeat(asked));
+    expect(bubbleText()?.includes(CUT_NOTE)).toBe(cut);
+  });
+
+  it('cuts a long page selection of sentences at 2,000 characters', async () => {
+    const fake = fakeApi();
+    start(fake);
+    const text = 'Roll backward. '.repeat(200).trim();
+    select(text);
+    fake.command({ action: 'selection' });
+    await settle();
+    // The first 2,000 characters end with a space, which the units do not keep.
+    expect(fake.requests().flatMap(textsOf).join(' ')).toBe(text.slice(0, MAX_SELECTION).trim());
+    expect(bubbleText()).toContain(CUT_NOTE);
   });
 
   it('says when the selection could not be translated', async () => {
@@ -672,7 +715,7 @@ describe('startSession', () => {
     fake.command({ action: 'selection' });
     await settle();
     expect(bubbleText()).toContain('翻訳できませんでした');
-    expect(bubbleText()).not.toContain('（先頭');
+    expect(bubbleText()).not.toContain(CUT_NOTE);
   });
 
   it('closes the bubble on Escape and leaves no element behind', async () => {
@@ -860,6 +903,7 @@ describe('runInjection', () => {
     // Only the new copy's WXT context still listens, for the copy after it.
     expect(documentListeners()).toEqual([expect.stringMatching(/:wxt:content-script-started$/u)]);
     expect(windowListeners()).toEqual([]);
-    expect(port.posted.length).toBeGreaterThan(0);
+    // The progress it heard when it connected, and nothing after the end.
+    expect(port.posted.map((progress) => progress.state)).toEqual(['on']);
   });
 });

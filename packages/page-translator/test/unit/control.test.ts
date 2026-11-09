@@ -117,22 +117,42 @@ describe('selection', () => {
     const chrome = fakeChrome();
     expect(await createControl(chrome.api).selection(3, 'rolling backward')).toEqual(Ok(undefined));
     expect(chrome.log).toEqual(['inject 3', 'send 3 selection']);
-    expect(chrome.sent).toEqual([toFrame(3, { action: 'selection', text: 'rolling backward' })]);
-  });
-
-  it('cuts the menu text to the longest selection without splitting a character', async () => {
-    const chrome = fakeChrome();
-    const control = createControl(chrome.api);
-    expect(await control.selection(3, 'a'.repeat(MAX_SELECTION + 500))).toEqual(Ok(undefined));
-    // The emoji takes 2 UTF-16 units across the limit: it goes as a whole, so it is left out.
-    expect(await control.selection(3, `${'a'.repeat(MAX_SELECTION - 1)}😀b`)).toEqual(
-      Ok(undefined),
-    );
     expect(chrome.sent).toEqual([
-      toFrame(3, { action: 'selection', text: 'a'.repeat(MAX_SELECTION) }),
-      toFrame(3, { action: 'selection', text: 'a'.repeat(MAX_SELECTION - 1) }),
+      toFrame(3, { action: 'selection', text: 'rolling backward', cut: false }),
     ]);
   });
+
+  it.each([
+    {
+      name: 'exactly 2,000 units',
+      text: 'a'.repeat(MAX_SELECTION),
+      sent: MAX_SELECTION,
+      cut: false,
+    },
+    { name: '2,001 units', text: 'a'.repeat(MAX_SELECTION + 1), sent: MAX_SELECTION, cut: true },
+    {
+      name: 'far more',
+      text: 'a'.repeat(MAX_SELECTION + 500),
+      sent: MAX_SELECTION,
+      cut: true,
+    },
+    // The emoji takes 2 UTF-16 units across the limit: it goes as a whole, so it is left out.
+    {
+      name: 'a character split at the limit',
+      text: `${'a'.repeat(MAX_SELECTION - 1)}😀`,
+      sent: MAX_SELECTION - 1,
+      cut: true,
+    },
+  ])(
+    'cuts the menu text without splitting a character and says so: $name',
+    async ({ text, sent, cut }) => {
+      const chrome = fakeChrome();
+      expect(await createControl(chrome.api).selection(3, text)).toEqual(Ok(undefined));
+      expect(chrome.sent).toEqual([
+        toFrame(3, { action: 'selection', text: 'a'.repeat(sent), cut }),
+      ]);
+    },
+  );
 
   it('reports a page Chrome lets no extension script', async () => {
     const chrome = fakeChrome();
@@ -283,7 +303,7 @@ describe('background wiring', () => {
     await chrome.command.trigger(COMMAND_ID, bank);
     await vi.waitFor(() => expect(chrome.log).toHaveLength(4));
     expect(chrome.sent).toEqual([
-      toFrame(3, { action: 'selection', text: 'rolling backward' }),
+      toFrame(3, { action: 'selection', text: 'rolling backward', cut: false }),
       // The shortcut has no text: the page script reads its own selection.
       toFrame(3, { action: 'selection' }),
     ]);
