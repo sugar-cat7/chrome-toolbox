@@ -35,3 +35,5 @@ Internal to public projection:
 - `sender_forbidden` → `sender_forbidden`
 - `model_refused` → `unavailable`
 - `audio_unsupported` → `unavailable`
+- `capture_failed` → `unavailable`
+- `capture_not_invoked` → `permission_denied`

@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
+import { capture, Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
 import {
   connectionPort,
   createLlamaClient,
@@ -14,7 +14,7 @@ import {
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
-import { tabPagesStore, type PageInfo } from './page-context.ts';
+import { tabPagesStore, type PageInfo, type TabPageStore } from './page-context.ts';
 import {
   nextDisplay,
   subtitleSettingsStore,
@@ -29,7 +29,8 @@ import {
   type TranslateRequest,
   type TranslateResponse,
 } from './protocol.ts';
-import { tabFronts } from './tab-fronts.ts';
+import { createSessions, type Sessions } from './sessions.ts';
+import { tabFronts, type TabFronts } from './tab-fronts.ts';
 import {
   CAPTION_CACHE_ENTRIES,
   createSubtitleTranslator,
@@ -89,7 +90,7 @@ export function senderKind(sender: Sender): SenderKind {
 const ROUTES = {
   page: ['llm/status'],
   content: ['subs/page', 'subs/translate', 'subs/front', 'subs/display'],
-  offscreen: [],
+  offscreen: ['audio/lines', 'audio/status', 'audio/idle', 'audio/failed'],
   other: [],
 } as const satisfies Record<SenderKind, readonly SubtitleMessageType[]>;
 
@@ -165,6 +166,65 @@ function captionTranslation({
 
 /** The shortcut (`commands` in wxt.config.ts) that steps the display: ja → both → source → off. */
 const CYCLE_DISPLAY = 'cycle-display';
+/** The shortcut that starts or stops the speech subtitles of the tab in front. */
+const TOGGLE_AUDIO = 'toggle-audio';
+/** Shown by Chrome where it lists the extension's offscreen document (UI text is Japanese). */
+const OFFSCREEN_JUSTIFICATION = 'タブの音声を取り込み、話している内容を字幕にします。';
+
+/** The service worker's audio capture over Chrome's tab capture and offscreen document. */
+function audioSessions({
+  pages,
+  fronts,
+  subtitles,
+  fetch,
+}: {
+  pages: TabPageStore;
+  fronts: TabFronts;
+  subtitles: SubtitleSettingsStore;
+  fetch: Fetch;
+}): Sessions {
+  return createSessions({
+    tabCapture: {
+      getMediaStreamId: (targetTabId, done) => {
+        // The callback form, so that runtime.lastError tells why no id came.
+        browser.tabCapture.getMediaStreamId({ targetTabId }, (streamId) => {
+          done(streamId, browser.runtime.lastError?.message);
+        });
+      },
+    },
+    offscreen: {
+      has: async (): Promise<Result<boolean>> => {
+        const contexts = await capture(
+          () => browser.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] }),
+          'capture_failed',
+        );
+        return contexts.ok ? Ok(contexts.value.length > 0) : contexts;
+      },
+      create: () =>
+        capture(
+          () =>
+            browser.offscreen.createDocument({
+              url: 'offscreen.html',
+              reasons: ['USER_MEDIA'],
+              justification: OFFSCREEN_JUSTIFICATION,
+            }),
+          'capture_failed',
+        ),
+      close: () => capture(() => browser.offscreen.closeDocument(), 'capture_failed'),
+    },
+    session: browser.storage.session,
+    storage: browser.storage.local,
+    send: (message) => browser.runtime.sendMessage(message),
+    tabs: browser.tabs,
+    settings: settingsStore(browser.storage.local),
+    subtitles,
+    glossary: glossaryStore(browser.storage.local),
+    pages,
+    fronts,
+    fetch,
+    now: () => Date.now(),
+  });
+}
 
 /**
  * Saves the display mode in the subtitle settings, which every tab follows. One change at a time:
@@ -200,6 +260,8 @@ export function startBackground(): () => void {
   const fronts = tabFronts(browser.storage.session);
   const subtitles = subtitleSettingsStore(browser.storage.local);
   const display = displaySwitch(subtitles);
+  // The tab whose audio is captured (one at a time), kept in storage.session too.
+  const sessions = audioSessions({ pages, fronts, subtitles, fetch: fetcher });
   const captions = captionTranslation({
     settings: settingsStore(browser.storage.local),
     subtitles,
@@ -209,13 +271,22 @@ export function startBackground(): () => void {
   /** The handlers for one message; the content routes answer for the sender's tab. */
   function handlersFor(sender: Sender): SubtitleProtocolHandlers {
     const tabId = sender.tab?.id;
+    /** An empty answer once `done` succeeded. */
+    const answer = async (done: Promise<Result<void>>): Promise<Result<Record<string, never>>> => {
+      const result = await done;
+      return result.ok ? Ok({}) : result;
+    };
     return {
       ...llm,
       'subs/page': async ({ info }): Promise<Result<Record<string, never>>> => {
         if (tabId === undefined) return forbidden();
-        const kept = await pages.report(tabId, info);
-        return kept.ok ? Ok({}) : kept;
+        // A new video in the captured tab resets the pipeline with its context.
+        return answer(sessions.page(tabId, info));
       },
+      'audio/lines': ({ tabId: captured, lines }) => answer(sessions.lines(captured, lines)),
+      'audio/status': ({ tabId: captured, status }) => answer(sessions.status(captured, status)),
+      'audio/idle': ({ tabId: captured }) => answer(sessions.idle(captured)),
+      'audio/failed': ({ tabId: captured, code }) => answer(sessions.failed(captured, code)),
       'subs/translate': async (request): Promise<Result<TranslateResponse>> => {
         if (tabId === undefined) return forbidden();
         const page = await pages.get(tabId);
@@ -232,21 +303,31 @@ export function startBackground(): () => void {
       },
     };
   }
-  /** The display shortcut; a failed save leaves the display as it was, for the next press. */
+  /**
+   * The display shortcut (a failed save leaves the display as it was, for the next press) and the
+   * audio shortcut (a failed start is shown on the tab's pill).
+   */
   function onCommand(command: string): void {
-    if (command !== CYCLE_DISPLAY) return;
-    launch(
-      async () => {
-        await display.change(nextDisplay);
-      },
-      () => undefined,
-    );
+    if (command === CYCLE_DISPLAY)
+      launch(
+        async () => {
+          await display.change(nextDisplay);
+        },
+        () => undefined,
+      );
+    else if (command === TOGGLE_AUDIO)
+      launch(
+        async () => {
+          await sessions.toggle();
+        },
+        () => undefined,
+      );
   }
   /**
    * A closed tab's page and front are forgotten. The result is not used: an entry that stays ages
-   * out, and a translation uses a page only for the video it names. Tab updates are not followed:
-   * without a host permission Chrome leaves their URL out, and a listener would wake the service
-   * worker for every tab of every site; a tab's next `subs/page` replaces its page (S43).
+   * out, and a translation uses a page only for the video it names. Tab updates are followed only
+   * for a captured tab (sessions.ts): a listener would wake the service worker for every tab of
+   * every site; a tab's next `subs/page` replaces its page (S43).
    */
   function onTabRemoved(tabId: number): void {
     launch(
@@ -284,5 +365,6 @@ export function startBackground(): () => void {
     queue.clear();
     captions.dispose();
     display.dispose();
+    sessions.dispose();
   };
 }

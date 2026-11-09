@@ -84,6 +84,8 @@ export const INTERNAL_ERRORS = {
   sender_forbidden: 'sender_forbidden',
   model_refused: 'unavailable',
   audio_unsupported: 'unavailable',
+  capture_failed: 'unavailable',
+  capture_not_invoked: 'permission_denied',
 } as const;
 export type PublicErrorCode = keyof typeof PUBLIC_ERRORS;
 export type InternalErrorCode = keyof typeof INTERNAL_ERRORS;

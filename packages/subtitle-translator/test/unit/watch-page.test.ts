@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
 import type { Cue } from '../../src/captions/tracks.ts';
-import { AUDIO_HINT_MESSAGE, NO_SOURCE_MESSAGE } from '../../src/overlay/source.ts';
+import {
+  AUDIO_HINT_MESSAGE,
+  AUDIO_UNSUPPORTED_MESSAGE,
+  NO_SOURCE_MESSAGE,
+} from '../../src/overlay/source.ts';
 import { defaultSubtitleSettings, type DisplayMode } from '../../src/settings.ts';
 import { startWatchPage } from '../../src/watch-page.ts';
 import { fakeVideo } from './video.ts';
@@ -588,5 +592,127 @@ describe('watch page', () => {
     expect(server.sent).toHaveLength(sent);
     expect(posts()).toHaveLength(before);
     expect(player.querySelector('[data-st-overlay]')).toBeNull();
+  });
+});
+
+/** A message of this extension's service worker to the page (`tabs.sendMessage`); its answers. */
+async function fromBackground(
+  message: unknown,
+  sender: { id?: string } = { id: fakeBrowser.runtime.id },
+): Promise<unknown[]> {
+  const answers: unknown[] = [];
+  const taken = await fakeBrowser.runtime.onMessage.trigger(message, sender, (answer: unknown) => {
+    answers.push(answer);
+  });
+  // The page's own listener is the only one.
+  expect(taken).toHaveLength(1);
+  await settle();
+  return answers;
+}
+const toPage = (type: string, payload: unknown) => ({ type, target: 'content', payload });
+const captured = (state: string, message?: string) =>
+  toPage('subs/status', { status: { state, ...(message === undefined ? {} : { message }) } });
+/** A made-up line of the audio path, translated. */
+const LIVE_LINE = {
+  sentenceId: 'live:1',
+  lang: 'en',
+  source: 'Okay chat.',
+  ja: '訳:オーケー',
+  state: 'done',
+  endedAt: 1,
+  final: true,
+};
+
+describe('speech subtitles of a captured tab', () => {
+  it('shows the lines of the captured audio instead of the caption track, and goes back to the track when the capture stops', async () => {
+    const { server, shown, play, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    play();
+    frame(0);
+    await settle();
+    expect(server.asked()).toHaveLength(1);
+
+    expect(await fromBackground(captured('active'))).toEqual([Ok({})]);
+    expect(shown().button()?.getAttribute('data-state')).toBe('active');
+    expect(shown().pill()).toEqual(['字幕: 併記']);
+    expect(shown().rows()).toEqual([]);
+    expect(await fromBackground(toPage('subs/lines', { lines: [LIVE_LINE] }))).toEqual([Ok({})]);
+    expect(shown().rows()).toEqual(['Okay chat.', '訳:オーケー']);
+    // The caption feeder is gone: neither an answer nor a frame brings a batch or a caption line.
+    await server.answer(0);
+    frame(3_100);
+    await settle();
+    expect(server.asked()).toHaveLength(1);
+    expect(shown().rows()).toEqual(['Okay chat.', '訳:オーケー']);
+
+    expect(await fromBackground(captured('stopped'))).toEqual([Ok({})]);
+    expect(shown().rows()).toEqual([]);
+    expect(posts().at(-1)).toEqual({
+      source: 'st-content',
+      type: 'load-track',
+      languageCode: 'en',
+    });
+    tellCues();
+    await settle();
+    frame(0);
+    await settle();
+    expect(server.asked()).toHaveLength(2);
+    expect(shown().button()?.getAttribute('data-state')).toBe('active');
+  });
+
+  it('keeps the audio as the source after a navigation in the captured tab', async () => {
+    const { server, shown } = await start();
+    tellVideo();
+    await settle();
+    await fromBackground(captured('pause'));
+    const asked = posts().length;
+    navigate(`/watch?v=${OTHER}`);
+    tellVideo({ ...VIDEO_INFO, videoId: OTHER });
+    await settle();
+    expect(server.of('subs/page')).toHaveLength(2);
+    // No track is asked for: the tab's audio is the source.
+    expect(posts().slice(asked)).toEqual([{ source: 'st-content', type: 'ready' }]);
+    expect(shown().button()?.getAttribute('data-state')).toBe('pause');
+    expect(await fromBackground(toPage('subs/lines', { lines: [LIVE_LINE] }))).toEqual([Ok({})]);
+    expect(shown().rows()).toEqual(['Okay chat.', '訳:オーケー']);
+  });
+
+  it('shows on the pill why the audio did not start', async () => {
+    const { shown } = await start();
+    tellVideo({ ...VIDEO_INFO, live: true }, []);
+    await settle();
+    expect(shown().pill()).toEqual(['字幕: 併記', NO_SOURCE_MESSAGE]);
+    await fromBackground(captured('error', AUDIO_UNSUPPORTED_MESSAGE));
+    expect(shown().pill()).toEqual(['字幕: 併記', AUDIO_UNSUPPORTED_MESSAGE]);
+    expect(shown().button()?.getAttribute('data-state')).toBe('error');
+  });
+
+  it('ignores messages that are not for the watch page or not from this extension', async () => {
+    const { shown } = await start();
+    tellVideo({ ...VIDEO_INFO, live: true }, []);
+    await settle();
+    const own = { id: fakeBrowser.runtime.id };
+    for (const [message, sender] of [
+      [{ ...captured('active'), target: 'panel' }, own],
+      [{ ...captured('active'), target: 'background' }, own],
+      [{ type: 'subs/status', payload: { status: { state: 'active' } } }, own],
+      [captured('active'), { id: 'another-extension' }],
+      [captured('active'), {}],
+    ] as const)
+      expect(await fromBackground(message, sender)).toEqual([]);
+    expect(shown().button()?.getAttribute('data-state')).toBe('stopped');
+    // Addressed to the page but malformed: refused, not shown.
+    expect(await fromBackground(toPage('subs/lines', { lines: 'Okay chat.' }))).toEqual([
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ internalCode: 'input_invalid' }),
+      }),
+    ]);
+    expect(shown().rows()).toEqual([]);
+    stop?.();
+    stop = undefined;
+    expect(fakeBrowser.runtime.onMessage.hasListeners()).toBe(false);
   });
 });

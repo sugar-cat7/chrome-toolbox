@@ -7,6 +7,10 @@ export type SubtitleSource = 'captions' | 'audio' | 'none';
 export const NO_SOURCE_MESSAGE = '字幕なし・Alt+Shift+S で音声字幕';
 /** The pill with no source when the viewer chose audio, which starts only on their action. */
 export const AUDIO_HINT_MESSAGE = 'Alt+Shift+S で音声字幕';
+/** The pill when the server has no audio projector (mmproj): the side panel tells how to add it. */
+export const AUDIO_UNSUPPORTED_MESSAGE = '音声入力が使えません（サイドパネルを見てください）';
+/** The pill when the tab's audio could not be captured for another reason. */
+export const AUDIO_FAILED_MESSAGE = '音声字幕を開始できませんでした';
 
 /**
  * The source of a page's subtitles: the audio while the tab's audio is captured; nothing when the

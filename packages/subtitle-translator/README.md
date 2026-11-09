@@ -24,7 +24,7 @@ Only the connection check works today.
 3. In `chrome://extensions`, turn on Developer mode, choose "Load unpacked" and select `packages/subtitle-translator/dist/chrome-mv3`.
 4. Click the toolbar icon to open the side panel, enter the server URL (default `http://127.0.0.1:18083`) and press "接続を確認".
 
-Permissions: `storage` and `sidePanel`; host access to `localhost` and `127.0.0.1`. Any other server host is an optional permission that Chrome asks for when you check that URL.
+Permissions: `storage` and `sidePanel`; `tabCapture`, `offscreen` and `activeTab` for speech subtitles from the tab's audio (Alt+Shift+S starts and stops them; `activeTab` shows the captured tab's URL, so leaving www.youtube.com stops the capture); host access to `localhost` and `127.0.0.1`. Any other server host is an optional permission that Chrome asks for when you check that URL.
 
 ## Layout
 

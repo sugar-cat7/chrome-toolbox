@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { launch } from '@chrome-toolbox/contracts';
+import { Err, launch, Ok } from '@chrome-toolbox/contracts';
 import { systemTimers, type StorageArea, type Timers } from '@chrome-toolbox/extension-core';
 import {
   createCaptionFeeder,
@@ -25,10 +25,17 @@ import {
   type LiveView,
 } from './overlay/live-view.ts';
 import { mountOverlay, type OverlayHandle, type OverlayView } from './overlay/overlay.ts';
-import { noSourceMessage, pickSource } from './overlay/source.ts';
+import { noSourceMessage, pickSource, type SubtitleSource } from './overlay/source.ts';
 import { createTimeline, type Timeline } from './overlay/timeline.ts';
 import type { PageInfo } from './page-context.ts';
-import { addressed, subtitleProtocol } from './protocol.ts';
+import {
+  addressed,
+  contentProtocol,
+  isFor,
+  subtitleProtocol,
+  type AudioStatus,
+  type LiveLine,
+} from './protocol.ts';
 import {
   defaultSubtitleSettings,
   subtitleSettingsStore,
@@ -38,9 +45,25 @@ import {
   type SubtitleSettings,
 } from './settings.ts';
 
+type PageMessageListener = (
+  message: unknown,
+  sender: Readonly<{ id?: string | undefined }>,
+  sendResponse: (response: unknown) => void,
+) => true | undefined;
+/** `chrome.runtime` as the page receives the service worker's messages (`tabs.sendMessage`). */
+export type PageRuntime = {
+  readonly id: string;
+  onMessage: {
+    addListener(listener: PageMessageListener): void;
+    removeListener(listener: PageMessageListener): void;
+  };
+};
+
 export type WatchPageOptions = Readonly<{
   /** Delivers a message to the service worker (`runtime.sendMessage`); the target is added. */
   send?: (message: unknown) => Promise<unknown>;
+  /** Where the service worker's messages for the page arrive. */
+  runtime?: PageRuntime;
   /** Where the subtitle settings are, and their changes (`storage.local`). */
   storage?: StorageArea & StorageEvents;
   timers?: Timers;
@@ -54,6 +77,8 @@ const WATCH_PATH = /^\/(?:watch$|live\/)/u;
 /** One video of a visit and what draws its subtitles. */
 type Shown = {
   readonly videoId: string;
+  /** Where its subtitles come from: the caption track, the captured tab audio, or nowhere. */
+  readonly source: SubtitleSource;
   /** The caption track translated; none when the video has no source. */
   readonly track: CaptionTrack | undefined;
   /** What the pill says with no source: how to start speech subtitles. */
@@ -79,6 +104,8 @@ type Visit = {
   state: FrontState | undefined;
   /** The latest cues the bridge posted before their video was named: its feeder may take them. */
   cues: CuesMessage | undefined;
+  /** What the bridge said of the video shown, to show it again from another source. */
+  named: VideoMessage | undefined;
   shown: Shown | undefined;
 };
 
@@ -127,13 +154,19 @@ function pageInfo(video: VideoMessage['video'], tracks: number): PageInfo {
  * page is `active`. An ad clears the line until the video's frames come back, or until the ad
  * ends on a paused video (drawn from its `currentTime`). A new video or navigation starts over
  * with a new timeline, live view and feeder; leaving the watch page reports it `away`. The display mode is read live: a change saved anywhere (the pill, which sends
- * `subs/display`, the shortcut, the side panel) redraws every tab at once. Returns the cleanup of
- * every listener, observer, timer and the overlay.
+ * `subs/display`, the shortcut, the side panel) redraws every tab at once.
+ *
+ * While the service worker captures this tab's audio (`subs/status`, from this extension's service
+ * worker only, target `content`), the audio is the source: the caption feeder stops, the lines of
+ * `subs/lines` go to the live view and the pill shows the capture's state; when the capture stops
+ * the video is shown from its caption track again. Why the audio did not start shows on the pill
+ * until the next video. Returns the cleanup of every listener, observer, timer and the overlay.
  */
 export function startWatchPage(
   win: Window,
   {
     send = (message) => browser.runtime.sendMessage(message),
+    runtime = browser.runtime,
     storage = browser.storage.local,
     timers = systemTimers,
     mode,
@@ -146,7 +179,11 @@ export function startWatchPage(
   let settings: SubtitleSettings | undefined;
   let visit: Visit | undefined;
   let stopped = false;
+  /** The capture of this tab's audio, as the service worker last told; it outlives navigations. */
+  let audio: AudioStatus | undefined;
   const display = (): DisplayMode => settings?.display ?? defaultSubtitleSettings.display;
+  const capturing = (): boolean =>
+    audio !== undefined && audio.state !== 'stopped' && audio.state !== 'error';
 
   /** A refused report changes nothing on the page: the service worker learns the next one. */
   function report(state: FrontState): void {
@@ -177,19 +214,25 @@ export function startWatchPage(
     at.overlay.render(captionView(line, display(), shown.track.languageCode));
   }
 
+  /** The pill; why the audio did not start replaces the hint and shows on a caption track. */
   function pill(at: Visit, shown: Shown): void {
-    if (shown.track === undefined)
+    const failed = audio?.state === 'error' ? audio.message : undefined;
+    if (shown.source === 'audio')
+      at.overlay.status({ source: 'audio', state: audio?.state ?? 'away', display: display() });
+    else if (shown.track === undefined) {
+      const message = failed ?? shown.hint;
       at.overlay.status({
         source: 'none',
-        state: 'stopped',
+        state: failed === undefined ? 'stopped' : 'error',
         display: display(),
-        ...(shown.hint === undefined ? {} : { message: shown.hint }),
+        ...(message === undefined ? {} : { message }),
       });
-    else
+    } else
       at.overlay.status({
         source: 'captions',
-        state: at.state?.state ?? 'pause',
+        state: failed === undefined ? (at.state?.state ?? 'pause') : 'error',
         display: display(),
+        ...(failed === undefined ? {} : { message: failed }),
       });
   }
 
@@ -252,10 +295,14 @@ export function startWatchPage(
     shown.timeline.reset();
   }
 
-  function onVideo(at: Visit, current: SubtitleSettings, { video, tracks }: VideoMessage): void {
+  function onVideo(at: Visit, current: SubtitleSettings, message: VideoMessage): void {
+    const { video, tracks } = message;
     // The bridge names the video again on `ready` and after its own navigation event.
     if (at.shown?.videoId === video.videoId) return;
     close(at);
+    at.named = message;
+    // Why the audio did not start was about the last video.
+    if (audio?.state === 'error') audio = undefined;
     const info = pageInfo(video, tracks.length);
     launch(
       async () => {
@@ -264,13 +311,19 @@ export function startWatchPage(
       },
       () => undefined,
     );
+    show(at, current, message);
+  }
+
+  /** Shows the video's subtitles from its source: the captured audio, its caption track, none. */
+  function show(at: Visit, current: SubtitleSettings, { video, tracks }: VideoMessage): void {
     const picked = pickSource({
       setting: current.source,
       tracks: tracks.length,
       live: video.live,
-      capturing: false,
+      capturing: capturing(),
     });
     const track = picked === 'captions' ? pickSourceTrack(tracks) : undefined;
+    const source: SubtitleSource = picked === 'captions' && track === undefined ? 'none' : picked;
     const live = createLiveView({
       holdMs: LIVE_VIEW_LIMITS.holdMs,
       timers,
@@ -278,8 +331,9 @@ export function startWatchPage(
     });
     const shown: Shown = {
       videoId: video.videoId,
+      source,
       track,
-      hint: track === undefined ? noSourceMessage(current.source) : undefined,
+      hint: source === 'none' ? noSourceMessage(current.source) : undefined,
       timeline: createTimeline({ keepMs: FEEDER_LIMITS.keepMs }),
       live,
       feeder: undefined,
@@ -324,6 +378,56 @@ export function startWatchPage(
       sameTrack(cues, shown.videoId, shown.track)
     )
       feed(at, shown, cues);
+  }
+
+  /**
+   * The service worker told how the capture of this tab's audio stands. When the audio becomes the
+   * source, or stops being it, the video is shown again from its new source: the caption feeder
+   * stops while the audio is captured (only this tab), and starts over after.
+   */
+  function onAudio(next: AudioStatus): void {
+    const was = capturing();
+    audio = next;
+    const at = visit;
+    const shown = at?.shown;
+    if (at === undefined || shown === undefined) return;
+    if (was !== capturing() && at.named !== undefined && settings !== undefined) {
+      close(at);
+      show(at, settings, at.named);
+    } else pill(at, shown);
+  }
+
+  function onLines(lines: readonly LiveLine[]): void {
+    const shown = visit?.shown;
+    if (shown?.source !== 'audio') return;
+    for (const line of lines) shown.live.upsert(line);
+  }
+
+  const routeFromBackground = contentProtocol.route({
+    'subs/lines': ({ lines }) => {
+      onLines(lines);
+      return Promise.resolve(Ok({}));
+    },
+    'subs/status': ({ status }) => {
+      onAudio(status);
+      return Promise.resolve(Ok({}));
+    },
+  });
+  /** Takes only what this extension's service worker addressed to the page. */
+  function onRuntimeMessage(
+    message: unknown,
+    sender: Readonly<{ id?: string | undefined }>,
+    sendResponse: (response: unknown) => void,
+  ): true | undefined {
+    if (!isFor('content', message) || sender.id !== runtime.id) return undefined;
+    launch(
+      async () => {
+        sendResponse(await routeFromBackground(message));
+      },
+      (error) => sendResponse(Err(error)),
+    );
+    // Keeps the channel open for the asynchronous sendResponse.
+    return true;
   }
 
   function onMessage(event: MessageEvent): void {
@@ -391,6 +495,7 @@ export function startWatchPage(
       front: undefined,
       state: undefined,
       cues: undefined,
+      named: undefined,
       shown: undefined,
     };
     visit = started;
@@ -403,6 +508,7 @@ export function startWatchPage(
   }
 
   win.addEventListener('message', onMessage);
+  runtime.onMessage.addListener(onRuntimeMessage);
   doc.addEventListener('yt-navigate-finish', begin);
   const unwatch = watchSubtitleSettings(storage, onSettings);
   begin();
@@ -418,6 +524,7 @@ export function startWatchPage(
     stopped = true;
     unwatch();
     win.removeEventListener('message', onMessage);
+    runtime.onMessage.removeListener(onRuntimeMessage);
     doc.removeEventListener('yt-navigate-finish', begin);
     end();
   };

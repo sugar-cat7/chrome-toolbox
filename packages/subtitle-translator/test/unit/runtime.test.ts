@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type Mock } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
-import { subtitleStreamPart } from '@chrome-toolbox/extension-core';
+import { subtitleStreamPart, type Fetch } from '@chrome-toolbox/extension-core';
 import { glossaryStore } from '../../src/glossary.ts';
 import { tabPagesStore } from '../../src/page-context.ts';
 import { tabFronts } from '../../src/tab-fronts.ts';
@@ -36,6 +36,11 @@ function fakeCommands() {
 let commands: ReturnType<typeof fakeCommands>;
 beforeEach(() => {
   commands = fakeCommands();
+  // No test reaches a real server: a test that needs one stubs fetch itself.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<Fetch>(async () => new Response('', { status: 503 })),
+  );
 });
 afterEach(() => {
   fakeBrowser.reset();
@@ -348,9 +353,11 @@ describe('caption translation routes', () => {
     first();
     // A new service worker has nothing in memory: the page comes from storage.session.
     const second = startBackground();
-    // Tab updates are not listened to: without a host permission Chrome leaves out their URL, and
-    // a listener would wake the service worker for every tab of every site (S43).
-    expect(fakeBrowser.tabs.onUpdated.hasListeners()).toBe(false);
+    // Tab updates are listened to only while a tab is captured: a listener would wake the service
+    // worker for every tab of every site (S43). Nothing is captured once storage.session is read.
+    await vi.waitFor(() => {
+      expect(fakeBrowser.tabs.onUpdated.hasListeners()).toBe(false);
+    });
     expect(await ask(translate('Fixturo is here.'), topFrame(watch))).toEqual(
       Ok({ lines: [{ id: '0:a', ja: '訳:一行', state: 'done' }] }),
     );
@@ -502,5 +509,171 @@ describe('addressed messages', () => {
     expect(isFor('panel', { type: 'x' })).toBe(false);
     expect(isFor('panel', null)).toBe(false);
     expect(isFor('panel', 'panel')).toBe(false);
+  });
+});
+
+describe('audio capture wiring', () => {
+  /**
+   * Puts `mock` in place of a browser method for this test: the fake leaves these unimplemented,
+   * and their callback overloads hide the promise form from `vi.spyOn`.
+   */
+  function stub<F extends (...args: never[]) => unknown>(
+    target: object,
+    key: string,
+    mock: Mock<F>,
+  ): Mock<F> {
+    const original: unknown = Reflect.get(target, key);
+    Reflect.set(target, key, mock);
+    onTestFinished(() => {
+      Reflect.set(target, key, original);
+    });
+    return mock;
+  }
+  /** Chrome's tab capture, offscreen document and messaging, as the capture uses them. */
+  function fakeCapture() {
+    let open = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<Fetch>(async (input) =>
+        new URL(input).pathname === '/props'
+          ? Response.json({ total_slots: 3, modalities: { audio: true } })
+          : new Response('', { status: 404 }),
+      ),
+    );
+    const streamId = stub(
+      fakeBrowser.tabCapture,
+      'getMediaStreamId',
+      vi.fn<(options: unknown, callback?: (streamId: string) => void) => void>(
+        (_options, callback) => {
+          callback?.('stream-1');
+        },
+      ),
+    );
+    stub(
+      fakeBrowser.runtime,
+      'getContexts',
+      vi.fn<() => Promise<unknown[]>>(async () =>
+        open ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [],
+      ),
+    );
+    const create = stub(
+      fakeBrowser.offscreen,
+      'createDocument',
+      vi.fn<(parameters: unknown) => Promise<void>>(async () => {
+        open = true;
+      }),
+    );
+    const close = stub(
+      fakeBrowser.offscreen,
+      'closeDocument',
+      vi.fn<() => Promise<void>>(async () => {
+        open = false;
+      }),
+    );
+    const toOffscreen = stub(
+      fakeBrowser.runtime,
+      'sendMessage',
+      vi.fn<(message: unknown) => Promise<unknown>>(async () => Ok({})),
+    );
+    const toTab = stub(
+      fakeBrowser.tabs,
+      'sendMessage',
+      vi.fn<(tabId: number, message: unknown, options: unknown) => Promise<unknown>>(async () =>
+        Ok({}),
+      ),
+    );
+    return { stub, streamId, create, close, toOffscreen, toTab };
+  }
+  const offscreenSender = (): Browser.runtime.MessageSender => ({
+    url: fakeBrowser.runtime.getURL('/offscreen.html'),
+  });
+  const line = {
+    sentenceId: 'live:1',
+    lang: 'en',
+    source: 'Okay chat.',
+    state: 'pending',
+    endedAt: 5,
+    final: true,
+  };
+
+  it('starts the capture of the watch page in front from the shortcut and routes the offscreen messages to it', async () => {
+    const chrome = fakeCapture();
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube, active: true });
+    // The fake answers window queries only once a window has focus.
+    const query = chrome.stub(
+      fakeBrowser.tabs,
+      'query',
+      vi.fn<(info: unknown) => Promise<unknown[]>>(async () => [watch]),
+    );
+    commands.press('toggle-audio');
+    await vi.waitFor(() => {
+      expect(chrome.toOffscreen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'audio/start',
+          target: 'offscreen',
+          payload: expect.objectContaining({ tabId: watch.id, streamId: 'stream-1' }),
+        }),
+      );
+    });
+    expect(query).toHaveBeenCalledWith({ active: true, lastFocusedWindow: true });
+    expect(chrome.streamId).toHaveBeenCalledWith({ targetTabId: watch.id }, expect.any(Function));
+    expect(chrome.create).toHaveBeenCalledWith({
+      url: 'offscreen.html',
+      reasons: ['USER_MEDIA'],
+      justification: expect.any(String),
+    });
+
+    const lines = { type: 'audio/lines', payload: { tabId: watch.id, lines: [line] } };
+    expect(await ask(lines, offscreenSender())).toEqual(Ok({}));
+    expect(chrome.toTab).toHaveBeenCalledWith(
+      watch.id,
+      { type: 'subs/lines', payload: { lines: [line] }, target: 'content' },
+      { frameId: 0 },
+    );
+    for (const sender of strangers(watch).slice(0, 3))
+      expect(await ask(lines, sender)).toMatchObject({
+        ok: false,
+        error: { internalCode: 'sender_forbidden' },
+      });
+    expect(
+      await ask({ type: 'audio/lines', payload: { tabId: watch.id } }, offscreenSender()),
+    ).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
+
+    expect(
+      await ask({ type: 'audio/idle', payload: { tabId: watch.id } }, offscreenSender()),
+    ).toEqual(Ok({}));
+    await vi.waitFor(() => {
+      expect(chrome.close).toHaveBeenCalledTimes(1);
+    });
+    expect(chrome.toOffscreen).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'audio/stop', target: 'offscreen' }),
+    );
+    expect(await fakeBrowser.storage.session.get('capture')).toEqual({});
+    stop();
+    expect(fakeBrowser.tabs.onActivated.hasListeners()).toBe(false);
+  });
+
+  it('refuses the side panel and watch pages the offscreen messages, and the offscreen document the page ones', async () => {
+    fakeCapture();
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    for (const message of [
+      { type: 'audio/status', payload: { tabId: watch.id, status: { state: 'active' } } },
+      { type: 'audio/failed', payload: { tabId: watch.id, code: 'audio_unsupported' } },
+    ])
+      for (const sender of [
+        topFrame(watch),
+        { url: fakeBrowser.runtime.getURL('/sidepanel.html') },
+      ])
+        expect(await ask(message, sender)).toMatchObject({
+          ok: false,
+          error: { internalCode: 'sender_forbidden' },
+        });
+    expect(await ask(page, offscreenSender())).toMatchObject({
+      ok: false,
+      error: { internalCode: 'sender_forbidden' },
+    });
+    stop();
   });
 });
