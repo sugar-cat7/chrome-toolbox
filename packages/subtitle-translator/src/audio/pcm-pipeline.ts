@@ -15,7 +15,7 @@ export type PcmSegmentMessage = Readonly<{
 export type PcmCommand = Readonly<{ type: 'flush' | 'reset' }>;
 
 export type PcmPipeline = {
-  /** One render block: one array per channel, each of the block's length. */
+  /** One render block: one array per channel, each of the block's length; none is silence. */
   process(this: void, channels: readonly Float32Array[]): void;
   /** A message from the port; anything but a `PcmCommand` is ignored. */
   command(this: void, data: unknown): void;
@@ -61,8 +61,9 @@ export function createPcmPipeline(
 
   return {
     process(channels) {
-      const length = channels[0]?.length ?? 0;
-      if (!length) return;
+      // Without samples (a disconnected source) the block is silence of the last length, so the
+      // VAD's time keeps moving and an open segment closes after its hangover.
+      const length = channels[0]?.length || mono.length;
       if (mono.length !== length) mono = new Float32Array(length);
       const samples = resample(downmix(channels, mono));
       for (let i = 0; i < samples.length; i += 1) {

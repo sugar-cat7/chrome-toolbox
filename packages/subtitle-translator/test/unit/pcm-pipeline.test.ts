@@ -65,6 +65,20 @@ describe('pcm pipeline', () => {
     },
   );
 
+  it.each([
+    { name: 'no channels', channels: [] },
+    { name: 'an empty channel', channels: [new Float32Array(0)] },
+  ])('keeps the VAD clock going as silence with $name', ({ channels }) => {
+    const { sent, pipeline, feed } = start(48000);
+    feed(['silence:200', 'speech:600']);
+    // A disconnected source: 400 ms of blocks without samples, the hangover and the filter's tail.
+    for (let block = 0; block < Math.ceil((0.4 * 48000) / 128); block += 1)
+      pipeline.process(channels);
+    expect(sent.map(({ message }) => message.trailingSilenceMs)).toEqual([300]);
+    expect(sent[0]?.message.durationMs).toBeGreaterThanOrEqual(700);
+    expect(sent[0]?.message.durationMs).toBeLessThanOrEqual(720);
+  });
+
   it('does nothing without an input', () => {
     const { sent, pipeline } = start(48000);
     pipeline.process([]);

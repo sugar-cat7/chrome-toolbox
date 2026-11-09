@@ -28,6 +28,23 @@ describe('resampler', () => {
     expect(level(12000)).toBeLessThanOrEqual(low * 0.6);
   });
 
+  it.each([{ inputRate: 44100 }, { inputRate: 48000 }])(
+    'at $inputRate Hz, folds a 10 kHz tone at least 20 dB under 1 kHz and keeps 3 kHz within 1 dB',
+    ({ inputRate }) => {
+      const amplitude = 0.5;
+      // The output level of a tone of the same input level, in dB against that input level.
+      const gain = (hz: number) =>
+        20 *
+        Math.log10(
+          rms(resampleInBlocks(inputRate, tone(inputRate, inputRate, hz, amplitude)).slice(64)) /
+            (amplitude * Math.SQRT1_2),
+        );
+      // 10 kHz is above the 8 kHz Nyquist of 16 kHz: what is left of it lands at 6 kHz.
+      expect(gain(10000) - gain(1000)).toBeLessThanOrEqual(-20);
+      expect(Math.abs(gain(3000))).toBeLessThanOrEqual(1);
+    },
+  );
+
   it('carries the fraction and the filter across calls', () => {
     const input = pattern(['speech:200'], 44100);
     const whole = Array.from(createResampler(44100, 16000)(input));
