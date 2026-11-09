@@ -9,7 +9,7 @@ import {
 } from '@chrome-toolbox/extension-core';
 import type { FrontState } from './front.ts';
 import { toPromptGlossary, type GlossaryEntry, type GlossaryStore } from './glossary.ts';
-import { AUDIO_FAILED_MESSAGE, AUDIO_UNSUPPORTED_MESSAGE } from './overlay/source.ts';
+import { AUDIO_FAILED_MESSAGE, AUDIO_UNSUPPORTED_MESSAGE, pickSource } from './overlay/source.ts';
 import { contextText, type PageInfo, type TabPageStore } from './page-context.ts';
 import {
   addressed,
@@ -20,7 +20,12 @@ import {
   type LiveConfigMessage,
   type LiveLine,
 } from './protocol.ts';
-import type { StorageChanges, StorageEvents, SubtitleSettingsStore } from './settings.ts';
+import type {
+  StorageChanges,
+  StorageEvents,
+  SubtitleSettings,
+  SubtitleSettingsStore,
+} from './settings.ts';
 import { UNKNOWN_FRONT, type TabFronts } from './tab-fronts.ts';
 
 /** The `storage.session` key of the captured tab, which outlives a stopped service worker. */
@@ -38,6 +43,29 @@ const PROPS_TIMEOUT_MS = 15_000;
 const YOUTUBE_ORIGIN = 'https://www.youtube.com/';
 /** A page of www.youtube.com that plays one video: `/watch` and `/live/<id>`. */
 const WATCH_PAGE = /^https:\/\/www\.youtube\.com\/(?:watch(?:[?#]|$)|live\/)/u;
+/** The video of a watch page URL: `/watch?…v=<id>` or `/live/<id>`. */
+const WATCH_VIDEO =
+  /^https:\/\/www\.youtube\.com\/(?:watch\?(?:[^#]*&)?v=([\w-]{11})(?:[&#]|$)|live\/([\w-]{11})(?:[/?#]|$))/u;
+const videoIdOf = (url: string): string | undefined => {
+  const found = WATCH_VIDEO.exec(url);
+  return found?.[1] ?? found?.[2];
+};
+/**
+ * Whether the tab shows a watch page whose caption path would show nothing (S46): the page the tab
+ * reported is the video of its URL, and `pickSource` gives no caption track (a live stream, no
+ * tracks, or audio chosen as the source). An unknown page or a hidden URL is not such a page.
+ */
+function captionless(
+  url: string | undefined,
+  page: PageInfo | undefined,
+  setting: SubtitleSettings['source'],
+): boolean {
+  const videoId = url === undefined ? undefined : videoIdOf(url);
+  if (videoId === undefined || page?.videoId !== videoId) return false;
+  return (
+    pickSource({ setting, tracks: page.tracks, live: page.live, capturing: false }) !== 'captions'
+  );
+}
 /** What `getMediaStreamId` says when the extension was not invoked on the tab (Task 13 Step 0). */
 const NOT_INVOKED = 'has not been invoked';
 /**
@@ -134,6 +162,14 @@ export type Sessions = {
   failed(this: void, tabId: number, code: AudioFailure): Promise<Result<void>>;
   /** The `toggle-audio` shortcut: stops the tab in front if captured, else starts a watch page. */
   toggle(this: void): Promise<Result<void>>;
+  /**
+   * The toolbar icon on `tab` (S46; the panel opens on its own): stops the tab if captured, starts
+   * it if it shows a watch page whose caption path would show nothing, and does nothing else.
+   */
+  action(
+    this: void,
+    tab: Readonly<{ id: number; url?: string | undefined }>,
+  ): Promise<Result<void>>;
   /** Removes every listener; waiting operations are cancelled. */
   dispose(this: void): void;
 };
@@ -371,6 +407,21 @@ export function createSessions({
     return Ok(undefined);
   }
 
+  /** Starts the tab from a viewer's action; a failure is shown on its pill. */
+  async function startFromAction(tabId: number): Promise<Result<void>> {
+    const started = await startNow(tabId, undefined);
+    if (!started.ok) {
+      const message =
+        started.error.internalCode === 'audio_unsupported'
+          ? AUDIO_UNSUPPORTED_MESSAGE
+          : AUDIO_FAILED_MESSAGE;
+      await contentProtocol.send(toPage(tabId), 'subs/status', {
+        status: { state: 'error', message },
+      });
+    }
+    return started;
+  }
+
   function onRemoved(tabId: number): void {
     run(() => stopNow(tabId, 'tab-closed'));
   }
@@ -518,17 +569,17 @@ export function createSessions({
         if (captured?.tabId === tabId) return stopNow(tabId, 'user');
         // The shortcut invoked the extension on the tab: `activeTab` shows its URL.
         if (tab?.url === undefined || !WATCH_PAGE.test(tab.url)) return Ok(undefined);
-        const started = await startNow(tabId, undefined);
-        if (!started.ok) {
-          const message =
-            started.error.internalCode === 'audio_unsupported'
-              ? AUDIO_UNSUPPORTED_MESSAGE
-              : AUDIO_FAILED_MESSAGE;
-          await contentProtocol.send(toPage(tabId), 'subs/status', {
-            status: { state: 'error', message },
-          });
-        }
-        return started;
+        return startFromAction(tabId);
+      });
+    },
+    async action({ id: tabId, url }): Promise<Result<void>> {
+      const [page, chosen] = await Promise.all([pages.get(tabId), subtitles.load()]);
+      return queue.run(async (): Promise<Result<void>> => {
+        if (captured?.tabId === tabId) return stopNow(tabId, 'user');
+        // The click invoked the extension on the tab: `activeTab` shows its URL.
+        if (!page.ok || !chosen.ok || !captionless(url, page.value, chosen.value.source))
+          return Ok(undefined);
+        return startFromAction(tabId);
       });
     },
     dispose() {

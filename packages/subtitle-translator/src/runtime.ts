@@ -1,4 +1,4 @@
-import { browser } from 'wxt/browser';
+import { browser, type Browser } from 'wxt/browser';
 import { capture, Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
 import {
   connectionPort,
@@ -324,6 +324,25 @@ export function startBackground(): () => void {
       );
   }
   /**
+   * The toolbar icon (S46). The side panel opens in the click's own turn, before anything is
+   * awaited, while Chrome still counts the click as the viewer's gesture; then the click starts or
+   * stops the tab's speech subtitles, or does nothing more (sessions.ts).
+   */
+  function onAction(tab: Browser.tabs.Tab): void {
+    const tabId = tab.id;
+    if (tabId === undefined) return;
+    launch(
+      () => browser.sidePanel.open({ tabId }),
+      () => undefined,
+    );
+    launch(
+      async () => {
+        await sessions.action({ id: tabId, url: tab.url });
+      },
+      () => undefined,
+    );
+  }
+  /**
    * A closed tab's page and front are forgotten. The result is not used: an entry that stays ages
    * out, and a translation uses a page only for the video it names. Tab updates are followed only
    * for a captured tab (sessions.ts): a listener would wake the service worker for every tab of
@@ -358,10 +377,19 @@ export function startBackground(): () => void {
   browser.runtime.onMessage.addListener(onMessage);
   browser.tabs.onRemoved.addListener(onTabRemoved);
   browser.commands.onCommand.addListener(onCommand);
+  browser.action.onClicked.addListener(onAction);
+  // The click handler opens the panel: `openPanelOnActionClick` would open it without invoking
+  // the tab, so no capture could start from the icon (Task 13 Step 0). A failure leaves the panel
+  // reachable from Chrome's side panel menu.
+  launch(
+    () => browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }),
+    () => undefined,
+  );
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
     browser.tabs.onRemoved.removeListener(onTabRemoved);
     browser.commands.onCommand.removeListener(onCommand);
+    browser.action.onClicked.removeListener(onAction);
     queue.clear();
     captions.dispose();
     display.dispose();

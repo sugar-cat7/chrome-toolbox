@@ -512,78 +512,78 @@ describe('addressed messages', () => {
   });
 });
 
+/**
+ * Puts `mock` in place of a browser method for this test: the fake leaves these unimplemented,
+ * and their callback overloads hide the promise form from `vi.spyOn`.
+ */
+function stub<F extends (...args: never[]) => unknown>(
+  target: object,
+  key: string,
+  mock: Mock<F>,
+): Mock<F> {
+  const original: unknown = Reflect.get(target, key);
+  Reflect.set(target, key, mock);
+  onTestFinished(() => {
+    Reflect.set(target, key, original);
+  });
+  return mock;
+}
+/** Chrome's tab capture, offscreen document and messaging, as the capture uses them. */
+function fakeCapture() {
+  let open = false;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<Fetch>(async (input) =>
+      new URL(input).pathname === '/props'
+        ? Response.json({ total_slots: 3, modalities: { audio: true } })
+        : new Response('', { status: 404 }),
+    ),
+  );
+  const streamId = stub(
+    fakeBrowser.tabCapture,
+    'getMediaStreamId',
+    vi.fn<(options: unknown, callback?: (streamId: string) => void) => void>(
+      (_options, callback) => {
+        callback?.('stream-1');
+      },
+    ),
+  );
+  stub(
+    fakeBrowser.runtime,
+    'getContexts',
+    vi.fn<() => Promise<unknown[]>>(async () =>
+      open ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [],
+    ),
+  );
+  const create = stub(
+    fakeBrowser.offscreen,
+    'createDocument',
+    vi.fn<(parameters: unknown) => Promise<void>>(async () => {
+      open = true;
+    }),
+  );
+  const close = stub(
+    fakeBrowser.offscreen,
+    'closeDocument',
+    vi.fn<() => Promise<void>>(async () => {
+      open = false;
+    }),
+  );
+  const toOffscreen = stub(
+    fakeBrowser.runtime,
+    'sendMessage',
+    vi.fn<(message: unknown) => Promise<unknown>>(async () => Ok({})),
+  );
+  const toTab = stub(
+    fakeBrowser.tabs,
+    'sendMessage',
+    vi.fn<(tabId: number, message: unknown, options: unknown) => Promise<unknown>>(async () =>
+      Ok({}),
+    ),
+  );
+  return { stub, streamId, create, close, toOffscreen, toTab };
+}
 describe('audio capture wiring', () => {
-  /**
-   * Puts `mock` in place of a browser method for this test: the fake leaves these unimplemented,
-   * and their callback overloads hide the promise form from `vi.spyOn`.
-   */
-  function stub<F extends (...args: never[]) => unknown>(
-    target: object,
-    key: string,
-    mock: Mock<F>,
-  ): Mock<F> {
-    const original: unknown = Reflect.get(target, key);
-    Reflect.set(target, key, mock);
-    onTestFinished(() => {
-      Reflect.set(target, key, original);
-    });
-    return mock;
-  }
-  /** Chrome's tab capture, offscreen document and messaging, as the capture uses them. */
-  function fakeCapture() {
-    let open = false;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<Fetch>(async (input) =>
-        new URL(input).pathname === '/props'
-          ? Response.json({ total_slots: 3, modalities: { audio: true } })
-          : new Response('', { status: 404 }),
-      ),
-    );
-    const streamId = stub(
-      fakeBrowser.tabCapture,
-      'getMediaStreamId',
-      vi.fn<(options: unknown, callback?: (streamId: string) => void) => void>(
-        (_options, callback) => {
-          callback?.('stream-1');
-        },
-      ),
-    );
-    stub(
-      fakeBrowser.runtime,
-      'getContexts',
-      vi.fn<() => Promise<unknown[]>>(async () =>
-        open ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [],
-      ),
-    );
-    const create = stub(
-      fakeBrowser.offscreen,
-      'createDocument',
-      vi.fn<(parameters: unknown) => Promise<void>>(async () => {
-        open = true;
-      }),
-    );
-    const close = stub(
-      fakeBrowser.offscreen,
-      'closeDocument',
-      vi.fn<() => Promise<void>>(async () => {
-        open = false;
-      }),
-    );
-    const toOffscreen = stub(
-      fakeBrowser.runtime,
-      'sendMessage',
-      vi.fn<(message: unknown) => Promise<unknown>>(async () => Ok({})),
-    );
-    const toTab = stub(
-      fakeBrowser.tabs,
-      'sendMessage',
-      vi.fn<(tabId: number, message: unknown, options: unknown) => Promise<unknown>>(async () =>
-        Ok({}),
-      ),
-    );
-    return { stub, streamId, create, close, toOffscreen, toTab };
-  }
   const offscreenSender = (): Browser.runtime.MessageSender => ({
     url: fakeBrowser.runtime.getURL('/offscreen.html'),
   });
@@ -674,6 +674,69 @@ describe('audio capture wiring', () => {
       ok: false,
       error: { internalCode: 'sender_forbidden' },
     });
+    stop();
+  });
+});
+
+describe('toolbar icon (S46)', () => {
+  /** A watch page of the `youtube` URL as its top frame reports it. */
+  const pageOf = (live: boolean, tracks: number) => ({
+    type: 'subs/page',
+    payload: { info: { ...page.payload.info, live, tracks } },
+  });
+
+  it('opens the side panel before anything is awaited and starts the audio of a live watch page, then stops it on the next click', async () => {
+    const chrome = fakeCapture();
+    const open = chrome.stub(
+      fakeBrowser.sidePanel,
+      'open',
+      vi.fn<(options: unknown) => Promise<void>>(async () => undefined),
+    );
+    const behavior = chrome.stub(
+      fakeBrowser.sidePanel,
+      'setPanelBehavior',
+      vi.fn<(behavior: unknown) => Promise<void>>(async () => undefined),
+    );
+    const clicks = vi.spyOn(fakeBrowser.action.onClicked, 'addListener');
+    const { stop, ask } = background();
+    // The icon no longer opens the panel by itself: the click handler does.
+    expect(behavior).toHaveBeenCalledWith({ openPanelOnActionClick: false });
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    expect(await ask(pageOf(true, 0), topFrame(watch))).toEqual(Ok({}));
+    const click = clicks.mock.calls.at(-1)?.[0];
+    click?.(watch);
+    // In the click's own turn, while Chrome still holds the gesture.
+    expect(open).toHaveBeenCalledWith({ tabId: watch.id });
+    await vi.waitFor(() => {
+      expect(chrome.toOffscreen).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'audio/start', target: 'offscreen' }),
+      );
+    });
+    click?.(watch);
+    expect(open).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => {
+      expect(chrome.close).toHaveBeenCalledTimes(1);
+    });
+    stop();
+    expect(fakeBrowser.action.onClicked.hasListeners()).toBe(false);
+  });
+
+  it('only opens the side panel on a watch page with caption tracks', async () => {
+    const chrome = fakeCapture();
+    const open = chrome.stub(
+      fakeBrowser.sidePanel,
+      'open',
+      vi.fn<(options: unknown) => Promise<void>>(async () => undefined),
+    );
+    const clicks = vi.spyOn(fakeBrowser.action.onClicked, 'addListener');
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    expect(await ask(pageOf(false, 2), topFrame(watch))).toEqual(Ok({}));
+    clicks.mock.calls.at(-1)?.[0]?.(watch);
+    expect(open).toHaveBeenCalledWith({ tabId: watch.id });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(chrome.streamId).not.toHaveBeenCalled();
+    expect(chrome.create).not.toHaveBeenCalled();
     stop();
   });
 });

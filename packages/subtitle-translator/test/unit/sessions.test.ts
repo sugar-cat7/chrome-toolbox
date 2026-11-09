@@ -640,3 +640,79 @@ describe('the toggle-audio shortcut', () => {
     expect(h.statuses(CAPTURED)).toEqual([{ state: 'error', message }]);
   });
 });
+
+describe('the toolbar icon (S46)', () => {
+  const ARCHIVE: PageInfo = { ...PAGE, live: false, tracks: 2 };
+  it.each([
+    { name: 'a live stream', page: { ...PAGE, live: true, tracks: 2 }, url: WATCH },
+    { name: 'an archive without caption tracks', page: { ...ARCHIVE, tracks: 0 }, url: WATCH },
+    {
+      name: 'a live page under /live/',
+      page: PAGE,
+      url: 'https://www.youtube.com/live/fixture-v01?si=x',
+    },
+    { name: 'captions the viewer did not choose', page: ARCHIVE, url: WATCH, source: 'audio' },
+  ] as const)(
+    'starts the audio of a watch page whose captions would show nothing: $name',
+    async ({ page, url, ...row }) => {
+      const h = setup();
+      await h.pages.report(CAPTURED, page);
+      if ('source' in row)
+        await subtitleSettingsStore(fakeBrowser.storage.local).save({
+          ...defaultSubtitleSettings,
+          source: row.source,
+        });
+      const sessions = kept(h.make());
+      expect(await sessions.action({ id: CAPTURED, url })).toEqual(Ok(undefined));
+      expect(await sessions.current()).toEqual(Ok({ tabId: CAPTURED, startedAt: 1_000 }));
+      expect(h.calls.slice(0, 2)).toEqual(['props:gemma4-e4b', `streamId:${CAPTURED}`]);
+    },
+  );
+
+  it.each([
+    { name: 'an archive with caption tracks', page: ARCHIVE, url: WATCH },
+    { name: 'a tab that reported no page', page: undefined, url: WATCH },
+    {
+      name: 'the page of another video',
+      page: PAGE,
+      url: 'https://www.youtube.com/watch?v=fixture-v02',
+    },
+    { name: 'a hidden URL', page: PAGE, url: undefined },
+    {
+      name: 'YouTube outside a watch page',
+      page: PAGE,
+      url: 'https://www.youtube.com/feed/subscriptions',
+    },
+    { name: 'another site', page: PAGE, url: 'https://example.com/watch?v=fixture-v01' },
+  ])('only opens the panel on $name', async ({ page, url }) => {
+    const h = setup();
+    if (page !== undefined) await h.pages.report(CAPTURED, page);
+    const sessions = kept(h.make());
+    expect(await sessions.action({ id: CAPTURED, url })).toEqual(Ok(undefined));
+    expect(h.calls).toEqual([]);
+    expect(await sessions.current()).toEqual(Ok(undefined));
+  });
+
+  it('stops the capture on a second click on the captured tab, and leaves it on a click elsewhere', async () => {
+    const h = setup();
+    await h.pages.report(OTHER, ARCHIVE);
+    const sessions = kept(await capturing(h));
+    expect(await sessions.action({ id: OTHER, url: WATCH })).toEqual(Ok(undefined));
+    expect(await sessions.current()).toEqual(Ok({ tabId: CAPTURED, startedAt: 1_000 }));
+    expect(await sessions.action({ id: CAPTURED, url: WATCH })).toEqual(Ok(undefined));
+    expect(await sessions.current()).toEqual(Ok(undefined));
+    expect(h.statuses(CAPTURED)).toEqual([{ state: 'stopped' }]);
+    // Even when its URL is hidden, the captured tab is known by its id.
+    expect(await sessions.start(CAPTURED)).toEqual(Ok(undefined));
+    expect(await sessions.action({ id: CAPTURED, url: undefined })).toEqual(Ok(undefined));
+    expect(await sessions.current()).toEqual(Ok(undefined));
+  });
+
+  it('tells the watch page why the audio did not start from the icon', async () => {
+    const h = setup({ audio: false });
+    await h.pages.report(CAPTURED, PAGE);
+    const sessions = kept(h.make());
+    expect(await sessions.action({ id: CAPTURED, url: WATCH })).toMatchObject({ ok: false });
+    expect(h.statuses(CAPTURED)).toEqual([{ state: 'error', message: AUDIO_UNSUPPORTED_MESSAGE }]);
+  });
+});

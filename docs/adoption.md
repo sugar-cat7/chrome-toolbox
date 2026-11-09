@@ -72,7 +72,7 @@ Spike, 2026-11-09: a headed Chrome for Testing 156.0.8078.4 (Playwright 1.64, bu
 - A side panel button on its own was also refused. The test pressed the panel page's button in a tab, with no action run, to stand in for a panel opened from Chrome's side panel menu.
 - The toolbar action with `openPanelOnActionClick: false` fired `action.onClicked` and invoked the tab. The service worker got an id then, and again later without any gesture. When the `onClicked` handler opened the panel itself (`sidePanel.open({ tabId })`), the panel's button got an id too.
 - The shortcut was not verified. Playwright's key events (CDP) for Alt+Shift+S, registered as ⌥⇧S, never reached Chrome's command handling on macOS, so `commands.onCommand` did not fire. The [activeTab guide](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab) lists "Executing a keyboard shortcut from the commands API" as an invocation (read 2026-11-09). The [tabCapture reference](https://developer.chrome.com/docs/extensions/reference/api/tabCapture) names only the action ("after the user invokes an extension, such as by clicking the extension's action button") and says an id "expires after a few seconds if it is not used".
-- For Task 14: as long as the action opens the panel through `openPanelOnActionClick`, no panel button can start a capture. Two ways remain: handle `action.onClicked` and open the panel with `sidePanel.open` in that handler, which invokes the tab, or point the viewer to Alt+Shift+S.
+- For Task 14: as long as the action opens the panel through `openPanelOnActionClick`, no panel button can start a capture. Two ways remain: handle `action.onClicked` and open the panel with `sidePanel.open` in that handler, which invokes the tab, or point the viewer to Alt+Shift+S. The user chose the first, with the icon itself as the start (S46, below).
 
 (b) Getting an id again: after a capture stopped, the service worker took a new id for the same tab with no new action and captured again. The invocation outlived `history.pushState` and a same-origin reload; a navigation to another site revoked it. As decided (S8), the capture still stays open while away or paused; this is recorded only.
 
@@ -109,6 +109,11 @@ Decisions:
 - The service worker calls `getMediaStreamId` in its callback form and reads `runtime.lastError.message`: the repository's Result rules allow no rejection handling, and `capture` drops the message that tells `capture_not_invoked` from `capture_failed`.
 - A captured tab that is not the active tab of its window is sent to the offscreen document as `away` (`hidden`), from `tabs.onActivated` and `tabs.get(tabId).active`, because its page stays visible.
 - `tabs.onUpdated` and `tabs.onActivated` are listened to only while a tab is captured. They are also added when the service worker starts, so the event that woke it is not lost, and removed once `storage.session` shows no capture.
+- Starting from the toolbar icon (user decision 2026-11-09, S46):
+  - The service worker sets `openPanelOnActionClick: false` and handles `action.onClicked`. The handler calls `sidePanel.open({ tabId })` first, in the click's own turn before anything is awaited, so Chrome still counts the click as the viewer's gesture.
+  - The click starts the capture only on a YouTube watch page whose caption path would show nothing. That means the page the tab last reported (`subs/page`) is the video of the tab's URL, and the source would not be its caption track: a live stream, no tracks, or audio chosen as the source.
+  - A second click on the captured tab stops it. Anywhere else, including a tab whose page or URL is unknown, the click only opens the panel.
+  - Alt+Shift+S starts and stops as before. The side panel only stops a capture and says how to start one.
 
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 

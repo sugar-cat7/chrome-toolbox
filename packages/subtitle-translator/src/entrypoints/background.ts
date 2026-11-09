@@ -1,14 +1,9 @@
-import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { launch } from '@chrome-toolbox/contracts';
 import { startBackground } from '../runtime.ts';
 
+// Every listener is registered in this first turn, so the event that woke the worker reaches it.
+// The toolbar icon opens the side panel from its click handler (runtime.ts, S46); there is no
+// popup.
 export default defineBackground(() => {
   startBackground();
-  // The toolbar action opens the side panel; there is no popup. A failure leaves
-  // the panel reachable from Chrome's side panel menu, so it needs no recovery.
-  launch(
-    () => browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }),
-    () => undefined,
-  );
 });
