@@ -211,7 +211,7 @@ Each extension keeps its own settings in `chrome.storage.local` (key `settings`,
 
 The subtitle extension picks its translation model with `translator` in its own settings (key `subtitles`): `gemma` (the default) uses `models.translate`, and `plamo` sends to the preset section `plamo-3-translate-2b`.
 
-The side panel edits the URL. The comment extension's "設定" tab also edits the model names sent to the router ("翻訳モデル" for `models.translate`, "Clef モデル" for `models.clef`); the other extensions use the defaults, so keep the preset section names as above. "接続を確認" calls `GET /health` and `GET /v1/models` and shows the model names.
+The side panel edits the URL. The comment extension's "設定" tab also edits the model names sent to the router ("翻訳モデル" for `models.translate`, "Clef モデル" for `models.clef`), and so does the subtitle extension's side panel ("翻訳モデル（Gemma）" for `models.translate`, "音声認識モデル" for `models.asr`); the other extensions use the defaults, so keep the preset section names as above. "接続を確認" calls `GET /health` and `GET /v1/models` and shows the model names.
 
 A failed Clef request never fails a comment batch: when Clef is unreachable, times out or answers an HTTP error for that request (such as a 503 while the router loads the model), those comments keep the translation model's category and "設定" shows the error. When Clef is not there (HTTP 501 for a model that is not a decision model, 404, or the router's 400 "model '<name>' not found"), the comment extension classifies abuse with the translation model from then on, until its settings change.
 
@@ -219,7 +219,7 @@ A server on another machine: start it with `--host` set to an address in your LA
 
 ## PLaMo 3 Translate
 
-The subtitle extension can translate with PLaMo: choose it in its side panel (Gemma is the default). When the router does not list `plamo-3-translate-2b`, a PLaMo request gets an HTTP error, or the line is in a language PLaMo does not know (Portuguese), that line is translated with Gemma and the side panel says so. While PLaMo is chosen, the side panel shows "Built with PLaMo" and a link to the PLaMo Community License.
+The subtitle extension can translate with PLaMo: choose it in its side panel (Gemma is the default). When the router does not list `plamo-3-translate-2b`, a PLaMo request gets an HTTP error, or the line is in a language PLaMo does not know (Portuguese), that line is translated with Gemma and the side panel says so, one line per reason with the latest first (such as "PLaMo がエラーを返した 3 行を Gemma で訳しました"). While PLaMo is chosen, the side panel shows "Built with PLaMo" and a link to the PLaMo Community License.
 
 Measured on 2026-11-06 on this server (llama.cpp 620d222 runs it; the minimum is [b11455](https://github.com/ggml-org/llama.cpp/releases/tag/b11455), [#30045](https://github.com/ggml-org/llama.cpp/pull/30045)), with 40 made-up spoken sentences in English, Korean, Spanish, Indonesian and Chinese, and 40 English chat lines:
 
