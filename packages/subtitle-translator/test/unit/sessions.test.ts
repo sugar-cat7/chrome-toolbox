@@ -91,6 +91,7 @@ function setup({
   const toOffscreen: Message[] = [];
   const toTabs: { tabId: number; frameId: number; message: Message }[] = [];
   const state = {
+    audio,
     open: false,
     active: CAPTURED,
     urls: new Map<number, string | undefined>([
@@ -104,7 +105,7 @@ function setup({
     calls.push(`props:${url.searchParams.get('model')}`);
     return Response.json({
       total_slots: 3,
-      ...(audio === undefined ? {} : { modalities: { vision: false, audio } }),
+      ...(state.audio === undefined ? {} : { modalities: { vision: false, audio: state.audio } }),
     });
   });
   const tabs = {
@@ -283,6 +284,37 @@ describe('starting a capture', () => {
     expect(h.calls.slice(-2)).toEqual(['audio/start', 'close']);
     expect(await stored()).toBeUndefined();
     expect(await sessions.current()).toEqual(Ok(undefined));
+  });
+
+  it('stops the capture of another tab only right before taking the new stream id', async () => {
+    const h = setup();
+    const sessions = kept(await capturing(h));
+    h.calls.length = 0;
+    expect(await sessions.start(OTHER)).toEqual(Ok(undefined));
+    expect(h.calls).toEqual([
+      'props:gemma4-e4b',
+      'audio/stop',
+      'close',
+      `streamId:${OTHER}`,
+      'create',
+      'audio/start',
+      'audio/front',
+    ]);
+  });
+
+  it('keeps the capture of a tab when another tab cannot start', async () => {
+    const h = setup();
+    const sessions = kept(await capturing(h));
+    h.state.audio = false;
+    expect(await sessions.start(OTHER)).toMatchObject({
+      ok: false,
+      error: { internalCode: 'audio_unsupported' },
+    });
+    expect(await sessions.current()).toEqual(Ok({ tabId: CAPTURED, startedAt: 1_000 }));
+    expect(h.count('audio/stop')).toBe(0);
+    expect(h.count('close')).toBe(0);
+    expect(await stored()).toEqual({ tabId: CAPTURED, startedAt: 1_000 });
+    expect(h.statuses(CAPTURED)).toEqual([]);
   });
 
   it('starts the capture with the streamer glossary and the saved subtitle settings', async () => {

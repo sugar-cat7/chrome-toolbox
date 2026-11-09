@@ -125,9 +125,21 @@ export function startOffscreen({
     if (at.idle !== undefined) return;
     at.idle = timers.set(() => {
       at.idle = undefined;
-      if (session === at)
-        notify(() => subtitleProtocol.send(deliver, 'audio/idle', { tabId: at.tabId }));
+      if (session === at) reportIdle(at);
     }, IDLE_RELEASE_MS);
+  }
+  /**
+   * Asks the service worker to release the capture. A report it did not take is made again after
+   * another `IDLE_RELEASE_MS`, unless the capture became active or ended meanwhile.
+   */
+  function reportIdle(at: Session): void {
+    const again = (): void => {
+      if (session === at && at.front.state !== 'active') armIdle(at);
+    };
+    launch(async () => {
+      const reported = await subtitleProtocol.send(deliver, 'audio/idle', { tabId: at.tabId });
+      if (!reported.ok) again();
+    }, again);
   }
   function clearIdle(at: Session): void {
     if (at.idle !== undefined) timers.clear(at.idle);

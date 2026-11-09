@@ -72,7 +72,13 @@ const isSent = (message: unknown): message is Sent =>
 function setup({
   started,
   fetch = vi.fn<Fetch>(async () => new Response('', { status: 503 })),
-}: { started?: Result<never>; fetch?: Fetch } = {}) {
+  answer = async () => Ok({}),
+}: {
+  started?: Result<never>;
+  fetch?: Fetch;
+  /** The background's answer to each message the document sends. */
+  answer?: (message: Sent) => Promise<unknown>;
+} = {}) {
   const calls: string[] = [];
   const sent: Sent[] = [];
   let listener: Listener | undefined;
@@ -104,8 +110,9 @@ function setup({
         },
       },
       sendMessage: async (message) => {
-        if (isSent(message)) sent.push(message);
-        return Ok({});
+        if (!isSent(message)) return Ok({});
+        sent.push(message);
+        return answer(message);
       },
     },
     startCapture: async (deps) => {
@@ -268,6 +275,48 @@ describe('offscreen document', () => {
     await vi.advanceTimersByTimeAsync(1_200_000);
     expect(h.toBackground('audio/idle')).toHaveLength(1);
   });
+
+  it('reports idle again ten minutes later when the background did not take the report', async () => {
+    vi.useFakeTimers();
+    const refused = async (message: Sent) =>
+      message.type === 'audio/idle' ? Err(failure('ipc_failed')) : Ok({});
+    const h = setup({ answer: refused });
+    await h.deliver(START);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(h.toBackground('audio/idle')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(h.toBackground('audio/idle')).toHaveLength(2);
+    // Active again: no report and no timer until it stops being active.
+    await h.deliver(front('active'));
+    await vi.advanceTimersByTimeAsync(1_200_000);
+    expect(h.toBackground('audio/idle')).toHaveLength(2);
+  });
+
+  it.each([
+    { name: 'the capture became active', meanwhile: front('active') },
+    { name: 'the capture stopped', meanwhile: to('audio/stop') },
+  ])(
+    'does not report idle again when $name while the report was refused',
+    async ({ meanwhile }) => {
+      vi.useFakeTimers();
+      let refuse: (() => void) | undefined;
+      const h = setup({
+        answer: (message) =>
+          message.type === 'audio/idle'
+            ? new Promise((resolve) => {
+                refuse = () => resolve(Err(failure('ipc_failed')));
+              })
+            : Promise.resolve(Ok({})),
+      });
+      await h.deliver(START);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(h.toBackground('audio/idle')).toHaveLength(1);
+      await h.deliver(meanwhile);
+      refuse?.();
+      await vi.advanceTimersByTimeAsync(1_200_000);
+      expect(h.toBackground('audio/idle')).toHaveLength(1);
+    },
+  );
 
   it('stops the capture when the server loses the audio projector mid-capture', async () => {
     const h = setup();

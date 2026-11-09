@@ -314,10 +314,6 @@ export function createSessions({
 
   async function startNow(tabId: number, streamId: string | undefined): Promise<Result<void>> {
     if (captured?.tabId === tabId) return Ok(undefined);
-    if (captured !== undefined) {
-      const replaced = await stopNow(captured.tabId, 'replaced');
-      if (!replaced.ok) return replaced;
-    }
     const loaded = await settings.load();
     if (!loaded.ok) return loaded;
     const { llamaBaseUrl: baseUrl, models } = loaded.value;
@@ -331,6 +327,11 @@ export function createSessions({
     if (!page.ok) return page;
     const config = await liveConfig(page.value);
     if (!config.ok) return config;
+    // Another tab's capture ends only now: a start refused above leaves it running.
+    if (captured !== undefined) {
+      const replaced = await stopNow(captured.tabId, 'replaced');
+      if (!replaced.ok) return replaced;
+    }
     const id = streamId === undefined ? await mediaStreamId(tabId) : Ok(streamId);
     if (!id.ok) return id;
     const open = await offscreen.has();
