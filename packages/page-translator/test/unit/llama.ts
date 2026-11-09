@@ -60,10 +60,13 @@ export function llama({
   state: initial = {},
   respond,
   door,
+  propsDoor,
 }: {
   state?: Partial<ServerState>;
   respond?: (chat: StubChat) => StubReply | undefined;
   door?: (chat: StubChat) => Promise<void>;
+  /** Holds every `/props` answer until it resolves (the fetch's signal still aborts it). */
+  propsDoor?: () => Promise<void>;
 } = {}): Server {
   const state: ServerState = { slots: {}, plamo: true, models: 'up', ...initial };
   const calls: Call[] = [];
@@ -78,6 +81,7 @@ export function llama({
     const model = chat?.model ?? url.searchParams.get('model') ?? undefined;
     calls.push({ path: url.pathname, model, chat, signal: init?.signal ?? undefined });
     if (url.pathname === '/props') {
+      await Promise.race([propsDoor?.() ?? Promise.resolve(), aborted(init?.signal ?? undefined)]);
       const total = state.slots[model ?? ''] ?? 3;
       return total === 'down'
         ? Response.json({ error: { code: 503 } }, { status: 503 })

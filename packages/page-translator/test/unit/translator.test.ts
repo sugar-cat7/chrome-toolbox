@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { Ok } from '@chrome-toolbox/contracts';
+import { Err, failure, Ok } from '@chrome-toolbox/contracts';
 import {
   defaultSettings,
   PAGE_PLAMO_MAX_TOKENS,
@@ -66,6 +66,12 @@ const rich: PageToken[] = [
   { t: 'space' },
   { t: 'text', text: 'to dodge.' },
 ];
+/** A link that never closes: no page unit (`pageTokensValid`). */
+const unclosed: PageToken[] = [
+  { t: 'open', n: 1 },
+  { t: 'text', text: 'Final Boss Guide' },
+];
+const cancelled = { ok: false, error: { internalCode: 'operation_cancelled' } };
 const RICH_PIECES = [
   `${STUB_PAGE_PREFIX}Roll`,
   `${STUB_PAGE_PREFIX}backward`,
@@ -188,6 +194,43 @@ describe('Gemma', () => {
     expect(server.chats(GEMMA).map((chat) => chat.id_slot)).toEqual([1]);
   });
 
+  it('asks a model for its slots once while several requests wait for the answer', async () => {
+    const props = gate();
+    const server = llama({ propsDoor: () => props.promise });
+    const translator = await translatorFor(server);
+    const first = translator.translate(1, request(['Final Boss Guide']));
+    const second = translator.translate(2, request(['Roll backward.']));
+    const third = translator.translate(3, request(['Phase two.']));
+    await vi.waitFor(() => expect(server.asked()).toEqual([`/props?${GEMMA}`]));
+    // A cancelled request stops waiting at once; the shared question goes on for the others.
+    translator.cancel(3);
+    expect(await third).toMatchObject(cancelled);
+    expect(server.calls[0]?.signal?.aborted).toBe(false);
+    props.open();
+    expect(await first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: true });
+    expect(server.asked()).toEqual([`/props?${GEMMA}`]);
+    expect(server.chats(GEMMA).map((chat) => chat.id_slot)).toEqual([2, 2]);
+  });
+
+  it('asks again after a shared slot question failed', async () => {
+    const server = llama({ state: { slots: { [GEMMA]: 'down' } } });
+    const translator = await translatorFor(server);
+    const failed = { ok: false, error: { internalCode: 'network_failed' } };
+    expect(
+      await Promise.all([
+        translator.translate(1, request(['Final Boss Guide'])),
+        translator.translate(2, request(['Roll backward.'])),
+      ]),
+    ).toMatchObject([failed, failed]);
+    expect(server.asked()).toEqual([`/props?${GEMMA}`]);
+    server.state.slots[GEMMA] = 3;
+    expect(await translator.translate(1, request(['Final Boss Guide']))).toMatchObject({
+      ok: true,
+    });
+    expect(server.asked()).toEqual([`/props?${GEMMA}`, `/props?${GEMMA}`]);
+  });
+
   it('runs one Gemma batch at a time, across tabs and purposes', async () => {
     const server = llama({ door: pause });
     const translator = await translatorFor(server);
@@ -258,10 +301,6 @@ describe('Gemma', () => {
   it('fails only the units with invalid tokens and sends the rest (P21)', async () => {
     const server = llama();
     const translator = await translatorFor(server);
-    const unclosed: PageToken[] = [
-      { t: 'open', n: 1 },
-      { t: 'text', text: 'Final Boss Guide' },
-    ];
     const adjacent: PageToken[] = [
       { t: 'text', text: 'Final' },
       { t: 'text', text: 'Boss' },
@@ -355,7 +394,8 @@ describe('PLaMo', () => {
           { id: 1, pieces: gemmaPieces('Final Boss Guide') },
           { id: 2, pieces: gemmaPieces('Roll backward.') },
         ],
-        translator: 'plamo',
+        // PLaMo translated nothing.
+        translator: 'gemma',
       }),
     );
     expect(server.chats(PLAMO)).toEqual([]);
@@ -370,6 +410,30 @@ describe('PLaMo', () => {
       `/props?${PLAMO}`,
     ]);
     expect(server.chats(PLAMO).map(lineOf)).toEqual(['Final Boss Guide']);
+  });
+
+  it.each([
+    { name: 'every unit came from PLaMo', units: ['Final Boss Guide'], translator: 'plamo' },
+    {
+      name: 'PLaMo and Gemma shared the units',
+      units: ['Final Boss Guide', rich],
+      translator: 'plamo',
+    },
+    { name: 'every unit was rich', units: [rich], translator: 'gemma' },
+    { name: 'PLaMo refused every unit', units: ['Refused line.'], translator: 'gemma' },
+    { name: 'no unit was valid', units: [unclosed], translator: 'gemma' },
+  ])('reports PLaMo only when it translated a unit: $name', async ({ units, translator: by }) => {
+    const server = llama({
+      respond: (chat) =>
+        chat.model === PLAMO && lineOf(chat) === 'Refused line.'
+          ? { status: 503, body: { error: { code: 503 } } }
+          : undefined,
+    });
+    const translator = await translatorFor(server, { translator: 'plamo' });
+    expect(await translator.translate(1, request(units))).toMatchObject({
+      ok: true,
+      value: { translator: by },
+    });
   });
 
   it('gives PLaMo the page title and the two units before it as context', async () => {
@@ -544,7 +608,6 @@ describe('cancel', () => {
     const held = gate();
     const server = llama({ door: () => held.promise });
     const translator = await translatorFor(server);
-    const cancelled = { ok: false, error: { internalCode: 'operation_cancelled' } };
 
     const page = translator.translate(1, request(['Final Boss Guide']));
     await vi.waitFor(() => expect(server.chats(GEMMA)).toHaveLength(1));
@@ -618,7 +681,6 @@ describe('cancel', () => {
     const running = translator.translate(1, request(['Final Boss Guide']));
     await vi.waitFor(() => expect(server.chats(GEMMA)).toHaveLength(1));
     translator.dispose();
-    const cancelled = { ok: false, error: { internalCode: 'operation_cancelled' } };
     expect(await running).toMatchObject(cancelled);
     expect(await translator.translate(1, request(['Roll backward.']))).toMatchObject(cancelled);
     held.open();
@@ -650,14 +712,33 @@ describe('settings', () => {
     expect(server.chats(PLAMO).map(lineOf)).toEqual(['Final Boss Guide']);
   });
 
-  it('fails a request when the page settings cannot be read', async () => {
+  it('uses the default page settings when the stored record is not one', async () => {
     const server = llama();
-    const translator = await translatorFor(server);
-    // The settings are read by the first request.
+    const translator = await translatorFor(server, { translator: 'plamo' });
+    // The settings are read by the first request: a corrupt record does not lock translation.
     await fakeBrowser.storage.local.set({ page: { ...defaultPageSettings, translator: 'other' } });
+    expect(await translator.translate(1, request(['Final Boss Guide']))).toEqual(
+      Ok({ results: [{ id: 1, pieces: gemmaPieces('Final Boss Guide') }], translator: 'gemma' }),
+    );
+    // Gemma is the default: no model list, no PLaMo.
+    expect(server.asked()).toEqual([`/props?${GEMMA}`]);
+    expect(server.chats(PLAMO)).toEqual([]);
+  });
+
+  it('fails a request when the page settings cannot be read from storage', async () => {
+    const server = llama();
+    const translator = createPageTranslator({
+      fetch: server.fetch,
+      settings: settingsStore(fakeBrowser.storage.local),
+      pageSettings: {
+        load: () => Promise.resolve(Err(failure('storage_failed'))),
+        save: (settings) => Promise.resolve(Ok(settings)),
+      },
+    });
+    created.push(translator);
     expect(await translator.translate(1, request(['Final Boss Guide']))).toMatchObject({
       ok: false,
-      error: { internalCode: 'response_invalid' },
+      error: { internalCode: 'storage_failed' },
     });
     expect(server.calls).toEqual([]);
   });

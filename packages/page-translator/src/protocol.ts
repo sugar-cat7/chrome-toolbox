@@ -42,8 +42,9 @@ export const translateRequestSchema = z.strictObject({
 export type TranslateRequest = z.infer<typeof translateRequestSchema>;
 /**
  * The background's answer: the translation of each unit's text tokens (`readPagePieces`), with
- * no `pieces` for a unit that could not be read back, which fails alone (P21); the model that
- * translated, and `plamo_missing` when PLaMo was chosen but the server has none.
+ * no `pieces` for a unit that could not be read back, which fails alone (P21); who translated
+ * (`plamo` when PLaMo translated a unit of the request, else `gemma`), and `plamo_missing` when
+ * PLaMo was chosen but the server has none.
  */
 export const translateReplySchema = z.strictObject({
   results: z.array(z.strictObject({ id: z.int(), pieces: z.optional(z.array(z.string())) })),

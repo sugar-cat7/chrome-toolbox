@@ -19,7 +19,7 @@ import {
   type SettingsStore,
 } from '@chrome-toolbox/extension-core';
 import type { TranslateReply, TranslateRequest } from './protocol.ts';
-import type { PageSettings, PageSettingsStore } from './settings.ts';
+import { defaultPageSettings, type PageSettings, type PageSettingsStore } from './settings.ts';
 
 /** A router's cold model load took 13 s live; a batch of 6 units writes a few hundred tokens. */
 export const PAGE_TIMEOUT_MS = 30_000;
@@ -73,8 +73,8 @@ export type PageTranslator = {
 
 /**
  * What the settings say and what the server told about them, kept until `reload`: whether
- * `/v1/models` lists PLaMo (once it answered) and each model's slots (once `/props` gave 2 or
- * more; a failed or smaller answer is asked again by the next request).
+ * `/v1/models` lists PLaMo (once it answered) and each model's slots (`slotsOf`: the question
+ * while it runs, then its answer of 2 or more slots).
  */
 type Setup = {
   model: string;
@@ -82,12 +82,27 @@ type Setup = {
   gemma: LlamaClient;
   plamo: LlamaClient;
   listed: boolean | undefined;
-  slots: Map<string, SlotPlan>;
+  slots: Map<string, Promise<Result<SlotPlan>>>;
 };
 /** A unit of the request: where it stands in it, its tokens and its text as sent. */
 type Unit = Readonly<{ at: number; tokens: readonly PageToken[]; line: string }>;
 
 const cancelled = (): Result<never> => Err(failure('operation_cancelled'));
+/** `pending`'s result, or `operation_cancelled` as soon as `signal` aborts. */
+async function unlessAborted<T>(
+  pending: Promise<Result<T>>,
+  signal: AbortSignal,
+): Promise<Result<T>> {
+  if (signal.aborted) return cancelled();
+  let stop = (): void => undefined;
+  const aborted = new Promise<Result<T>>((resolve) => {
+    stop = () => resolve(cancelled());
+    signal.addEventListener('abort', stop, { once: true });
+  });
+  const result = await Promise.race([pending, aborted]);
+  signal.removeEventListener('abort', stop);
+  return result;
+}
 const isPlain = (tokens: readonly PageToken[]): boolean =>
   tokens.every((token) => token.t === 'text' || token.t === 'space');
 
@@ -114,16 +129,20 @@ export function createPageTranslator({
   const keyOf = (tabId: number, purpose: Purpose): string => `${tabId}:${purpose}`;
   let loading: Promise<Result<Setup>> | undefined;
   let disposed = false;
+  /** Aborts the questions requests share (`slotsOf`) once the translator is disposed. */
+  const probe = new AbortController();
 
   async function load(): Promise<Result<Setup>> {
     const shared = await settings.load();
     if (!shared.ok) return shared;
     const page = await pageSettings.load();
-    if (!page.ok) return page;
+    // A stored record that is no page settings does not lock translation: the defaults apply
+    // until the options page saves valid ones. Storage that cannot be read fails the request.
+    if (!page.ok && page.error.internalCode !== 'response_invalid') return page;
     const { llamaBaseUrl: baseUrl, models } = shared.value;
     return Ok({
       model: models.translate,
-      translator: page.value.translator,
+      translator: page.ok ? page.value.translator : defaultPageSettings.translator,
       gemma: createLlamaClient({ baseUrl, fetch, queue: gemmaQueue, timeoutMs }),
       plamo: createLlamaClient({ baseUrl, fetch, queue: plamoQueue, timeoutMs }),
       listed: undefined,
@@ -139,20 +158,26 @@ export function createPageTranslator({
     return loaded;
   }
 
-  /** The slots of `model`, asked once; nothing is sent to a model without its own slots. */
-  async function slotsOf(
-    current: Setup,
-    model: string,
-    signal: AbortSignal,
-  ): Promise<Result<SlotPlan>> {
-    const known = current.slots.get(model);
-    if (known !== undefined) return Ok(known);
-    const props = await current.gemma.props({ model, signal });
+  /**
+   * The slots of `model`; nothing is sent to a model without its own slots. One `/props` question
+   * per model serves every request waiting for it, and its answer is kept; a failed or too small
+   * answer is forgotten, so the next request asks again. The question is no request's to abort: a
+   * cancelled request stops waiting while the others keep the answer.
+   */
+  function slotsOf(current: Setup, model: string, signal: AbortSignal): Promise<Result<SlotPlan>> {
+    let asked = current.slots.get(model);
+    if (asked === undefined) {
+      asked = askSlots(current, model);
+      current.slots.set(model, asked);
+    }
+    return unlessAborted(asked, signal);
+  }
+  async function askSlots(current: Setup, model: string): Promise<Result<SlotPlan>> {
+    const props = await current.gemma.props({ model, signal: probe.signal });
+    const plan = props.ok ? slotPlan(props.value.totalSlots) : undefined;
+    if (plan === undefined) current.slots.delete(model);
     if (!props.ok) return props;
-    const plan = slotPlan(props.value.totalSlots);
-    if (plan === undefined) return Err(failure('model_refused'));
-    current.slots.set(model, plan);
-    return Ok(plan);
+    return plan === undefined ? Err(failure('model_refused')) : Ok(plan);
   }
 
   /**
@@ -288,10 +313,11 @@ export function createPageTranslator({
       if (!listed.ok) return listed;
       missing = !listed.value;
       if (listed.value) {
-        translator = 'plamo';
         const rest = await viaPlamo(current, request, left, pieces, signal);
         if (!rest.ok) return rest;
         left = rest.value;
+        // The reply names PLaMo only when it translated a unit (`pieces` holds PLaMo's so far).
+        if (pieces.size > 0) translator = 'plamo';
       }
     }
     if (left.length > 0) {
@@ -333,6 +359,7 @@ export function createPageTranslator({
       disposed = true;
       loading = undefined;
       for (const controller of running.values()) controller.abort();
+      probe.abort();
       running.clear();
       gemmaQueue.clear();
       plamoQueue.clear();
