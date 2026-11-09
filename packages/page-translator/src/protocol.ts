@@ -82,6 +82,12 @@ export type Progress = z.infer<typeof progressSchema>;
 
 /** Longest selected text a `selection` command carries (spec §8); a longer one is cut. */
 export const MAX_SELECTION = 2000;
+/** `text` within MAX_SELECTION UTF-16 units; a character the limit would split is left out. */
+export function cutSelection(text: string): string {
+  if (text.length <= MAX_SELECTION) return text;
+  const last = text.charCodeAt(MAX_SELECTION - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? MAX_SELECTION - 1 : MAX_SELECTION);
+}
 
 /**
  * What the background asks the page script in a tab's top frame: answer that it runs (`ping`),

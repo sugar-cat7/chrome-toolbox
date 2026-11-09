@@ -1,6 +1,7 @@
 // Helpers for the page translator's browser tests: made-up pages served at made-up hosts, the
 // toolbar button that lets the extension into a tab, and a fingerprint of what a page shows.
 import type { BrowserContext, Page, Worker } from '@playwright/test';
+import { defaultSettings } from '@chrome-toolbox/extension-core';
 import { triggerAction } from '@chrome-toolbox/extension-core/testing';
 import { PAGE_SCRIPT } from '../../src/control.ts';
 
@@ -16,7 +17,23 @@ export type WorkerChrome = {
       files: string[];
     }): Promise<unknown>;
   };
+  storage: { local: { set(items: Record<string, unknown>): Promise<void> } };
 };
+
+/** A llama.cpp address where nothing listens (the discard port). */
+export const NO_SERVER = 'http://127.0.0.1:9';
+
+/**
+ * Points the extension at the llama.cpp server at `origin`, as the options page does. A page
+ * script told to translate asks the background, which would otherwise reach whatever listens on
+ * the default address (a real server on a developer's machine).
+ */
+export const useServer = (serviceWorker: Worker, origin: string): Promise<void> =>
+  serviceWorker.evaluate(
+    (settings) =>
+      (globalThis as unknown as { chrome: WorkerChrome }).chrome.storage.local.set({ settings }),
+    { ...defaultSettings, llamaBaseUrl: origin },
+  );
 
 /**
  * Answers requests for `url` (origin and path; any query) with `html`, as the made-up site

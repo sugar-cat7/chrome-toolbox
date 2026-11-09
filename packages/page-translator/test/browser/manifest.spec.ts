@@ -5,10 +5,12 @@ import { expect, test, triggerAction } from '@chrome-toolbox/extension-core/test
 import { PAGE_SCRIPT } from '../../src/control.ts';
 import {
   fingerprint,
+  NO_SERVER,
   ping,
   servePage,
   startTranslation,
   tabIdOf,
+  useServer,
   type WorkerChrome,
 } from './page.ts';
 
@@ -69,6 +71,10 @@ test('the manifest asks for no site access at install', async () => {
 
 test.describe('in a browser', () => {
   test.use({ realVisibility: true });
+  // These tests are about getting into pages: what a page script asks to translate fails.
+  test.beforeEach(async ({ serviceWorker }) => {
+    await useServer(serviceWorker, NO_SERVER);
+  });
 
   test('the toolbar action injects the page script, which answers ping', async ({
     context,
@@ -88,8 +94,8 @@ test.describe('in a browser', () => {
     await startTranslation(context, page);
     await startTranslation(context, page);
     expect(await ping(serviceWorker, await tabIdOf(serviceWorker, page))).toEqual({ ready: true });
-    // The page script of this task only answers: the page is as it was, and it told the page
-    // nothing (no window message naming the extension or when it started).
+    // No server answers here: the page is as it was, and the page script told the page nothing
+    // (no window message naming the extension or when it started).
     expect(await fingerprint(page)).toBe(before);
     expect(await page.evaluate(() => Reflect.get(window, 'heard'))).toEqual([]);
   });

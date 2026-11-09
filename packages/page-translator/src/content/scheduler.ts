@@ -98,6 +98,11 @@ function cutTitle(title: string): string {
   return cut;
 }
 
+/** What a request tells the model of `doc`: its title (`TITLE_LENGTH`) and its site. */
+export function pageOf(doc: Document): TranslateRequest['page'] {
+  return { title: cutTitle(doc.title), site: doc.defaultView?.location.hostname ?? '' };
+}
+
 /** Where a paragraph's nodes are children: its block, or the shadow root whose host is its block. */
 type Container = Element | ShadowRoot;
 
@@ -578,11 +583,6 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     for (const [key, unit] of rest) if (!waiting.has(key)) waiting.set(key, unit);
   }
 
-  const pageOf = (): TranslateRequest['page'] => ({
-    title: cutTitle(doc.title),
-    site: view?.location.hostname ?? '',
-  });
-
   /** Sends the next batch when none is out, the page is visible and no retry is waited for. */
   function pump(): void {
     if (!running || !begun || !visible() || flight !== undefined || retryTimer !== undefined)
@@ -607,7 +607,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     const request: TranslateRequest = {
       purpose: 'page',
       units: units.map((unit, i) => ({ id: i + 1, tokens: [...unit.tokens] })),
-      page: pageOf(),
+      page: pageOf(doc),
     };
     launch(
       async () => {

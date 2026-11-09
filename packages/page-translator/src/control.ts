@@ -1,7 +1,7 @@
 import { z } from 'zod/mini';
 import { capture, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import type { StorageArea } from '@chrome-toolbox/extension-core';
-import { MAX_SELECTION, type PageCommand } from './protocol.ts';
+import { cutSelection, type PageCommand } from './protocol.ts';
 import {
   defaultPageSettings,
   isNever,
@@ -127,12 +127,6 @@ const alwaysScript = (matches: string[]): AlwaysScript => ({
 });
 const sameSites = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((pattern) => right.includes(pattern));
-/** `text` within MAX_SELECTION UTF-16 units; a character the limit would split is left out. */
-function cutSelection(text: string): string {
-  if (text.length <= MAX_SELECTION) return text;
-  const last = text.charCodeAt(MAX_SELECTION - 1);
-  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? MAX_SELECTION - 1 : MAX_SELECTION);
-}
 
 /**
  * `now` is the wall clock (ms since the epoch): a request outlives the service worker that took

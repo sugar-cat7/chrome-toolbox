@@ -186,7 +186,7 @@ function upOf(node: Node): Node | null {
 }
 
 /** Whether a paragraph of `block` may show a box: not in or under a button, summary or link. */
-function takesBox(block: Element): boolean {
+export function takesBox(block: Element): boolean {
   for (let at: Node | null = block; at !== null; at = upOf(at))
     if (isElement(at) && NO_BOX_TAGS.has(at.localName)) return false;
   return true;

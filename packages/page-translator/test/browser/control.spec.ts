@@ -2,7 +2,7 @@ import type { Page, Worker } from '@playwright/test';
 import { expect, test } from '@chrome-toolbox/extension-core/testing';
 import { ALWAYS_SCRIPT_ID } from '../../src/control.ts';
 import { defaultPageSettings, type PageSettings } from '../../src/settings.ts';
-import { ping, servePage, tabIdOf } from './page.ts';
+import { NO_SERVER, ping, servePage, tabIdOf, useServer } from './page.ts';
 
 // The background's control in Chrome: the always registration and the never list. Chrome's
 // permission prompt cannot be answered from a test, so the always site is 127.0.0.1, which the
@@ -56,6 +56,10 @@ async function popupOf(
 
 test.describe('in a browser', () => {
   test.use({ realVisibility: true });
+  // These tests are about getting into pages: what a page script asks to translate fails.
+  test.beforeEach(async ({ serviceWorker }) => {
+    await useServer(serviceWorker, NO_SERVER);
+  });
 
   test('an always site gets the page script on its next load until it is excluded', async ({
     context,

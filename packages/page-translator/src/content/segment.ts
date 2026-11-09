@@ -381,8 +381,11 @@ function cutLong(sentence: string): string[] {
   return parts;
 }
 
-/** `text` in pieces of whole sentences, each at most `PAGE_UNIT_CHARS` long. */
-function sentenceUnits(text: string): string[] {
+/**
+ * `text` in pieces of whole sentences, each at most `PAGE_UNIT_CHARS` long (a longer sentence is
+ * cut at a space): a long paragraph's units, and the selection's.
+ */
+export function sentenceUnits(text: string): string[] {
   const sentences: string[] = [];
   let start = 0;
   for (const match of text.matchAll(SENTENCE_END)) {
