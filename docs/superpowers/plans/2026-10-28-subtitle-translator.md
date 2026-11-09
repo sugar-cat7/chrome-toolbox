@@ -1751,15 +1751,17 @@ it('flush closes the open segment when it is long enough', () => {
     } as const;
     ```
 
-  - `LiveConfig = Readonly<{ display: DisplayMode; sourceLang: 'auto' | string; context: string; glossary: readonly GlossaryEntry[]; translator: SubtitleTranslator }>`
+  - `LiveConfig = Readonly<{ display: DisplayMode; sourceLang: SubtitleSettings['sourceLang']; context: string; glossary: readonly GlossaryEntry[]; translator: SubtitleTranslator }>`
+    - `sourceLang` は設定の型（`'auto'` か 12 言語）。`'auto' | string` は lint（`no-redundant-type-constituents`）に掛かる。
     - `glossary` は `toPromptGlossary` を通したもの。
     - `translator` はライブの処理では読まない。`audio/config` で offscreen に届き、Task 13 の `createLineTranslator` の `config` が読む。
-  - `createLivePipeline(deps: { asr: AsrClient; translate: (input: LineInput & { signal: AbortSignal }) => Promise<Result<string>>; config: () => LiveConfig; emit: (line: LiveLine) => void; now: () => number; timers: Timers }): LivePipeline`
+  - `createLivePipeline(deps: { asr: AsrClient; translate: (input: LineInput & { signal: AbortSignal }) => Promise<Result<string>>; config: () => LiveConfig; emit: (line: LiveLine) => void; now: () => number; timers: Timers; onFailure?: (error: AppError) => void }): LivePipeline`
+    - `onFailure`: ASR と翻訳の失敗ごとに、数えた後で呼ぶ（ライブの処理が自分で止めたものは呼ばない）。Task 13 は `audio_unsupported` で取得を止める。
   - `LivePipeline`:
     - `push(segment: Segment & { endedAt: number }): void`
       - `endedAt` は「受け取った時刻 − `trailingSilenceMs` − `carriedMs`」。長さで切った区切りは、切った後ろの音（最大 480 ms、Task 11 の `carriedMs`）を受け取り済みなので、それも引く（判断 S45）。
-    - `mode(kind: 'active' | 'pause' | 'away'): void`
-    - `reset(): void`: SPA の遷移のとき。言語、文脈、開いた文を捨てる。
+    - `mode(kind: 'active' | 'pause' | 'away'): void`（最初は `active`）
+    - `reset(): void`: SPA の遷移のとき。言語、文脈、開いた文を捨てる（開いた文は出さない）。待ちと実行中の仕事も、前の動画のものなので捨てる（`dropped`、翻訳は `skipped`）。
     - `stats(): LiveStats`
     - `dispose(): void`
   - `LiveStats = Readonly<{ segments: number; silent: number; dropped: number; expired: number; skipped: number; failed: number; lang?: string; sourceP50Ms?: number; jaP50Ms?: number; jaP95Ms?: number }>`
@@ -1771,16 +1773,21 @@ it('flush closes the open segment when it is long enough', () => {
   - 文:
     - 文末の記号（`.?!。？！`）で終わらない結果は、開いた文として持つ。次の区切りの結果を、開いた文につなげる。同じ `sentenceId` で原語を出し直し、翻訳も新しい版に置き換える。
     - 開いた文を閉じる条件: 文末の記号、次の区切りの `gapBeforeMs` が 700 以上、言語が変わった、6,000 ms または 200 文字に達した。閉じた文は `final: true` で出す。
-    - 文脈は、同じ言語の直前の閉じた 3 文（原語）。
+      - 間に失った区切り（`dropped`、`expired`、`failed`）があれば閉じる（言葉が抜けた所でつなげない）。無音の区切りは、その長さと前の間を次の区切りの間に足す。
+      - `pause` か `away` から `active` に戻ったら、次の区切りから新しい文にする。再開時に VAD を reset するので間が分からず、ミュートの間も配信は進むため。
+      - 6,000 ms は区切りの長さと間の和（音声の時間）。200 文字を超えるつなぎは、先に開いた文を閉じる。
+    - 文脈は、直前の閉じた 3 文（持つ文字起こしはこれだけ）のうち、同じ言語のもの（原語）。言語が混ざると 3 文より少ない。
+    - 訳は、訳した版の文にだけ付ける。古い版の訳は捨てる（1 本の列なので、訳の実行中に文が伸びることはない。その前提を守るための確認）。
   - 待ちと期限（枠 0 は 1 本の列。PLaMo で訳すときも同じ列にする。判断 S17）:
     - 次に流す仕事は、区切りの終わりがいちばん古いもの。同じなら翻訳が先。
     - ASR の待ちは 2 件まで。3 件目が来たら、いちばん古い待ちを捨てる（`dropped`）。
     - 翻訳の待ちは 2 文まで。同じ文の待ちは新しい版に置き換える。3 文目が来たら、いちばん古い文の待ちを捨てる（`skipped`。その文は原語のまま）。
-    - 列の先頭に来たとき、区切りの終わりから `asrStartDeadlineMs` を過ぎた ASR と、`translationStartDeadlineMs` を過ぎた翻訳は、流さずに捨てる（`expired`、翻訳は `skipped`）。
+    - 列の先頭に来たとき、区切りの終わりから `asrStartDeadlineMs` を過ぎた ASR と、`translationStartDeadlineMs` を過ぎた翻訳は、流さずに捨てる（`expired`、翻訳は `skipped`）。待っている間に過ぎたものも、`timers` で過ぎた時点に捨てる。ちょうど期限の時刻なら流す。
+    - 翻訳は、ASR が終わった時点でいちばん古い仕事になるので、すぐ流れる。翻訳の待ちの上限と置き換えは、区切りの終わりが前後したときの守り。
   - モード:
     - `active`: ふつうに流す。
-    - `pause`: 受け取った分は流し終える（入力は Task 13 の側で止まる）。
-    - `away`: 待ちを捨てる（`dropped`）。実行中のリクエストは AbortSignal で止める。開いた文は閉じる。
+    - `pause`: 受け取った分（flush で閉じた区切りを含む）は流し終える（入力は Task 13 の側で止まる）。
+    - `away`: 待ちを捨てる（区切りは `dropped`、翻訳は `skipped`）。実行中のリクエストは AbortSignal で止める（ASR は `dropped`、翻訳は `skipped`）。開いた文は閉じる。訳を出している文は `done` のまま、訳のない文は `skipped` で出す。次の `active` か `pause` までに push された区切りは捨てる（`dropped`）。
   - 遅延: `sourceMs` は原語の行を出した時刻 − `endedAt`、`jaMs` は訳を出した時刻 − 訳した版の `endedAt`。直近 200 件のリングから p50 と p95 を出す。
   - `createLanguageTally(size: 20): { observe(lang: string): void; current(): string | undefined; reset(): void }`
     - 直近 20 行でいちばん多い言語。同数なら新しい方。状態の表示に使う。
@@ -1890,9 +1897,9 @@ it('language tally follows the majority of the last 20 lines', () => {
     - `audio/start`: `{ tabId, streamId, settings: { baseUrl, models }, config: LiveConfig }`
       - すぐに `startCapture` で stream id を使う（stream id は使わないと数秒で切れるため）。投影器の確認は background が先に済ませている（下の `Sessions.start`。判断 S7）。
     - `audio/config`: `{ config: LiveConfig }`
-    - `audio/front`: `{ front: FrontState }`
-      - active → 入力をつなぐ。
-      - pause → `flush()` してから入力を切る。
+    - `audio/front`: `{ front: FrontState }`。変わるたびに `pipeline.mode(front.state)` を呼ぶ（away だけでなく）。ライブの処理は away の後、次の `active` か `pause` まで区切りを捨て、active に戻ると新しい文を始める（Task 12）。
+      - active → `discard()`（VAD の `reset`。止めている間に、床の窓が 0 で埋まるため）、`pipeline.mode('active')`、入力をつなぐ。
+      - pause → `pipeline.mode('pause')` を `flush()` より先に呼ぶ（away の後でも、flush で閉じた区切りが流れるように）。それから `flush()` し、入力を切る。
       - away → 入力を切って `discard()` し、`pipeline.mode('away')`。
     - `audio/reset`: SPA の遷移のとき。`pipeline.reset()` と `discard()`。
     - `audio/stop`: `{}`
@@ -1902,6 +1909,7 @@ it('language tally follows the majority of the last 20 lines', () => {
     - `audio/status`: `{ tabId, status: PillState }`
     - `audio/idle`: `{ tabId }`。active でない状態が 600,000 ms 続いたとき。
     - `audio/failed`: `{ tabId, code }`。取得中に `audio_unsupported` などで続けられなくなったとき。
+      - `createLivePipeline` の `onFailure` につなぐ。`code` が `audio_unsupported`（取得の途中で投影器がなくなった。HTTP 400）なら `audio/failed` を送り、background が取得を止めてサイドパネルで案内する。ほかの失敗は数えるだけ（`LiveStats.failed`）。
   - `SessionState = Readonly<{ tabId: number; startedAt: number; front: FrontState; stats: LiveStats; translator: TranslatorStatus }>`（`TranslatorStatus` は Task 8）
   - LLM の client は offscreen の中で作る。ASR と翻訳とも `timeoutMs: 8_000` で、キューは `concurrency: 1`。待ちの上限と期限は Task 12 のライブの処理が受け持つ。
   - 訳は Task 8 の `createLineTranslator({ client, config: () => ({ translator: config.translator, model: settings.models.translate }) })` でつくり、ライブの処理の `translate` には、その `ja` だけを返す関数を渡す。`audio/state` の `translator` は、その `status()`。
@@ -1987,14 +1995,17 @@ it('recovers the captured tab from storage.session after a service worker restar
 });
 // offscreen.test.ts（capture と pipeline は偽物）
 it.each([
-  { front: 'active', calls: ['input:on'] },
-  { front: 'pause', calls: ['flush', 'input:off'] },
+  { front: 'active', calls: ['discard', 'mode:active', 'input:on'] },
+  { front: 'pause', calls: ['mode:pause', 'flush', 'input:off'] },
   { front: 'away', calls: ['input:off', 'discard', 'mode:away'] },
 ])('applies front $front', async ({ front, calls }) => {
   /* ... */
 });
 it('reports idle after 10 minutes without being active', async () => {
   /* fake timers。active に戻るとタイマーが外れる */
+});
+it('stops the capture when the server loses the audio projector mid-capture', async () => {
+  /* pipeline の onFailure に audio_unsupported → audio/failed { code: 'audio_unsupported' } を 1 回。response_invalid では送らない */
 });
 it('ignores messages that are not addressed to the offscreen document', async () => {
   /* target が panel や background のもの、ほかの送り手のもの */
@@ -2009,6 +2020,9 @@ it('translates live lines with the line translator chosen in the config and repo
   - Expected: FAIL
 - [ ] **Step 3: 実装する**
   - `startCapture` は単体テストをせず、Task 15 の E2E と Step 5 で確かめる。
+  - `audio/front` は上の順で、毎回 `pipeline.mode(front.state)` を呼ぶ。再開（active）では、入力をつなぐ前に `discard()` で VAD を reset する。
+  - `createLivePipeline` の `onFailure` を、`audio_unsupported` のときの `audio/failed` につなぐ。
+  - `push` には worklet のメッセージの `pcm`（使い回さないもの）を渡し、`now` は `endedAt` と同じ時計（`performance.timeOrigin + performance.now()`）にする。
 - [ ] **Step 4: 通ることを確認する**
   - Run: `pnpm errors:generate && pnpm --filter @chrome-toolbox/subtitle-translator test && pnpm check`
   - Expected: PASS
