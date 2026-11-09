@@ -14,7 +14,7 @@ import {
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
-import { TAB_PAGES_MAX, tabPagesStore, type PageInfo } from './page-context.ts';
+import { tabPagesStore, type PageInfo } from './page-context.ts';
 import {
   nextDisplay,
   subtitleSettingsStore,
@@ -29,7 +29,7 @@ import {
   type TranslateRequest,
   type TranslateResponse,
 } from './protocol.ts';
-import type { FrontState } from './front.ts';
+import { tabFronts } from './tab-fronts.ts';
 import {
   CAPTION_CACHE_ENTRIES,
   createSubtitleTranslator,
@@ -195,9 +195,9 @@ export function startBackground(): () => void {
   // What each watch page last reported (16 tabs): the context and glossary of its captions. Kept
   // in storage.session too, so the batches after a service worker restart still have them.
   const pages = tabPagesStore(browser.storage.session);
-  // Whether each watch page last had its video in front (16 tabs), for the capture (Task 13) and
-  // the side panel (Task 14). Reported again on each change.
-  const fronts = createLruCache<number, FrontState>({ max: TAB_PAGES_MAX });
+  // Whether each watch page has its video in front (16 tabs), also in storage.session: the capture
+  // (Task 13) follows its changes with `fronts.onFront`, the side panel (Task 14) reads it.
+  const fronts = tabFronts(browser.storage.session);
   const subtitles = subtitleSettingsStore(browser.storage.local);
   const display = displaySwitch(subtitles);
   const captions = captionTranslation({
@@ -221,10 +221,10 @@ export function startBackground(): () => void {
         const page = await pages.get(tabId);
         return page.ok ? captions.translate(request, page.value) : page;
       },
-      'subs/front': ({ state, reason }): Promise<Result<Record<string, never>>> => {
+      'subs/front': async (front): Promise<Result<Record<string, never>>> => {
         if (tabId === undefined) return forbidden();
-        fronts.set(tabId, reason === undefined ? { state } : { state, reason });
-        return Promise.resolve(Ok({}));
+        const kept = await fronts.report(tabId, front);
+        return kept.ok ? Ok({}) : kept;
       },
       'subs/display': async ({ mode }): Promise<Result<Record<string, never>>> => {
         const saved = await display.change(() => mode);
@@ -249,10 +249,9 @@ export function startBackground(): () => void {
    * worker for every tab of every site; a tab's next `subs/page` replaces its page (S43).
    */
   function onTabRemoved(tabId: number): void {
-    fronts.delete(tabId);
     launch(
       async () => {
-        await pages.forget(tabId);
+        await Promise.all([pages.forget(tabId), fronts.forget(tabId)]);
       },
       () => undefined,
     );

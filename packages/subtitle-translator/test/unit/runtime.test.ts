@@ -5,6 +5,7 @@ import { Ok } from '@chrome-toolbox/contracts';
 import { subtitleStreamPart } from '@chrome-toolbox/extension-core';
 import { glossaryStore } from '../../src/glossary.ts';
 import { tabPagesStore } from '../../src/page-context.ts';
+import { tabFronts } from '../../src/tab-fronts.ts';
 import { defaultSubtitleSettings, subtitleSettingsStore } from '../../src/settings.ts';
 import {
   senderKind,
@@ -466,6 +467,29 @@ describe('display and front routes', () => {
         error: { internalCode: 'sender_forbidden' },
       });
     stop();
+  });
+
+  it('keeps the front of each tab across a service worker restart and forgets it when the tab closes', async () => {
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const tabId = watch.id ?? -1;
+    /** What a service worker started now would find for the tab. */
+    const stored = () => tabFronts(fakeBrowser.storage.session).get(tabId);
+    const first = background();
+    const muted = { state: 'pause', reason: 'muted' } as const;
+    expect(await first.ask({ type: 'subs/front', payload: muted }, topFrame(watch))).toEqual(
+      Ok({}),
+    );
+    first.stop();
+    expect(await stored()).toEqual(Ok(muted));
+    const second = background();
+    await fakeBrowser.tabs.onRemoved.trigger(tabId, {
+      isWindowClosing: false,
+      windowId: watch.windowId,
+    });
+    await vi.waitFor(async () => {
+      expect(await stored()).toEqual(Ok({ state: 'away' }));
+    });
+    second.stop();
   });
 });
 

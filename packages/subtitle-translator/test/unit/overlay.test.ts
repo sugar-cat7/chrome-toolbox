@@ -223,12 +223,13 @@ describe('subtitle overlay', () => {
     expect(press.defaultPrevented).toBe(true);
   });
 
-  it('shows the button only with the player controls, under the mouse or with the focus', () => {
+  it('shows the button only with the player controls or with the focus', () => {
     const { root } = setup();
     const css = (root.querySelector('style')?.textContent ?? '').replace(/\s+/gu, ' ');
     expect(css).toContain(
-      ':host-context(#movie_player:not(.ytp-autohide)) .pill, .pill:hover, .pill:focus { opacity: 1; pointer-events: auto; }',
+      ':host-context(#movie_player:not(.ytp-autohide)) .pill, .pill:focus { opacity: 1; pointer-events: auto; }',
     );
+    expect(css).not.toContain(':hover');
     expect(css).toMatch(/\.pill \{[^}]*opacity: 0;[^}]*pointer-events: none;/u);
     // Only the button takes the pointer: the rest of the overlay lets every click through.
     expect(css).toMatch(/:host \{[^}]*pointer-events: none;/u);

@@ -45,7 +45,8 @@ const PAGE_STYLE_MARK = 'data-st-style';
  * Inside the shadow root, so the page's styles do not reach it and it reaches nothing of the
  * page. The host covers the player and is the size container: text follows the player's height.
  * It lets every click through to the player, except on the pill while the pill shows: with the
- * player's controls (YouTube hides them with `.ytp-autohide`), under the mouse or with the focus.
+ * player's controls (YouTube shows them while the mouse moves over the player and hides them with
+ * `.ytp-autohide`) or with the focus.
  */
 const STYLE = `
 :host {
@@ -103,7 +104,6 @@ const STYLE = `
   transition: opacity 0.1s;
 }
 :host-context(#movie_player:not(.ytp-autohide)) .pill,
-.pill:hover,
 .pill:focus {
   opacity: 1;
   pointer-events: auto;

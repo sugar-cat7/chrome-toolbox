@@ -532,6 +532,25 @@ describe('watch page', () => {
     expect(shown().rows()).toEqual(['We are going in.', '訳:We are going in.']);
   });
 
+  it('draws the line at the video position when an ad ends while the video is paused', async () => {
+    const { player, server, shown, play, pause, seek, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    play();
+    frame(500);
+    await server.answer(0);
+    player.classList.add('ad-showing');
+    await settle();
+    expect(shown().rows()).toEqual([]);
+    // The ad ends on a paused video moved on: no frame comes to draw it.
+    pause();
+    seek(3_100);
+    player.classList.remove('ad-showing');
+    await settle();
+    expect(shown().rows()).toEqual(['We are going in.', '訳:We are going in.']);
+  });
+
   it('reports the player away when the page leaves the video', async () => {
     const { server, play } = await start();
     play();

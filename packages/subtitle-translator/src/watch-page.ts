@@ -64,6 +64,8 @@ type Shown = {
   sync: FrameSync | undefined;
   /** The playback position of the last frame, in ms; none during an ad. */
   position: number | undefined;
+  /** An ad cleared the line and no frame came since. */
+  cleared: boolean;
 };
 
 /** A watch page, from its load or navigation to the next navigation. */
@@ -122,9 +124,9 @@ function pageInfo(video: VideoMessage['video'], tracks: number): PageInfo {
  * the bridge for the track's cues unless they came already, and makes the feeder from them; the
  * feeder's lines go into the timeline, which is drawn at the position of each video frame while
  * the video plays (`syncFrames`), and the feeder sends batches (`subs/translate`) only while the
- * page is `active`. An ad clears the line until the video's frames come back. A new video or
- * navigation starts over with a new timeline, live view and feeder; leaving the watch page reports
- * it `away`. The display mode is read live: a change saved anywhere (the pill, which sends
+ * page is `active`. An ad clears the line until the video's frames come back, or until the ad
+ * ends on a paused video (drawn from its `currentTime`). A new video or navigation starts over
+ * with a new timeline, live view and feeder; leaving the watch page reports it `away`. The display mode is read live: a change saved anywhere (the pill, which sends
  * `subs/display`, the shortcut, the side panel) redraws every tab at once. Returns the cleanup of
  * every listener, observer, timer and the overlay.
  */
@@ -198,11 +200,26 @@ export function startWatchPage(
     if (shown === undefined) return;
     shown.feeder?.front(state.state === 'active');
     // An ad has a time of its own: the video's line does not stay over it.
-    if (state.reason === 'ad' && shown.position !== undefined) {
-      shown.position = undefined;
-      draw(at, shown);
+    if (state.reason === 'ad') {
+      shown.cleared = true;
+      if (shown.position !== undefined) {
+        shown.position = undefined;
+        draw(at, shown);
+      }
+    } else if (shown.cleared && at.video.paused && !at.player.classList.contains('ad-showing')) {
+      // The ad is over on a paused video, which sends no frame: its line is drawn from where it
+      // stands. A playing video's next frame draws it.
+      shown.cleared = false;
+      moveTo(at, shown, at.video.currentTime * 1000);
     }
     pill(at, shown);
+  }
+
+  /** Draws the line at `ms`, which the feeder follows too. */
+  function moveTo(at: Visit, shown: Shown, ms: number): void {
+    shown.position = ms;
+    shown.feeder?.position(ms);
+    draw(at, shown);
   }
 
   /** Translates the cues of the chosen track, from the position of the frames on. */
@@ -268,6 +285,7 @@ export function startWatchPage(
       feeder: undefined,
       sync: undefined,
       position: undefined,
+      cleared: false,
     };
     at.shown = shown;
     // Cues posted before this video was named are its feeder's, or nobody's.
@@ -281,9 +299,8 @@ export function startWatchPage(
       player: at.player,
       video: at.video,
       onFrame: (ms) => {
-        shown.position = ms;
-        shown.feeder?.position(ms);
-        draw(at, shown);
+        shown.cleared = false;
+        moveTo(at, shown, ms);
       },
     });
     if (held !== undefined && sameTrack(held, video.videoId, track)) feed(at, shown, held);

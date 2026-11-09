@@ -1,7 +1,7 @@
 import { z } from 'zod/mini';
-import { capture, Ok, type Result } from '@chrome-toolbox/contracts';
-import { createLruCache, createQueue, type StorageArea } from '@chrome-toolbox/extension-core';
+import { createLruCache, type StorageArea } from '@chrome-toolbox/extension-core';
 import { PAGE_LIMITS } from './limits.ts';
+import { TAB_STATE_MAX, tabSessionStore, type TabSessionStore } from './tab-session.ts';
 
 /** Characters kept of what a page names; defined in limits.ts for the MAIN-world bridge. */
 export { PAGE_LIMITS };
@@ -60,7 +60,7 @@ const same = (a: PageInfo, b: PageInfo): boolean =>
   a.tracks === b.tracks;
 
 /** Tabs whose page info the service worker keeps. */
-export const TAB_PAGES_MAX = 16;
+export const TAB_PAGES_MAX = TAB_STATE_MAX;
 
 /** The page info of the most recent tabs. */
 export function createTabPages(max = TAB_PAGES_MAX): TabPages {
@@ -76,74 +76,16 @@ export function createTabPages(max = TAB_PAGES_MAX): TabPages {
   };
 }
 
-/** The `storage.session` key of the tab pages: `{ tabId, info }`, the oldest first. */
+/** The `storage.session` key of the tab pages. */
 const SESSION_KEY = 'subs:pages';
-const sessionSchema = z.array(
-  z.strictObject({ tabId: z.int().check(z.nonnegative()), info: pageInfoSchema }),
-);
-type Entry = { tabId: number; info: PageInfo };
 
-export type TabPageStore = {
-  /** Keeps what the tab shows, in memory and in the session. */
-  report(this: void, tabId: number, info: PageInfo): Promise<Result<void>>;
-  /** What the tab showed: from memory, or from the session when a restart emptied the memory. */
-  get(this: void, tabId: number): Promise<Result<PageInfo | undefined>>;
-  /** Forgets a tab that closed. */
-  forget(this: void, tabId: number): Promise<Result<void>>;
-};
+export type TabPageStore = TabSessionStore<PageInfo>;
 
 /**
- * The page info of the 16 tabs reported last, kept in memory and in `storage.session`, which
- * outlives a stopped service worker (and ends with the browser session). The session holds one
- * list, read and written whole, one operation at a time so that none undoes another; an
- * unreadable list counts as empty and the next report replaces it.
+ * The page info of the 16 tabs reported last, kept in memory and in `storage.session`
+ * (`tabSessionStore`), so that the batches after a service worker restart still have their
+ * context and glossary.
  */
 export function tabPagesStore(area: StorageArea, max = TAB_PAGES_MAX): TabPageStore {
-  const memory = createTabPages(max);
-  const queue = createQueue({ concurrency: 1, maxPending: 64 });
-  async function read(): Promise<Result<Entry[]>> {
-    const stored = await capture(() => area.get(SESSION_KEY), 'storage_failed');
-    if (!stored.ok) return stored;
-    const parsed = sessionSchema.safeParse(stored.value[SESSION_KEY]);
-    return Ok(parsed.success ? parsed.data.slice(-max) : []);
-  }
-  /** Writes `change` of the stored list, unless it gives undefined (nothing to change). */
-  function update(change: (entries: Entry[]) => Entry[] | undefined): Promise<Result<void>> {
-    return queue.run(async (): Promise<Result<void>> => {
-      const entries = await read();
-      if (!entries.ok) return entries;
-      const next = change(entries.value);
-      if (next === undefined) return Ok(undefined);
-      return capture(() => area.set({ [SESSION_KEY]: next.slice(-max) }), 'storage_failed');
-    });
-  }
-  const without = (entries: Entry[], tabId: number): Entry[] =>
-    entries.filter((entry) => entry.tabId !== tabId);
-  return {
-    report(tabId, info) {
-      memory.report(tabId, info);
-      return update((entries) => [...without(entries, tabId), { tabId, info }]);
-    },
-    async get(tabId): Promise<Result<PageInfo | undefined>> {
-      const known = memory.get(tabId);
-      if (known !== undefined) return Ok(known);
-      // Behind the writes queued before it, so a forgotten tab does not come back.
-      return queue.run(async (): Promise<Result<PageInfo | undefined>> => {
-        const entries = await read();
-        if (!entries.ok) return entries;
-        // A report that came while this waited is newer than the session.
-        const newer = memory.get(tabId);
-        if (newer !== undefined) return Ok(newer);
-        const stored = entries.value.find((entry) => entry.tabId === tabId)?.info;
-        if (stored !== undefined) memory.report(tabId, stored);
-        return Ok(stored);
-      });
-    },
-    forget(tabId) {
-      memory.forget(tabId);
-      return update((entries) =>
-        entries.some((entry) => entry.tabId === tabId) ? without(entries, tabId) : undefined,
-      );
-    },
-  };
+  return tabSessionStore({ area, key: SESSION_KEY, schema: pageInfoSchema, max });
 }

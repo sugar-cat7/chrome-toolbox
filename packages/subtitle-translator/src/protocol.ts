@@ -89,10 +89,10 @@ export const liveLineSchema = z
   );
 export type LiveLine = Readonly<z.infer<typeof liveLineSchema>>;
 
-/** A `FrontState` as a watch page reports it. */
+/** A `FrontState` as a watch page reports it (without a reason, the key is left out). */
 export const frontStateSchema = z.strictObject({
   state: z.enum(FRONT_STATES),
-  reason: z.optional(z.enum(FRONT_REASONS)),
+  reason: z.exactOptional(z.enum(FRONT_REASONS)),
 });
 
 /** The messages the service worker answers; each task adds its own. */
