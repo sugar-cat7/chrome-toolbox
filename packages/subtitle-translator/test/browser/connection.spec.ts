@@ -1,4 +1,5 @@
-import { expect, test, usedHeap } from '@chrome-toolbox/extension-core/testing';
+import { usedHeap } from '@chrome-toolbox/extension-core/testing';
+import { expect, test } from './server.ts';
 
 const connect = async (
   sidePanel: import('@playwright/test').Page,

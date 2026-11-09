@@ -11,6 +11,7 @@ import {
   AUTO_LANGUAGE,
   SOURCE_CHOICES,
   START_GUIDE,
+  STARTING,
   explain,
 } from './text.ts';
 
@@ -37,7 +38,8 @@ function audioInput(capability: CapabilityView): string {
 
 /**
  * Speech subtitles: the captured tab can be stopped here; they start only from the toolbar icon or
- * Alt+Shift+S, which Chrome lets capture a tab (S46). Below, whether the server takes audio input.
+ * Alt+Shift+S, which Chrome lets capture a tab (S46), and while a start runs the panel says so until
+ * the service worker tells it the start ended. Below, whether the server takes audio input.
  */
 export function AudioSection({
   tab,
@@ -90,7 +92,7 @@ export function AudioSection({
           </button>
         </div>
       ) : (
-        <p>{START_GUIDE}</p>
+        <p>{tab?.starting === true ? STARTING : START_GUIDE}</p>
       )}
       <p className="text-xs text-slate-600">{audioInput(capability)}</p>
       {failure !== '' && (

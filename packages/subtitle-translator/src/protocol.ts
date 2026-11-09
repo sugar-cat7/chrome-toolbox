@@ -186,14 +186,16 @@ export type SessionState = Readonly<z.infer<typeof sessionStateSchema>>;
 
 /**
  * What the side panel shows of a tab: the page it reported, where its subtitles come from, whether
- * it has its video in front (`UNKNOWN_FRONT`, away, when it reported nothing), the capture of its
- * audio when it is the captured tab, and the service worker's caption translator.
+ * it has its video in front (`UNKNOWN_FRONT`, away, when it reported nothing), `starting` while the
+ * capture of its audio starts, that capture once it is the captured tab, and the service worker's
+ * caption translator.
  */
 export const tabStateSchema = z.strictObject({
   tabId: tabIdSchema,
   page: z.exactOptional(pageInfoSchema),
   source: z.enum(SUBTITLE_SOURCES),
   front: frontStateSchema,
+  starting: z.exactOptional(z.literal(true)),
   session: z.exactOptional(sessionStateSchema),
   translator: translatorStatusSchema,
 });

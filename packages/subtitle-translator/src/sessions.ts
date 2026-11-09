@@ -133,7 +133,10 @@ export type SessionsDeps = Readonly<{
   fronts: TabFronts;
   fetch: Fetch;
   now: () => number;
-  /** Told after a capture started and after one stopped: the side panel asks again (Task 14). */
+  /**
+   * Told when a start begins and when it ends (started or refused), and after a capture stopped:
+   * the side panel asks again (Task 14).
+   */
   changed: () => void;
 }>;
 
@@ -147,8 +150,13 @@ export type Sessions = {
   start(this: void, tabId: number, streamId?: string): Promise<Result<void>>;
   /** Stops the tab's capture, if it is the captured one; tells its page unless it closed. */
   stop(this: void, tabId: number, reason: StopReason): Promise<Result<void>>;
-  /** The captured tab, once what a restart left is known. */
+  /**
+   * The captured tab, once what a restart left is known. It does not wait for a start or a stop
+   * in progress: during a start, the tab captured before it (if any).
+   */
   current(this: void): Promise<Result<CaptureRecord | undefined>>;
+  /** The tab whose capture is starting now, if any (nothing survives a service worker restart). */
+  starting(this: void): number | undefined;
   /**
    * Keeps what a watch page reported (`subs/page`). In the captured tab a new video resets the
    * pipeline, and the context goes to the offscreen document with the tab's status.
@@ -230,6 +238,8 @@ export function createSessions({
 }: SessionsDeps): Sessions {
   const queue = createQueue({ concurrency: 1, maxPending: 32 });
   let captured: Captured | undefined;
+  /** The tab whose start runs now. */
+  let pending: number | undefined;
   let listening = false;
   let disposed = false;
 
@@ -352,8 +362,18 @@ export function createSessions({
     return closed.ok ? removed : closed;
   }
 
+  /** Starts the tab unless it is captured; the side panel hears when the start begins and ends. */
   async function startNow(tabId: number, streamId: string | undefined): Promise<Result<void>> {
     if (captured?.tabId === tabId) return Ok(undefined);
+    pending = tabId;
+    changed();
+    const started = await capture(() => startCapture(tabId, streamId), 'unexpected_failure');
+    pending = undefined;
+    changed();
+    return started.ok ? started.value : started;
+  }
+
+  async function startCapture(tabId: number, streamId: string | undefined): Promise<Result<void>> {
     const loaded = await settings.load();
     if (!loaded.ok) return loaded;
     const { llamaBaseUrl: baseUrl, models } = loaded.value;
@@ -408,7 +428,6 @@ export function createSessions({
     captured = at;
     listen(true);
     follow(at);
-    changed();
     return Ok(undefined);
   }
 
@@ -514,14 +533,15 @@ export function createSessions({
   return {
     start: (tabId, streamId) => queue.run(() => startNow(tabId, streamId)),
     stop: (tabId, reason) => queue.run(() => stopNow(tabId, reason)),
-    current: () =>
-      queue.run(async (): Promise<Result<CaptureRecord | undefined>> =>
-        Ok(
-          captured === undefined
-            ? undefined
-            : { tabId: captured.tabId, startedAt: captured.startedAt },
-        ),
-      ),
+    async current(): Promise<Result<CaptureRecord | undefined>> {
+      await recovery;
+      return Ok(
+        captured === undefined
+          ? undefined
+          : { tabId: captured.tabId, startedAt: captured.startedAt },
+      );
+    },
+    starting: () => pending,
     async page(tabId, info): Promise<Result<void>> {
       const before = await pages.get(tabId);
       const kept = await pages.report(tabId, info);

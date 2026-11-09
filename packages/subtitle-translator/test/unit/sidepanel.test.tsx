@@ -211,6 +211,20 @@ describe('side panel', () => {
     expect(of('subs/stop')).toHaveLength(1);
   });
 
+  it('says the capture is starting until the service worker tells the panel it started', async () => {
+    let tab: TabState = { ...CAPTION_TAB, starting: true };
+    const { api, events } = fakeApi({ 'subs/tab-state': async () => Ok(tab) });
+    await open(api);
+    const audio = region('音声');
+    expect(await within(audio).findByText('開始しています…')).toBeTruthy();
+    expect(within(audio).queryByText(START_GUIDE)).toBeNull();
+    expect(within(audio).queryByRole('button')).toBeNull();
+    tab = audioTab();
+    events.message.fire({ type: 'subs/state-changed', payload: {}, target: 'panel' });
+    expect(await within(audio).findByRole('button', { name: '停止' })).toBeTruthy();
+    expect(within(audio).queryByText('開始しています…')).toBeNull();
+  });
+
   it('explains a missing projector with the llama-server.md guidance', async () => {
     const { api } = fakeApi({ 'subs/capability': async () => Ok({ audio: false }) });
     await open(api);

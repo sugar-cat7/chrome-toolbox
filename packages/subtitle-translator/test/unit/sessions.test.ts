@@ -82,10 +82,13 @@ function setup({
   audio = true,
   streamError,
   startError,
+  held,
 }: {
   audio?: boolean | undefined;
   streamError?: string;
   startError?: boolean;
+  /** `/props` answers only once this settles (a router loading the model). */
+  held?: Promise<void>;
 } = {}) {
   const calls: string[] = [];
   const toOffscreen: Message[] = [];
@@ -103,6 +106,7 @@ function setup({
     const url = new URL(input);
     if (url.pathname !== '/props') return new Response('', { status: 404 });
     calls.push(`props:${url.searchParams.get('model')}`);
+    await held;
     return Response.json({
       total_slots: 3,
       ...(state.audio === undefined ? {} : { modalities: { vision: false, audio: state.audio } }),
@@ -387,25 +391,55 @@ describe('stopping a capture', () => {
     expect(h.statuses(CAPTURED)).toEqual(told);
   });
 
-  it('tells the side panel after a capture starts and after it stops, and after nothing else', async () => {
+  it('tells the side panel when a start begins and ends and after a stop, and after nothing else', async () => {
     const h = setup();
     await h.pages.report(CAPTURED, PAGE);
     const sessions = kept(h.make());
     expect(await sessions.current()).toEqual(Ok(undefined));
     expect(h.changed).not.toHaveBeenCalled();
     expect(await sessions.start(CAPTURED)).toEqual(Ok(undefined));
-    expect(h.changed).toHaveBeenCalledOnce();
-    // Starting the captured tab again, stopping another tab and a refused start change nothing.
+    expect(h.changed).toHaveBeenCalledTimes(2);
+    // Starting the captured tab again and stopping another tab change nothing.
     expect(await sessions.start(CAPTURED)).toEqual(Ok(undefined));
     expect(await sessions.stop(OTHER, 'user')).toEqual(Ok(undefined));
+    expect(h.changed).toHaveBeenCalledTimes(2);
+    // A refused start began and ended: the panel stops showing it as starting.
     h.state.audio = false;
     expect(await sessions.start(OTHER)).toMatchObject({ ok: false });
-    expect(h.changed).toHaveBeenCalledOnce();
+    expect(h.changed).toHaveBeenCalledTimes(4);
+    expect(sessions.starting()).toBeUndefined();
     h.tabs.onRemoved.fire(CAPTURED);
     await vi.waitFor(() => {
-      expect(h.changed).toHaveBeenCalledTimes(2);
+      expect(h.changed).toHaveBeenCalledTimes(5);
     });
     expect(await sessions.current()).toEqual(Ok(undefined));
+  });
+
+  it('answers the captured tab at once while a start waits for the server, and names the starting tab', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = setup({ held });
+    await h.pages.report(CAPTURED, PAGE);
+    const sessions = kept(h.make());
+    expect(sessions.starting()).toBeUndefined();
+    const started = sessions.start(CAPTURED);
+    await vi.waitFor(() => {
+      expect(h.calls).toEqual(['props:gemma4-e4b']);
+    });
+    expect(sessions.starting()).toBe(CAPTURED);
+    expect(h.changed).toHaveBeenCalledOnce();
+    // Not queued behind the start: it answers before a timer of 0 ms fires.
+    const late = new Promise((resolve) => {
+      setTimeout(() => resolve('late'), 0);
+    });
+    expect(await Promise.race([sessions.current(), late])).toEqual(Ok(undefined));
+    release();
+    expect(await started).toEqual(Ok(undefined));
+    expect(sessions.starting()).toBeUndefined();
+    expect(await sessions.current()).toEqual(Ok({ tabId: CAPTURED, startedAt: 1_000 }));
+    expect(h.changed).toHaveBeenCalledTimes(2);
   });
 
   it('ignores the stop conditions of a tab it does not capture', async () => {

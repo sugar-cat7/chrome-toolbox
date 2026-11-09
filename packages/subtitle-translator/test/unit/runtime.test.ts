@@ -849,8 +849,9 @@ describe('side panel routes (Task 14)', () => {
     // A watch page that reported its page: the panel asks again.
     expect(told(chrome.toOffscreen)).toBe(1);
     commands.press('toggle-audio');
+    // The start began and ended.
     await vi.waitFor(() => {
-      expect(told(chrome.toOffscreen)).toBe(2);
+      expect(told(chrome.toOffscreen)).toBe(3);
     });
     expect(await ask(tabState(watch.id), panelSender())).toEqual(
       Ok({
@@ -871,7 +872,7 @@ describe('side panel routes (Task 14)', () => {
       Ok({}),
     );
     expect(chrome.close).toHaveBeenCalledOnce();
-    expect(told(chrome.toOffscreen)).toBe(3);
+    expect(told(chrome.toOffscreen)).toBe(4);
     expect(await ask(tabState(watch.id), panelSender())).toEqual(
       Ok({
         tabId: watch.id,
@@ -881,6 +882,61 @@ describe('side panel routes (Task 14)', () => {
         translator: { chosen: 'gemma' },
       }),
     );
+    stop();
+  });
+
+  it('answers the tab state at once while its capture is starting, and tells the panel when it started', async () => {
+    const chrome = fakeCapture();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // A router that loads the speech model takes its time to answer /props.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<Fetch>(async (input) => {
+        if (new URL(input).pathname !== '/props') return new Response('', { status: 404 });
+        await held;
+        return Response.json({ total_slots: 3, modalities: { audio: true } });
+      }),
+    );
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube, active: true });
+    chrome.stub(
+      fakeBrowser.tabs,
+      'query',
+      vi.fn<(info: unknown) => Promise<unknown[]>>(async () => [watch]),
+    );
+    expect(await ask(page, topFrame(watch))).toEqual(Ok({}));
+    commands.press('toggle-audio');
+    // The start began: the panel was told.
+    await vi.waitFor(() => {
+      expect(told(chrome.toOffscreen)).toBe(2);
+    });
+    const late = new Promise((resolve) => {
+      setTimeout(() => resolve('late'), 0);
+    });
+    expect(await Promise.race([ask(tabState(watch.id), panelSender()), late])).toEqual(
+      Ok({
+        tabId: watch.id,
+        page: page.payload.info,
+        source: 'captions',
+        front: { state: 'away' },
+        starting: true,
+        translator: { chosen: 'gemma' },
+      }),
+    );
+    release();
+    await vi.waitFor(() => {
+      expect(told(chrome.toOffscreen)).toBe(3);
+    });
+    expect(await ask(tabState(watch.id), panelSender())).toMatchObject({
+      ok: true,
+      value: { source: 'audio' },
+    });
+    expect(await ask(tabState(watch.id), panelSender())).not.toMatchObject({
+      value: { starting: true },
+    });
     stop();
   });
 

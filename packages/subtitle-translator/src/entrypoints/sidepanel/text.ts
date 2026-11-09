@@ -41,6 +41,8 @@ export const STOP_REASONS: Readonly<Record<(typeof FRONT_REASONS)[number], strin
 
 /** Speech subtitles start from the toolbar icon or the shortcut only (S46). */
 export const START_GUIDE = 'ツールバーのアイコンか Alt+Shift+S で開始';
+/** While the service worker starts the capture (the router may load the speech model first). */
+export const STARTING = '開始しています…';
 export const AUDIO_READY = '音声入力: 使えます';
 export const AUDIO_MISSING =
   '音声入力が使えません。llama.cpp のプリセットで mmproj を有効にして、サーバーを再起動してください（docs/llama-server.md）';

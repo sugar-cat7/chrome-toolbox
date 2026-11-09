@@ -288,10 +288,12 @@ export function startBackground(): () => void {
     fetch: fetcher,
   });
   /**
-   * What the side panel shows of a tab. Its source is the audio while it is the captured tab, and
-   * otherwise what its watch page would pick (`pickSource`); without a page, none. On the audio
-   * path the panel shows the offscreen translator (`session.translator`), elsewhere this one: the
-   * caption translator's status, or the chosen translator before its first request.
+   * What the side panel shows of a tab, answered at once: a start in progress (which may wait up
+   * to 15 s for the router to load the speech model) is told by `starting`, not waited for. Its
+   * source is the audio while it is the captured tab, and otherwise what its watch page would pick
+   * (`pickSource`); without a page, none. On the audio path the panel shows the offscreen
+   * translator (`session.translator`), elsewhere this one: the caption translator's status, or the
+   * chosen translator before its first request.
    */
   async function tabState(tabId: number): Promise<Result<TabState>> {
     const [page, front, chosen, current] = await Promise.all([
@@ -327,6 +329,7 @@ export function startBackground(): () => void {
       ...(shown === undefined ? {} : { page: shown }),
       source,
       front: front.value,
+      ...(sessions.starting() === tabId ? { starting: true } : {}),
       ...(session === undefined ? {} : { session }),
       translator: captions.status() ?? { chosen: chosen.value.translator },
     });
