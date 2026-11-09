@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
+import { defaultSettings, PLAMO_TRANSLATE_MODEL } from '@chrome-toolbox/extension-core';
+import { STUB_PAGE_PREFIX, STUB_PLAMO_PREFIX } from '@chrome-toolbox/extension-core/testing';
 import { claimPage } from '../../src/content/claim.ts';
 import { injectPage, PAGE_SCRIPT, type ScriptingApi } from '../../src/control.ts';
 import { optionsPort, senderKind, startBackground, type PanelApi } from '../../src/runtime.ts';
+import { defaultPageSettings } from '../../src/settings.ts';
+import { gate, llama } from './llama.ts';
 
 afterEach(() => {
   fakeBrowser.reset();
@@ -31,9 +35,20 @@ function background(): {
   };
 }
 const start = { type: 'page/start', payload: { tabId: 3, url: 'https://wiki.fixture.test/a' } };
+/** A page batch of one paragraph, as the page script sends it. */
+const translate = {
+  type: 'page/translate',
+  payload: {
+    purpose: 'page',
+    units: [{ id: 1, tokens: [{ t: 'text', text: 'Final Boss Guide' }] }],
+    page: { title: 'Fixture Wiki', site: 'wiki.fixture.test' },
+  },
+};
+const cancel = { type: 'page/cancel', payload: {} };
+const cancelled = { ok: false, error: { internalCode: 'operation_cancelled' } };
 
 describe('extension runtime wiring', () => {
-  it('answers status messages from the background and removes its listener on cleanup', async () => {
+  it('answers status messages from the background and removes its listeners on cleanup', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) =>
@@ -56,8 +71,12 @@ describe('extension runtime wiring', () => {
       ).toBe(true);
     });
     expect(reply).toEqual(Ok({ models: ['stub-model'] }));
+    expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(true);
+    expect(fakeBrowser.storage.local.onChanged.hasListeners()).toBe(true);
     stop();
     expect(fakeBrowser.runtime.onMessage.hasListeners()).toBe(false);
+    expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(false);
+    expect(fakeBrowser.storage.local.onChanged.hasListeners()).toBe(false);
   });
 
   it('saves the options page URL in extension storage before asking the background', async () => {
@@ -188,5 +207,113 @@ describe('extension runtime wiring', () => {
     expect(claimPage({})).toBe(true);
     // The mark is the shared symbol, so a script bundled apart finds it too.
     expect(Reflect.has(world, Symbol.for('chrome-toolbox.page-translator'))).toBe(true);
+  });
+  it.each([
+    { route: 'page/translate', sender: 'page', expected: 'sender_forbidden' },
+    { route: 'page/translate', sender: 'iframe', expected: 'sender_forbidden' },
+    { route: 'page/translate', sender: 'other extension', expected: 'sender_forbidden' },
+    { route: 'page/cancel', sender: 'page', expected: 'sender_forbidden' },
+    { route: 'page/cancel', sender: 'iframe', expected: 'sender_forbidden' },
+    { route: 'page/start', sender: 'content', expected: 'sender_forbidden' },
+  ] as const)('$route from $sender', async ({ route, sender, expected }) => {
+    const server = llama();
+    vi.stubGlobal('fetch', vi.fn(server.fetch));
+    const { ask, stop } = background();
+    const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
+    const senders: Record<typeof sender, Browser.runtime.MessageSender> = {
+      page: options,
+      iframe: { tab, frameId: 7, url: 'https://ads.fixture.test/frame' },
+      'other extension': { url: 'chrome-extension://other-extension-id/popup.html' },
+      content: { tab, frameId: 0, url: 'https://wiki.fixture.test/a' },
+    };
+    const messages = { 'page/translate': translate, 'page/cancel': cancel, 'page/start': start };
+    expect(await ask(messages[route], senders[sender])).toMatchObject({
+      ok: false,
+      error: { internalCode: expected },
+    });
+    expect(server.calls).toEqual([]);
+    stop();
+  });
+
+  it("translates for a tab's top frame and stops it on page/cancel and when the tab closes", async () => {
+    const held = gate();
+    const server = llama({ door: () => held.promise });
+    vi.stubGlobal('fetch', server.fetch);
+    const { ask, stop } = background();
+    const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
+    const other = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/b' });
+    const top = (of: typeof tab): Browser.runtime.MessageSender => ({
+      tab: of,
+      frameId: 0,
+      url: 'https://wiki.fixture.test/a',
+    });
+    // More than 6 units is no batch of the page script.
+    const seven = Array.from({ length: 7 }, (_, i) => ({
+      id: i + 1,
+      tokens: [{ t: 'text', text: 'Final Boss Guide' }],
+    }));
+    expect(
+      await ask(
+        { type: 'page/translate', payload: { ...translate.payload, units: seven } },
+        top(tab),
+      ),
+    ).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
+
+    const running = ask(translate, top(tab));
+    await vi.waitFor(() => expect(server.chats(defaultSettings.models.translate)).toHaveLength(1));
+    // Another tab's page/cancel leaves this tab's batch running.
+    expect(await ask(cancel, top(other))).toEqual(Ok({}));
+    expect(await ask(cancel, top(tab))).toEqual(Ok({}));
+    expect(await running).toMatchObject(cancelled);
+
+    const again = ask(translate, top(tab));
+    await vi.waitFor(() => expect(server.chats(defaultSettings.models.translate)).toHaveLength(2));
+    await fakeBrowser.tabs.onRemoved.trigger(tab.id ?? -1, {
+      windowId: tab.windowId ?? -1,
+      isWindowClosing: false,
+    });
+    expect(await again).toMatchObject(cancelled);
+
+    held.open();
+    expect(await ask(translate, top(other))).toEqual(
+      Ok({
+        results: [{ id: 1, pieces: [`${STUB_PAGE_PREFIX}Final Boss Guide`] }],
+        translator: 'gemma',
+      }),
+    );
+    stop();
+  });
+
+  it('reads the settings again when the shared or the page settings change', async () => {
+    const server = llama();
+    vi.stubGlobal('fetch', server.fetch);
+    const { ask, stop } = background();
+    const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
+    const top: Browser.runtime.MessageSender = {
+      tab,
+      frameId: 0,
+      url: 'https://wiki.fixture.test/a',
+    };
+    expect(await ask(translate, top)).toMatchObject({ ok: true });
+    expect(server.chats(defaultSettings.models.translate)).toHaveLength(1);
+
+    await fakeBrowser.storage.local.set({
+      settings: {
+        ...defaultSettings,
+        models: { ...defaultSettings.models, translate: 'gemma4-e2b' },
+      },
+    });
+    expect(await ask(translate, top)).toMatchObject({ ok: true });
+    expect(server.chats('gemma4-e2b')).toHaveLength(1);
+
+    await fakeBrowser.storage.local.set({ page: { ...defaultPageSettings, translator: 'plamo' } });
+    expect(await ask(translate, top)).toEqual(
+      Ok({
+        results: [{ id: 1, pieces: [`${STUB_PLAMO_PREFIX}Final Boss Guide`] }],
+        translator: 'plamo',
+      }),
+    );
+    expect(server.chats(PLAMO_TRANSLATE_MODEL)).toHaveLength(1);
+    stop();
   });
 });

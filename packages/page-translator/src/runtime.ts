@@ -12,6 +12,8 @@ import {
 } from '@chrome-toolbox/extension-core';
 import { injectPage, PAGE_SCRIPT, type ScriptingApi } from './control.ts';
 import { pageProtocol, type PageProtocolHandlers } from './protocol.ts';
+import { pageSettingsStore } from './settings.ts';
+import { createPageTranslator } from './translator.ts';
 
 /** The extension APIs the options page uses; tests pass a fake with this shape. */
 export type PanelApi = {
@@ -69,14 +71,23 @@ const scripting: ScriptingApi = {
 
 /** Routes only this extension's pages may use: they let the extension into a tab. */
 type PageRoute = 'page/start';
+/** Routes only the page script in a tab's top frame may use: they translate for that tab. */
+type ContentRoute = 'page/translate' | 'page/cancel';
+/** The storage keys of the settings the translator reads: the shared ones and the page's. */
+const SETTINGS_KEYS = ['settings', 'page'] as const;
 
 /** Registers the service worker's message router and returns its cleanup. */
 export function startBackground(): () => void {
-  // One inference at a time; a full queue answers queue_full instead of growing.
+  // One status check at a time; a full queue answers queue_full instead of growing.
   const queue = createQueue({ concurrency: 1, maxPending: 16 });
-  const handlers: Omit<PageProtocolHandlers, PageRoute> = llmHandlers({
+  const handlers: Omit<PageProtocolHandlers, PageRoute | ContentRoute> = llmHandlers({
     fetch: (input, init) => fetch(input, init),
     queue,
+  });
+  const translator = createPageTranslator({
+    fetch: (input, init) => fetch(input, init),
+    settings: settingsStore(browser.storage.local),
+    pageSettings: pageSettingsStore(browser.storage.local),
   });
   const pageHandlers: Pick<PageProtocolHandlers, PageRoute> = {
     // The popup's tab got `activeTab` from the toolbar button: the page script goes into its top
@@ -97,18 +108,39 @@ export function startBackground(): () => void {
       return told.ok ? Ok({}) : told;
     },
   };
+  /** The page script's routes for the tab it runs in: requests and cancels are that tab's. */
+  const contentHandlers = (tabId: number): Pick<PageProtocolHandlers, ContentRoute> => ({
+    'page/translate': (request) => translator.translate(tabId, request),
+    // The page left the viewer: its batch stops, a selection bubble's request goes on.
+    'page/cancel': () => {
+      translator.cancel(tabId, 'page');
+      return Promise.resolve(Ok({}));
+    },
+  });
   const forbidden = (): Promise<Result<never>> => Promise.resolve(Err(failure('sender_forbidden')));
-  const otherHandlers: Pick<PageProtocolHandlers, PageRoute> = { 'page/start': forbidden };
-  const routes = {
-    page: pageProtocol.route({ ...handlers, ...pageHandlers }),
-    other: pageProtocol.route({ ...handlers, ...otherHandlers }),
+  const notPage: Pick<PageProtocolHandlers, PageRoute> = { 'page/start': forbidden };
+  const notContent: Pick<PageProtocolHandlers, ContentRoute> = {
+    'page/translate': forbidden,
+    'page/cancel': forbidden,
   };
+  const routes = {
+    page: pageProtocol.route({ ...handlers, ...pageHandlers, ...notContent }),
+    other: pageProtocol.route({ ...handlers, ...notPage, ...notContent }),
+  };
+  /** The route for `sender`: a content script's carries the tab it runs in. */
+  function routeOf(sender: Sender): (message: unknown) => Promise<Result<unknown>> {
+    const kind = senderKind(sender);
+    const tabId = sender.tab?.id;
+    if (kind !== 'content' || tabId === undefined)
+      return kind === 'page' ? routes.page : routes.other;
+    return pageProtocol.route({ ...handlers, ...notPage, ...contentHandlers(tabId) });
+  }
   function onMessage(
     message: unknown,
     sender: Sender,
     sendResponse: (response: unknown) => void,
   ): true {
-    const route = senderKind(sender) === 'page' ? routes.page : routes.other;
+    const route = routeOf(sender);
     launch(
       async () => {
         sendResponse(await route(message));
@@ -118,9 +150,22 @@ export function startBackground(): () => void {
     // Keeps the channel open for the asynchronous sendResponse.
     return true;
   }
+  /** A closed tab's requests stop, the page's and the selection's. */
+  function onTabRemoved(tabId: number): void {
+    translator.cancel(tabId);
+  }
+  /** The options page or the popup saved settings: the next request reads them again. */
+  function onStorageChanged(changes: Record<string, unknown>): void {
+    if (SETTINGS_KEYS.some((key) => Object.hasOwn(changes, key))) translator.reload();
+  }
   browser.runtime.onMessage.addListener(onMessage);
+  browser.tabs.onRemoved.addListener(onTabRemoved);
+  browser.storage.local.onChanged.addListener(onStorageChanged);
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
+    browser.tabs.onRemoved.removeListener(onTabRemoved);
+    browser.storage.local.onChanged.removeListener(onStorageChanged);
+    translator.dispose();
     queue.clear();
   };
 }

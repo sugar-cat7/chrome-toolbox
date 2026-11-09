@@ -2,7 +2,7 @@ import { z } from 'zod/mini';
 import {
   defineProtocol,
   llmProtocolSpec,
-  type PageToken,
+  pageTokenSchema,
   type ProtocolHandlers,
 } from '@chrome-toolbox/extension-core';
 
@@ -16,26 +16,41 @@ export type DisplayMode = (typeof DISPLAY_MODES)[number];
 /** The port the popup opens to a tab's page script (`tabs.connect`) to follow its progress. */
 export const PROGRESS_PORT = 'page-progress';
 
+/** Who translates a page: Gemma (`models.translate` of the shared settings) or PLaMo (P5). */
+export const PAGE_TRANSLATORS = ['gemma', 'plamo'] as const;
+/** Units in one request: the page script's batch holds at most this many. */
+export const MAX_REQUEST_UNITS = 6;
+/** Longest page title (UTF-16 code units, as the page script cuts it) and site (a host name). */
+const TITLE_LENGTH = 200;
+const SITE_LENGTH = 253;
+
 /**
  * What the page script asks the background to translate: the page's paragraphs (`page`, one
  * batch at a time) or the selected text (`selection`, the bubble). `id` tells the units apart in
  * the reply; `page` is context for the model.
  */
-export type TranslateRequest = {
-  purpose: 'page' | 'selection';
-  units: { id: number; tokens: PageToken[] }[];
-  page: { title: string; site: string };
-};
+export const translateRequestSchema = z.strictObject({
+  purpose: z.enum(['page', 'selection']),
+  units: z
+    .array(z.strictObject({ id: z.int(), tokens: z.array(pageTokenSchema) }))
+    .check(z.minLength(1), z.maxLength(MAX_REQUEST_UNITS)),
+  page: z.strictObject({
+    title: z.string().check(z.maxLength(TITLE_LENGTH)),
+    site: z.string().check(z.maxLength(SITE_LENGTH)),
+  }),
+});
+export type TranslateRequest = z.infer<typeof translateRequestSchema>;
 /**
  * The background's answer: the translation of each unit's text tokens (`readPagePieces`), with
  * no `pieces` for a unit that could not be read back, which fails alone (P21); the model that
  * translated, and `plamo_missing` when PLaMo was chosen but the server has none.
  */
-export type TranslateReply = {
-  results: { id: number; pieces?: string[] }[];
-  translator: 'gemma' | 'plamo';
-  notice?: 'plamo_missing';
-};
+export const translateReplySchema = z.strictObject({
+  results: z.array(z.strictObject({ id: z.int(), pieces: z.optional(z.array(z.string())) })),
+  translator: z.enum(PAGE_TRANSLATORS),
+  notice: z.optional(z.literal('plamo_missing')),
+});
+export type TranslateReply = z.infer<typeof translateReplySchema>;
 
 const count = z.int().check(z.minimum(0));
 /**
@@ -58,7 +73,7 @@ export const progressSchema = z.strictObject({
   cached: count,
   limit: z.boolean(),
   notice: z.optional(z.enum(['unreachable', 'plamo_missing'])),
-  translator: z.optional(z.enum(['gemma', 'plamo'])),
+  translator: z.optional(z.enum(PAGE_TRANSLATORS)),
 });
 export type Progress = z.infer<typeof progressSchema>;
 
@@ -86,6 +101,12 @@ export const pageCommandMessageSchema = z.strictObject({
 
 export const pageProtocolSpec = {
   ...llmProtocolSpec,
+  // The two routes below answer the page script in a tab's top frame only; any other sender gets
+  // `sender_forbidden`.
+  /** Translates a batch of the tab's paragraphs or its selection (`TranslateRequest`). */
+  'page/translate': { request: translateRequestSchema, response: translateReplySchema },
+  /** Stops the tab's running `page` request (the page left the viewer); a selection goes on. */
+  'page/cancel': { request: z.strictObject({}), response: z.strictObject({}) },
   // The routes below answer extension pages (the popup, the options page) only; any other
   // sender gets `sender_forbidden`.
   /**
