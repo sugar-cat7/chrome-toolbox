@@ -24,6 +24,7 @@ describe('pcm pipeline', () => {
         expect(message).toMatchObject({
           type: 'segment',
           trailingSilenceMs: 300,
+          carriedMs: 0,
           gapBeforeMs: expect.any(Number),
         });
         // The edge frames of the speech may hold the resampling filter's tail.

@@ -7,6 +7,7 @@ export type PcmSegmentMessage = Readonly<{
   pcm: Int16Array<ArrayBuffer>;
   durationMs: number;
   trailingSilenceMs: number;
+  carriedMs: number;
   gapBeforeMs: number;
 }>;
 
@@ -51,6 +52,7 @@ export function createPcmPipeline(
         pcm,
         durationMs: segment.durationMs,
         trailingSilenceMs: segment.trailingSilenceMs,
+        carriedMs: segment.carriedMs,
         gapBeforeMs: segment.gapBeforeMs,
       },
       [pcm.buffer],

@@ -34,10 +34,15 @@ export type Segment = Readonly<{
   durationMs: number;
   /**
    * Silence received after the segment's end and left out: `hangoverMs` when silence closed it,
-   * what a flush found (under `hangoverMs`), 0 when its length did. The rest of a length cut (up to
-   * `cutSearchMs` − `frameMs`) is speech, so it does not count here.
+   * what a flush found (under `hangoverMs`), 0 when its length did.
    */
   trailingSilenceMs: number;
+  /**
+   * Audio past a length cut, already received, that starts the next segment (up to `cutSearchMs`
+   * − `frameMs`); 0 otherwise. The speech ended `trailingSilenceMs + carriedMs` before the segment
+   * arrived (S45).
+   */
+  carriedMs: number;
   /**
    * The time from the end of the last segment sent (or from the start or a reset) to this
    * segment's speech; 0 for the rest of a segment cut for length. Closes a sentence at 700 ms.
@@ -129,10 +134,11 @@ export function createVad(options: VadOptions): Vad {
     restFrom = 0;
   };
 
-  const segment = (frames: number, trailingSilenceMs: number): Segment => ({
+  const segment = (frames: number, trailingSilenceMs: number, carriedMs: number): Segment => ({
     pcm: pcm.subarray(0, frames * frameSamples),
     durationMs: frames * options.frameMs,
     trailingSilenceMs,
+    carriedMs,
     gapBeforeMs,
   });
 
@@ -146,7 +152,7 @@ export function createVad(options: VadOptions): Vad {
     if (frames < minFrames) return undefined;
     sinceEnd = trailing;
     preRollCount = Math.min(preRollCount, trailing);
-    return segment(frames, trailing * options.frameMs);
+    return segment(frames, trailing * options.frameMs, 0);
   };
 
   /** Closes a full segment after the quietest frame of its last `cutSearchMs`; the rest stays open. */
@@ -155,7 +161,7 @@ export function createVad(options: VadOptions): Vad {
     for (let at = quietest + 1; at < buffered; at += 1)
       if ((levels[at] ?? 0) <= (levels[quietest] ?? 0)) quietest = at;
     const frames = quietest + 1;
-    const closed = segment(frames, 0);
+    const closed = segment(frames, 0, (buffered - frames) * options.frameMs);
     restFrom = frames;
     buffered -= frames;
     silentRun = Math.min(silentRun, buffered);

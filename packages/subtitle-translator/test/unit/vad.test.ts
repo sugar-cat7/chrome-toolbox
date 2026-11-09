@@ -28,11 +28,12 @@ function distance(pcm: Int16Array, input: Float32Array): number {
 }
 
 describe('vad', () => {
-  it.each<{ name: string; pattern: Part[]; segments: number[] }>([
+  it.each<{ name: string; pattern: Part[]; segments: number[]; carried: number[] }>([
     {
       name: '発話→無音で区切る',
       pattern: ['silence:200', 'speech:600', 'silence:400'],
       segments: [700],
+      carried: [0],
     },
     {
       // 前置き 100 + 発話 1,300 + 静かな 20 で 1,420。続きも同じ。最後は 460
@@ -47,17 +48,21 @@ describe('vad', () => {
         'silence:400',
       ],
       segments: [1420, 1420, 460],
+      // Each cut comes at 1,500 ms, 80 ms after the quiet frame; the last closes on silence.
+      carried: [80, 80, 0],
     },
     {
       name: '短すぎる音は捨てる',
       pattern: ['silence:200', 'speech:160', 'silence:400'],
       segments: [],
+      carried: [],
     },
-    { name: '無音だけ', pattern: ['silence:60000'], segments: [] },
-    { name: '一定の大きさの BGM だけ', pattern: ['tone:60000'], segments: [] },
-  ])('vad: $name', ({ pattern: parts, segments }) => {
+    { name: '無音だけ', pattern: ['silence:60000'], segments: [], carried: [] },
+    { name: '一定の大きさの BGM だけ', pattern: ['tone:60000'], segments: [], carried: [] },
+  ])('vad: $name', ({ pattern: parts, segments, carried }) => {
     const found = segmentsOf(parts);
     expect(found.map((segment) => segment.durationMs)).toEqual(segments);
+    expect(found.map((segment) => segment.carriedMs)).toEqual(carried);
     for (const segment of found) expect(segment.pcm.length).toBe(segment.durationMs * 16);
   });
 
@@ -76,6 +81,9 @@ describe('vad', () => {
     expect(first?.durationMs).toBeGreaterThanOrEqual(1020);
     expect(first?.durationMs).toBeLessThanOrEqual(1500);
     expect((first?.durationMs ?? 0) + (second?.durationMs ?? 0)).toBe(1900);
+    // The audio past the cut had arrived when the first segment closed at 1,500 ms.
+    expect(first?.carriedMs).toBe(1500 - (first?.durationMs ?? 0));
+    expect(second?.carriedMs).toBe(0);
     // The two segments join into the audio from the pre-roll to the end of the speech.
     const joined = new Int16Array([...(first?.pcm ?? []), ...(second?.pcm ?? [])]);
     expect(distance(joined, input.subarray(1600, 32000))).toBeLessThan(1);
@@ -149,12 +157,12 @@ describe('vad', () => {
     {
       name: 'an open segment',
       pattern: ['silence:200', 'speech:600'],
-      flushed: { durationMs: 700, trailingSilenceMs: 0, gapBeforeMs: 200 },
+      flushed: { durationMs: 700, trailingSilenceMs: 0, carriedMs: 0, gapBeforeMs: 200 },
     },
     {
       name: 'an open segment in its hangover',
       pattern: ['silence:200', 'speech:600', 'silence:100'],
-      flushed: { durationMs: 700, trailingSilenceMs: 100, gapBeforeMs: 200 },
+      flushed: { durationMs: 700, trailingSilenceMs: 100, carriedMs: 0, gapBeforeMs: 200 },
     },
     { name: 'a sound too short', pattern: ['silence:200', 'speech:160'], flushed: undefined },
     { name: 'silence', pattern: ['silence:400'], flushed: undefined },
@@ -178,6 +186,7 @@ describe('vad', () => {
     expect(vad.flush()).toMatchObject({
       durationMs: 1900 - (first?.durationMs ?? 0),
       trailingSilenceMs: 0,
+      carriedMs: 0,
       gapBeforeMs: 0,
     });
   });
