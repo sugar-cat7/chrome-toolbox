@@ -4,9 +4,10 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
 import type { Cue } from '../../src/captions/tracks.ts';
 import { AUDIO_HINT_MESSAGE, NO_SOURCE_MESSAGE } from '../../src/overlay/source.ts';
-import { defaultSubtitleSettings } from '../../src/settings.ts';
+import { defaultSubtitleSettings, type DisplayMode } from '../../src/settings.ts';
 import { startWatchPage } from '../../src/watch-page.ts';
 import { fakeVideo } from './video.ts';
+import { fakeViewport } from './viewport.ts';
 
 const VIDEO = 'fixture-v01';
 const OTHER = 'fixture-v02';
@@ -55,6 +56,17 @@ const tellCues = (over: Record<string, unknown> = {}) =>
     cues: CUES,
     ...over,
   });
+/** Made-up sentences enough for three batches, one every 3 s. */
+const MANY: Cue[] = Array.from({ length: 12 }, (_, i) => ({
+  startMs: i * 3000,
+  endMs: i * 3000 + 1500,
+  text: `Fixture line ${i + 1}.`,
+}));
+/** The background saves the display the viewer chose; every tab sees the change. */
+const saveDisplay = async (display: DisplayMode) => {
+  await fakeBrowser.storage.local.set({ subtitles: { ...defaultSubtitleSettings, display } });
+  await settle();
+};
 const navigate = (url: string) => {
   history.pushState({}, '', url);
   document.dispatchEvent(new CustomEvent('yt-navigate-finish'));
@@ -132,14 +144,22 @@ function overlay(player: Element) {
       [...(root?.querySelectorAll('[data-row]') ?? [])]
         .filter(visible)
         .map((row) => row.textContent),
+    /** The parts of the pill on screen (the display, then the message), if it shows. */
     pill: () => {
       const pill = root?.querySelector('[data-pill]') ?? null;
-      return visible(pill) ? pill?.textContent : undefined;
+      return visible(pill)
+        ? [...(pill?.children ?? [])].filter(visible).map((part) => part.textContent)
+        : undefined;
+    },
+    button: () => {
+      const pill = root?.querySelector('[data-pill]');
+      return pill instanceof HTMLButtonElement ? pill : undefined;
     },
   };
 }
 
 let posted: MockInstance<Window['postMessage']>;
+let viewport: ReturnType<typeof fakeViewport>;
 let stop: (() => void) | undefined;
 const posts = () =>
   posted.mock.calls.map(([message]): unknown => message).filter((message) => message !== null);
@@ -155,11 +175,13 @@ async function start({ url = `/watch?v=${VIDEO}` }: { url?: string } = {}) {
 
 beforeEach(() => {
   posted = vi.spyOn(window, 'postMessage').mockImplementation(() => undefined);
+  viewport = fakeViewport();
 });
 afterEach(() => {
   stop?.();
   stop = undefined;
   fakeBrowser.reset();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   document.body.replaceChildren();
   document.head.replaceChildren();
@@ -310,11 +332,14 @@ describe('watch page', () => {
       frame(500);
       frame(3_100);
       await settle();
-      expect(shown().pill()).toBe(message);
+      expect(shown().pill()).toEqual(['字幕: 併記', message]);
       expect(shown().rows()).toEqual([]);
       expect(player.hasAttribute('data-st-on')).toBe(false);
       expect(posts()).toEqual([{ source: 'st-content', type: 'ready' }]);
-      expect(server.sent.map((sent) => sent.type)).toEqual(['subs/page']);
+      // Besides the front, which the speech subtitles follow too, only the page is reported.
+      expect(
+        server.sent.filter((sent) => sent.type !== 'subs/front').map((sent) => sent.type),
+      ).toEqual(['subs/page']);
     },
   );
 
@@ -369,8 +394,159 @@ describe('watch page', () => {
     expect(posts()).toEqual([{ source: 'st-content', type: 'ready' }]);
   });
 
-  it('removes the overlay and stops listening on cleanup', async () => {
+  it('tells the caption feeder whether the page is active, at start and on each change', async () => {
+    const { server, play, pause, frame, mute, visibility } = await start();
+    const fronts = () => server.of('subs/front').map((sent) => sent.payload);
+    // Reported as soon as the page is followed: the video has not started.
+    expect(fronts()).toEqual([{ state: 'pause', reason: 'paused' }]);
+    tellVideo();
+    tellCues({ cues: MANY });
+    await settle();
+    play();
+    frame(0);
+    await settle();
+    expect(server.asked()).toHaveLength(1);
+    // Muted, the frames go on but nothing more is sent; the answer in flight is still drawn.
+    mute(true);
+    await server.answer(0);
+    frame(100);
+    await settle();
+    expect(server.asked()).toHaveLength(1);
+    mute(false);
+    await settle();
+    expect(server.asked()).toHaveLength(2);
+    visibility('hidden');
+    await server.answer(1);
+    expect(server.asked()).toHaveLength(2);
+    visibility('visible');
+    await settle();
+    expect(server.asked()).toHaveLength(3);
+    pause();
+    await settle();
+    expect(fronts()).toEqual([
+      { state: 'pause', reason: 'paused' },
+      { state: 'active' },
+      { state: 'pause', reason: 'muted' },
+      { state: 'active' },
+      { state: 'away', reason: 'hidden' },
+      { state: 'active' },
+      { state: 'pause', reason: 'paused' },
+    ]);
+  });
+
+  it('sends nothing while the player is off screen', async () => {
     const { player, server, play, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    viewport.report(player, { width: 0, height: 0, isIntersecting: false });
+    play();
+    frame(0);
+    await settle();
+    expect(server.asked()).toEqual([]);
+    viewport.report(player, { width: 1280, height: 200 });
+    await settle();
+    expect(server.asked()).toHaveLength(1);
+    expect(server.of('subs/front').map((sent) => sent.payload)).toEqual([
+      { state: 'pause', reason: 'paused' },
+      { state: 'away', reason: 'offscreen' },
+      { state: 'active' },
+    ]);
+  });
+
+  it('cycles the display from the player button and follows the saved display', async () => {
+    const { server, shown, play, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    play();
+    frame(500);
+    await server.answer(0);
+    expect(shown().rows()).toEqual(['Okay chat.', '訳:Okay chat.']);
+    expect(shown().pill()).toEqual(['字幕: 併記']);
+    shown().button()?.click();
+    await settle();
+    expect(server.of('subs/display')).toEqual([
+      { type: 'subs/display', target: 'background', payload: { mode: 'source' } },
+    ]);
+    // The display changes when the background has saved it, as in every other tab.
+    expect(shown().pill()).toEqual(['字幕: 併記']);
+    await saveDisplay('source');
+    expect(shown().rows()).toEqual(['Okay chat.']);
+    expect(shown().pill()).toEqual(['字幕: 原語']);
+    await saveDisplay('off');
+    expect(shown().rows()).toEqual([]);
+    expect(shown().pill()).toEqual(['字幕: オフ']);
+    expect(server.of('subs/front').at(-1)?.payload).toEqual({
+      state: 'away',
+      reason: 'display-off',
+    });
+    shown().button()?.click();
+    await settle();
+    expect(server.of('subs/display').at(-1)?.payload).toEqual({ mode: 'ja' });
+    await saveDisplay('ja');
+    expect(shown().rows()).toEqual(['訳:Okay chat.']);
+    expect(server.of('subs/front').at(-1)?.payload).toEqual({ state: 'active' });
+  });
+
+  it('shows the line at once when the display comes back on while paused', async () => {
+    await fakeBrowser.storage.local.set({
+      subtitles: { ...defaultSubtitleSettings, display: 'off' },
+    });
+    const { server, shown, play, pause, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    play();
+    frame(500);
+    pause();
+    await settle();
+    expect(shown().rows()).toEqual([]);
+    await saveDisplay('both');
+    expect(shown().rows()).toEqual(['Okay chat.']);
+    expect(server.of('subs/translate')).toEqual([]);
+  });
+
+  it('clears the line when an ad starts, and keeps it while paused', async () => {
+    const { player, server, shown, play, pause, frame } = await start();
+    tellVideo();
+    tellCues();
+    await settle();
+    play();
+    frame(500);
+    await settle();
+    expect(shown().rows()).toEqual(['Okay chat.']);
+    pause();
+    await settle();
+    expect(shown().rows()).toEqual(['Okay chat.']);
+    play();
+    player.classList.add('ad-showing');
+    await settle();
+    expect(shown().rows()).toEqual([]);
+    // An answer that comes during the ad is kept for later, not drawn over the ad.
+    await server.answer(0);
+    expect(shown().rows()).toEqual([]);
+    player.classList.remove('ad-showing');
+    await settle();
+    frame(3_100);
+    expect(shown().rows()).toEqual(['We are going in.', '訳:We are going in.']);
+  });
+
+  it('reports the player away when the page leaves the video', async () => {
+    const { server, play } = await start();
+    play();
+    await settle();
+    navigate('/feed/subscriptions');
+    await settle();
+    expect(server.of('subs/front').map((sent) => sent.payload)).toEqual([
+      { state: 'pause', reason: 'paused' },
+      { state: 'active' },
+      { state: 'away', reason: 'offscreen' },
+    ]);
+  });
+
+  it('removes the overlay and stops listening on cleanup', async () => {
+    const { player, server, play, pause, frame } = await start();
     tellVideo();
     tellCues();
     await settle();
@@ -387,6 +563,8 @@ describe('watch page', () => {
     navigate(`/watch?v=${OTHER}`);
     await server.answer(0);
     frame(3_100);
+    await saveDisplay('off');
+    pause();
     await settle();
     expect(server.sent).toHaveLength(sent);
     expect(posts()).toHaveLength(before);

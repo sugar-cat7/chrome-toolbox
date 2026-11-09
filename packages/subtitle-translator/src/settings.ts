@@ -110,3 +110,34 @@ export function subtitleSettingsStore(area: StorageArea, key = 'subtitles'): Sub
     },
   };
 }
+
+/** What a storage area tells of its changes (`storage.local.onChanged`): each changed key. */
+export type StorageChanges = Readonly<Record<string, Readonly<{ newValue?: unknown }>>>;
+export type StorageEvents = {
+  onChanged: {
+    addListener(listener: (changes: StorageChanges) => void): void;
+    removeListener(listener: (changes: StorageChanges) => void): void;
+  };
+};
+
+/**
+ * Follows the saved subtitle settings, which any tab, the shortcut or the side panel may change:
+ * `onChange` gets them after each change of `key` in `area`, as `load` reads them (the defaults for
+ * a removed value, and also for one that does not match, as a reader that cannot load them uses).
+ * Returns the removal of the listener.
+ */
+export function watchSubtitleSettings(
+  area: StorageEvents,
+  onChange: (settings: SubtitleSettings) => void,
+  key = 'subtitles',
+): () => void {
+  function listener(changes: StorageChanges): void {
+    const change = changes[key];
+    if (change === undefined) return;
+    const value = change.newValue;
+    const parsed = value === undefined ? undefined : subtitleSettingsSchema.safeParse(value);
+    onChange(parsed?.success === true ? parsed.data : defaultSubtitleSettings);
+  }
+  area.onChanged.addListener(listener);
+  return () => area.onChanged.removeListener(listener);
+}

@@ -15,21 +15,19 @@ function start() {
   player.append(playback.video);
   document.body.append(player);
   const onFrame = vi.fn<(ms: number) => void>();
-  const onRunning = vi.fn<(running: boolean) => void>();
-  const sync = syncFrames({ doc: document, player, video: playback.video, onFrame, onRunning });
-  return { player, playback, onFrame, onRunning, sync };
+  const sync = syncFrames({ doc: document, player, video: playback.video, onFrame });
+  return { player, playback, onFrame, sync };
 }
 /** Lets the player's class observer see a change. */
 const observed = () => Promise.resolve();
 
 describe('frame sync', () => {
   it('reads the playback position of every frame while the video plays', () => {
-    const { playback, onFrame, onRunning, sync } = start();
+    const { playback, onFrame, sync } = start();
     expect(sync.running()).toBe(false);
     expect(playback.waiting()).toBe(0);
     playback.play();
     expect(sync.running()).toBe(true);
-    expect(onRunning.mock.calls).toEqual([[true]]);
     playback.frame(1_500);
     playback.frame(1_516.5);
     expect(onFrame.mock.calls).toEqual([[1_500], [1_516.5]]);
@@ -42,7 +40,7 @@ describe('frame sync', () => {
     { name: '広告', act: 'ad' },
     { name: '裏のタブ', act: 'hide' },
   ] as const)('stops on $name and starts again', async ({ act }) => {
-    const { player, playback, onFrame, onRunning, sync } = start();
+    const { player, playback, onFrame, sync } = start();
     playback.play();
     if (act === 'pause') playback.pause();
     if (act === 'end') playback.end();
@@ -50,7 +48,6 @@ describe('frame sync', () => {
     if (act === 'hide') playback.visibility('hidden');
     await observed();
     expect(sync.running()).toBe(false);
-    expect(onRunning.mock.calls).toEqual([[true], [false]]);
     expect(playback.waiting()).toBe(0);
     playback.frame(2_000);
     expect(onFrame).not.toHaveBeenCalled();
@@ -58,7 +55,7 @@ describe('frame sync', () => {
     if (act === 'hide') playback.visibility('visible');
     if (act === 'pause' || act === 'end') playback.play();
     await observed();
-    expect(onRunning.mock.calls).toEqual([[true], [false], [true]]);
+    expect(sync.running()).toBe(true);
     playback.frame(2_500);
     expect(onFrame.mock.calls).toEqual([[2_500]]);
   });
@@ -79,22 +76,24 @@ describe('frame sync', () => {
     expect(onFrame).not.toHaveBeenCalled();
   });
 
-  it('reports only changes', () => {
-    const { playback, onRunning } = start();
+  it('waits for one frame at a time, however many playback events come', () => {
+    const { playback, sync } = start();
     playback.play();
     playback.video.dispatchEvent(new Event('playing'));
+    playback.video.dispatchEvent(new Event('play'));
+    expect(playback.waiting()).toBe(1);
     playback.pause();
     playback.video.dispatchEvent(new Event('pause'));
-    expect(onRunning.mock.calls).toEqual([[true], [false]]);
+    expect(sync.running()).toBe(false);
+    expect(playback.waiting()).toBe(0);
   });
 
   it('removes every listener and observer and cancels the frame request on stop', async () => {
-    const { player, playback, onFrame, onRunning, sync } = start();
+    const { player, playback, onFrame, sync } = start();
     playback.play();
     sync.stop();
     expect(playback.waiting()).toBe(0);
     expect(sync.running()).toBe(false);
-    onRunning.mockClear();
     playback.pause();
     playback.play();
     playback.seek(3_000);
@@ -103,6 +102,7 @@ describe('frame sync', () => {
     await observed();
     playback.frame(3_000);
     expect(onFrame).not.toHaveBeenCalled();
-    expect(onRunning).not.toHaveBeenCalled();
+    expect(sync.running()).toBe(false);
+    expect(playback.waiting()).toBe(0);
   });
 });

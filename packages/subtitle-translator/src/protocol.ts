@@ -7,7 +7,9 @@ import {
 } from '@chrome-toolbox/extension-core';
 import { SENTENCE_LIMITS } from './captions/sentences.ts';
 import { CAPTION_LIMITS, LANGUAGE_CODE, VIDEO_ID } from './captions/tracks.ts';
+import { FRONT_REASONS, FRONT_STATES } from './front.ts';
 import { pageInfoSchema } from './page-context.ts';
+import { DISPLAY_MODES } from './settings.ts';
 
 /** Who a message is for: every receiver drops what is not for it before validating. */
 export type Target = 'background' | 'offscreen' | 'panel' | 'content';
@@ -87,6 +89,12 @@ export const liveLineSchema = z
   );
 export type LiveLine = Readonly<z.infer<typeof liveLineSchema>>;
 
+/** A `FrontState` as a watch page reports it. */
+export const frontStateSchema = z.strictObject({
+  state: z.enum(FRONT_STATES),
+  reason: z.optional(z.enum(FRONT_REASONS)),
+});
+
 /** The messages the service worker answers; each task adds its own. */
 export const subtitleProtocolSpec = {
   ...llmProtocolSpec,
@@ -98,6 +106,13 @@ export const subtitleProtocolSpec = {
   /** From a watch page's top frame, on load and after each navigation: what the tab shows. */
   'subs/page': {
     request: z.strictObject({ info: pageInfoSchema }),
+    response: z.strictObject({}),
+  },
+  /** From a watch page's top frame, at the start and on each change: whether it is in front. */
+  'subs/front': { request: frontStateSchema, response: z.strictObject({}) },
+  /** From a watch page's top frame (the player button): the display mode to save. */
+  'subs/display': {
+    request: z.strictObject({ mode: z.enum(DISPLAY_MODES) }),
     response: z.strictObject({}),
   },
 };

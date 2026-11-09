@@ -30,5 +30,12 @@ export default defineConfig({
     host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     action: { default_title: '配信字幕翻訳' },
+    // The service worker steps the saved display (runtime.ts); every tab follows it.
+    commands: {
+      'cycle-display': {
+        suggested_key: { default: 'Alt+Shift+J' },
+        description: '字幕の表示を切り替え（日本語／併記／原語／オフ）',
+      },
+    },
   },
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   mountOverlay,
   type OverlayHandle,
@@ -7,6 +7,7 @@ import {
   type PillState,
 } from '../../src/overlay/overlay.ts';
 import { NO_SOURCE_MESSAGE } from '../../src/overlay/source.ts';
+import type { DisplayMode } from '../../src/settings.ts';
 
 const HIDE_RULE = '#movie_player[data-st-on] .ytp-caption-window-container { display: none }';
 
@@ -22,7 +23,8 @@ function setup({ now = () => 0 }: { now?: () => number } = {}) {
   const player = document.createElement('div');
   player.id = 'movie_player';
   document.body.append(player);
-  const overlay = mountOverlay(player, { mode: 'open', now });
+  const onDisplay = vi.fn<(mode: DisplayMode) => void>();
+  const overlay = mountOverlay(player, { mode: 'open', now, onDisplay });
   mounted = overlay;
   const host = player.querySelector('[data-st-overlay]');
   const root = host?.shadowRoot;
@@ -43,6 +45,12 @@ function setup({ now = () => 0 }: { now?: () => number } = {}) {
     row: (name: 'source' | 'ja') => root.querySelector(`[data-row="${name}"]`),
     pill: () => root.querySelector('[data-pill]'),
     pillVisible: () => visible(root.querySelector('[data-pill]')),
+    /** The parts of the pill on screen: the display, then the message if any. */
+    pillText: () =>
+      [...root.querySelectorAll('[data-pill] > *')]
+        .filter(visible)
+        .map((part) => part.textContent ?? ''),
+    onDisplay,
   };
 }
 
@@ -133,26 +141,97 @@ describe('subtitle overlay', () => {
     expect(root.querySelector('img, b, i')).toBeNull();
   });
 
-  it('writes the pill message as text', () => {
-    const { overlay, pill, pillVisible } = setup();
+  it('writes the pill message as text, after the display', () => {
+    const { overlay, pill, pillVisible, pillText } = setup();
     overlay.status({
       source: 'none',
       state: 'stopped',
       display: 'both',
       message: NO_SOURCE_MESSAGE,
     });
-    expect(pill()?.textContent).toBe('字幕なし・Alt+Shift+S で音声字幕');
+    expect(pillText()).toEqual(['字幕: 併記', '字幕なし・Alt+Shift+S で音声字幕']);
     expect(pillVisible()).toBe(true);
     expect(pill()?.getAttribute('data-state')).toBe('stopped');
     overlay.status(captions);
-    expect(pillVisible()).toBe(false);
+    expect(pillVisible()).toBe(true);
+    expect(pillText()).toEqual(['字幕: 併記']);
+    expect(pill()?.getAttribute('data-state')).toBe('active');
   });
 
-  it('keeps the pill while the display is off', () => {
+  it('describes the button with the message while there is one', () => {
+    const { root, overlay, pill } = setup();
+    overlay.status({ ...captions, message: NO_SOURCE_MESSAGE });
+    const described = pill()?.getAttribute('aria-describedby') ?? '';
+    expect(root.getElementById(described)?.textContent).toBe(NO_SOURCE_MESSAGE);
+    overlay.status(captions);
+    expect(pill()?.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('shows no pill until it has a state', () => {
     const { overlay, pillVisible } = setup();
-    overlay.status({ ...captions, display: 'off', message: NO_SOURCE_MESSAGE });
+    overlay.render({ display: 'both', lang: 'en', source: 'Okay chat' });
+    expect(pillVisible()).toBe(false);
+    overlay.status({ ...captions, state: 'pause' });
+    expect(pillVisible()).toBe(true);
+  });
+
+  it('keeps the pill while the display is off, so the viewer can turn it back on', () => {
+    const { overlay, pillVisible, pillText } = setup();
+    overlay.status({ ...captions, state: 'away', display: 'off' });
     overlay.render({ display: 'off', lang: 'en', source: 'Okay chat' });
     expect(pillVisible()).toBe(true);
+    expect(pillText()).toEqual(['字幕: オフ']);
+  });
+
+  it.each([
+    { display: 'ja', label: '日本語', next: 'both' },
+    { display: 'both', label: '併記', next: 'source' },
+    { display: 'source', label: '原語', next: 'off' },
+    { display: 'off', label: 'オフ', next: 'ja' },
+  ] as const)('cycles the display from the player button: $display', ({ display, label, next }) => {
+    const { overlay, pill, pillText, onDisplay } = setup();
+    overlay.status({ ...captions, display });
+    const button = pill();
+    if (!(button instanceof HTMLButtonElement)) throw new Error('no button');
+    expect(button.type).toBe('button');
+    expect(pillText()).toEqual([`字幕: ${label}`]);
+    expect(button.getAttribute('aria-label')).toBe(`字幕の表示を切り替え（今は${label}）`);
+    button.click();
+    expect(onDisplay.mock.calls).toEqual([[next]]);
+  });
+
+  it('keeps clicks, double clicks and the keys of the button from the player', () => {
+    const { player, overlay, pill, onDisplay } = setup();
+    overlay.status(captions);
+    const button = pill();
+    if (!(button instanceof HTMLButtonElement)) throw new Error('no button');
+    const reached: string[] = [];
+    for (const type of ['click', 'dblclick', 'keydown'])
+      player.addEventListener(type, (event) => {
+        reached.push(event instanceof KeyboardEvent ? `${type}:${event.key}` : type);
+      });
+    button.click();
+    button.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, composed: true }));
+    for (const key of [' ', 'Enter', 'k'])
+      button.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, composed: true }));
+    // Space and Enter press the button; YouTube's other keys still reach the player.
+    expect(reached).toEqual(['keydown:k']);
+    expect(onDisplay).toHaveBeenCalledTimes(1);
+    // A press of the mouse does not take the focus, which would keep Space from the player.
+    const press = new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true });
+    button.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+  });
+
+  it('shows the button only with the player controls, under the mouse or with the focus', () => {
+    const { root } = setup();
+    const css = (root.querySelector('style')?.textContent ?? '').replace(/\s+/gu, ' ');
+    expect(css).toContain(
+      ':host-context(#movie_player:not(.ytp-autohide)) .pill, .pill:hover, .pill:focus { opacity: 1; pointer-events: auto; }',
+    );
+    expect(css).toMatch(/\.pill \{[^}]*opacity: 0;[^}]*pointer-events: none;/u);
+    // Only the button takes the pointer: the rest of the overlay lets every click through.
+    expect(css).toMatch(/:host \{[^}]*pointer-events: none;/u);
   });
 
   it("hides YouTube's own captions only while subtitles show", () => {

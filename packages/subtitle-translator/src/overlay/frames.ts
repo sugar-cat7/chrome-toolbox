@@ -12,22 +12,21 @@ const PLAYBACK_EVENTS = ['play', 'playing', 'pause', 'ended', 'emptied'] as cons
  * Follows the playback position frame by frame (`requestVideoFrameCallback`'s `mediaTime`) while
  * the video plays in front of the viewer: not paused or ended, no ad (`#movie_player.ad-showing`,
  * whose time is the ad's) and the tab visible. Nothing runs otherwise; a video moved while paused
- * tells its new position once. `onRunning` gets each change of whether frames are followed. Driven
- * by events and the player's class only: no timer, no polling.
+ * tells its new position once. Driven by events and the player's class only: no timer, no polling.
+ * Whether to translate is not decided here but by `watchFront` (a muted video still shows its
+ * lines, but is not translated further).
  */
 export function syncFrames({
   doc,
   player,
   video,
   onFrame,
-  onRunning,
 }: {
   doc: Document;
   player: HTMLElement;
   video: HTMLVideoElement;
   /** The position of the frame shown, in ms. */
   onFrame: (positionMs: number) => void;
-  onRunning: (running: boolean) => void;
 }): FrameSync {
   let request: number | undefined;
   let running = false;
@@ -50,7 +49,6 @@ export function syncFrames({
       video.cancelVideoFrameCallback(request);
       request = undefined;
     }
-    onRunning(running);
   }
   function onSeeked(): void {
     update();

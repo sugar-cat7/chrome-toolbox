@@ -11,6 +11,7 @@ import {
   parseSubtitleSettings,
   subtitleSettingsStore,
   TRANSLATOR_LABELS,
+  watchSubtitleSettings,
 } from '../../src/settings.ts';
 
 afterEach(() => fakeBrowser.reset());
@@ -41,6 +42,25 @@ describe('subtitle settings', () => {
     const next = { ...defaultSubtitleSettings, sourceLang: 'ko', translator: 'plamo' } as const;
     expect(await store.save(next)).toEqual(Ok(next));
     expect(await subtitleSettingsStore(fakeBrowser.storage.local).load()).toEqual(Ok(next));
+  });
+
+  it('follows the saved settings, with the defaults for a removed or unreadable value', async () => {
+    const seen: unknown[] = [];
+    const unwatch = watchSubtitleSettings(fakeBrowser.storage.local, (settings) => {
+      seen.push(settings);
+    });
+    const area = fakeBrowser.storage.local;
+    await area.set({ subtitles: { ...defaultSubtitleSettings, display: 'ja' }, settings: {} });
+    await area.set({ settings: { llamaBaseUrl: 'http://127.0.0.1:18083' } });
+    await area.set({ subtitles: { display: 'dim' } });
+    await area.remove('subtitles');
+    unwatch();
+    await area.set({ subtitles: { ...defaultSubtitleSettings, display: 'off' } });
+    expect(seen).toEqual([
+      { ...defaultSubtitleSettings, display: 'ja' },
+      defaultSubtitleSettings,
+      defaultSubtitleSettings,
+    ]);
   });
 
   it('rejects an unknown source language with input_invalid', () => {

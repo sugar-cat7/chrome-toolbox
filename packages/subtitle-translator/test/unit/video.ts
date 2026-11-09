@@ -8,6 +8,8 @@ export function fakeVideo() {
   let paused = true;
   let ended = false;
   let currentTime = 0;
+  let muted = false;
+  let volume = 1;
   let visibility: DocumentVisibilityState = 'visible';
   const callbacks = new Map<number, VideoFrameRequestCallback>();
   let next = 1;
@@ -15,6 +17,8 @@ export function fakeVideo() {
     paused: { get: () => paused, configurable: true },
     ended: { get: () => ended, configurable: true },
     currentTime: { get: () => currentTime, configurable: true },
+    muted: { get: () => muted, configurable: true },
+    volume: { get: () => volume, configurable: true },
   });
   Object.defineProperty(document, 'visibilityState', {
     get: () => visibility,
@@ -68,6 +72,14 @@ export function fakeVideo() {
           width: 1280,
           height: 720,
         });
+    },
+    mute: (on: boolean) => {
+      muted = on;
+      fire('volumechange');
+    },
+    setVolume: (level: number) => {
+      volume = level;
+      fire('volumechange');
     },
     visibility: (state: DocumentVisibilityState) => {
       visibility = state;

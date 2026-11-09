@@ -1,5 +1,5 @@
 import { isJapanese } from '../captions/tracks.ts';
-import type { DisplayMode } from '../settings.ts';
+import { DISPLAY_LABELS, nextDisplay, type DisplayMode } from '../settings.ts';
 import type { SubtitleSource } from './source.ts';
 
 /**
@@ -19,8 +19,8 @@ export type OverlayView = Readonly<{
 }>;
 
 /**
- * The pill: a small label at the top right of the overlay. It shows `message` (as text) when there
- * is one and is hidden otherwise; Task 10 turns it into the display toggle.
+ * The pill: the button at the top right of the overlay that switches the display. It names the
+ * display (`字幕: 併記`), followed by `message` when there is one.
  */
 export type PillState = Readonly<{
   source: SubtitleSource;
@@ -44,7 +44,8 @@ const PAGE_STYLE_MARK = 'data-st-style';
 /**
  * Inside the shadow root, so the page's styles do not reach it and it reaches nothing of the
  * page. The host covers the player and is the size container: text follows the player's height.
- * It lets every click through to the player.
+ * It lets every click through to the player, except on the pill while the pill shows: with the
+ * player's controls (YouTube hides them with `.ytp-autohide`), under the mouse or with the focus.
  */
 const STYLE = `
 :host {
@@ -85,13 +86,31 @@ const STYLE = `
   top: 12px;
   right: 12px;
   max-width: 60%;
+  display: flex;
+  gap: 0.6em;
+  align-items: baseline;
+  margin: 0;
   padding: 4px 10px;
+  border: 0;
   border-radius: 999px;
   background: rgb(8 8 8 / 0.7);
   color: #fff;
   font: 500 13px / 1.4 Roboto, 'Noto Sans JP', 'Hiragino Sans', sans-serif;
+  text-align: start;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
 }
+:host-context(#movie_player:not(.ytp-autohide)) .pill,
+.pill:hover,
+.pill:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .pill[data-state='error'] { background: rgb(150 30 30 / 0.85); }
+.message { font-weight: 400; }
 `;
 
 type Rows = { source: string; ja: string; dim: boolean };
@@ -116,6 +135,18 @@ function rowsOf(view: OverlayView): Rows {
   }
 }
 
+/** The id of the pill's message in the shadow root, which describes the button. */
+const MESSAGE_ID = 'st-pill-message';
+
+/** Keeps an event of the pill from the player, which would play, pause or go full screen. */
+const keep = (event: Event): void => event.stopPropagation();
+/** A press of the mouse leaves the focus where it was, so Space and YouTube's keys still work. */
+const noFocus = (event: Event): void => event.preventDefault();
+/** Space and Enter press the button; the player would also take them as play and pause. */
+function keepPress(event: KeyboardEvent): void {
+  if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
+}
+
 /**
  * Draws the subtitles over `player` (YouTube's `#movie_player`) in a shadow root (closed unless
  * `mode` says otherwise; tests read an open one): the source line small on top, the Japanese line
@@ -124,13 +155,23 @@ function rowsOf(view: OverlayView): Rows {
  * source, the player carries `data-st-on`, which the one style added to the page uses to hide
  * YouTube's own captions. When a view with `endedAt` brings a new line on screen, the host's
  * `data-st-latency` gets how long after the speech ended it was shown (ms, by `now`).
+ *
+ * The pill is a `<button>` from the first `status` on, also while the display is `off`, so the
+ * viewer can turn it back on. A press asks `onDisplay` for the next mode (ja → both → source →
+ * off → ja); the display changes when a `status` brings it.
  */
 export function mountOverlay(
   player: HTMLElement,
   {
     mode = 'closed',
     now = () => performance.timeOrigin + performance.now(),
-  }: { mode?: ShadowRootMode; now?: () => number } = {},
+    onDisplay,
+  }: {
+    mode?: ShadowRootMode;
+    now?: () => number;
+    /** The mode the viewer asked for with the pill. */
+    onDisplay?: (mode: DisplayMode) => void;
+  } = {},
 ): OverlayHandle {
   const doc = player.ownerDocument;
   const element = (className: string): HTMLDivElement => {
@@ -151,8 +192,24 @@ export function mountOverlay(
   jaRow.setAttribute('data-row', 'ja');
   jaRow.lang = 'ja';
   lines.append(sourceRow, jaRow);
-  const pill = element('pill');
+  const pill = doc.createElement('button');
+  pill.type = 'button';
+  pill.className = 'pill';
+  pill.hidden = true;
   pill.setAttribute('data-pill', '');
+  const pillLabel = doc.createElement('span');
+  const pillMessage = doc.createElement('span');
+  pillMessage.className = 'message';
+  pillMessage.id = MESSAGE_ID;
+  pillMessage.hidden = true;
+  pill.append(pillLabel, pillMessage);
+  pill.addEventListener('click', (event) => {
+    keep(event);
+    if (pillDisplay !== undefined) onDisplay?.(nextDisplay(pillDisplay));
+  });
+  pill.addEventListener('dblclick', keep);
+  pill.addEventListener('mousedown', noFocus);
+  pill.addEventListener('keydown', keepPress);
   root.append(style, lines, pill);
   player.append(host);
 
@@ -168,6 +225,7 @@ export function mountOverlay(
   let display: DisplayMode = 'off';
   let source: SubtitleSource | undefined;
   let on = false;
+  let pillDisplay: DisplayMode | undefined;
   let pillText = '';
   let pillState = '';
 
@@ -208,12 +266,21 @@ export function mountOverlay(
     },
     status(next) {
       source = next.source;
+      hide(pill, false);
+      if (next.display !== pillDisplay) {
+        pillDisplay = next.display;
+        const label = DISPLAY_LABELS[next.display];
+        pillLabel.textContent = `字幕: ${label}`;
+        pill.setAttribute('aria-label', `字幕の表示を切り替え（今は${label}）`);
+      }
       const text = next.message ?? '';
       if (text !== pillText) {
-        pill.textContent = text;
+        pillMessage.textContent = text;
         pillText = text;
+        hide(pillMessage, text === '');
+        if (text === '') pill.removeAttribute('aria-describedby');
+        else pill.setAttribute('aria-describedby', MESSAGE_ID);
       }
-      hide(pill, text === '');
       if (next.state !== pillState) {
         pill.setAttribute('data-state', next.state);
         pillState = next.state;

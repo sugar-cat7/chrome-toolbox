@@ -14,8 +14,14 @@ import {
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
 import { glossaryStore, type GlossaryStore } from './glossary.ts';
-import { tabPagesStore, type PageInfo } from './page-context.ts';
-import { subtitleSettingsStore, type SubtitleSettingsStore } from './settings.ts';
+import { TAB_PAGES_MAX, tabPagesStore, type PageInfo } from './page-context.ts';
+import {
+  nextDisplay,
+  subtitleSettingsStore,
+  type DisplayMode,
+  type SubtitleSettings,
+  type SubtitleSettingsStore,
+} from './settings.ts';
 import {
   subtitleProtocol,
   type SubtitleMessageType,
@@ -23,6 +29,7 @@ import {
   type TranslateRequest,
   type TranslateResponse,
 } from './protocol.ts';
+import type { FrontState } from './front.ts';
 import {
   CAPTION_CACHE_ENTRIES,
   createSubtitleTranslator,
@@ -81,7 +88,7 @@ export function senderKind(sender: Sender): SenderKind {
  */
 const ROUTES = {
   page: ['llm/status'],
-  content: ['subs/page', 'subs/translate'],
+  content: ['subs/page', 'subs/translate', 'subs/front', 'subs/display'],
   offscreen: [],
   other: [],
 } as const satisfies Record<SenderKind, readonly SubtitleMessageType[]>;
@@ -156,6 +163,29 @@ function captionTranslation({
   return { translate, dispose: () => queue.clear() };
 }
 
+/** The shortcut (`commands` in wxt.config.ts) that steps the display: ja → both → source → off. */
+const CYCLE_DISPLAY = 'cycle-display';
+
+/**
+ * Saves the display mode in the subtitle settings, which every tab follows. One change at a time:
+ * two quick presses of the shortcut step twice.
+ */
+function displaySwitch(subtitles: SubtitleSettingsStore): {
+  change(this: void, next: (mode: DisplayMode) => DisplayMode): Promise<Result<SubtitleSettings>>;
+  dispose(this: void): void;
+} {
+  const queue = createQueue({ concurrency: 1, maxPending: 4 });
+  return {
+    change: (next) =>
+      queue.run(async (): Promise<Result<SubtitleSettings>> => {
+        const loaded = await subtitles.load();
+        if (!loaded.ok) return loaded;
+        return subtitles.save({ ...loaded.value, display: next(loaded.value.display) });
+      }),
+    dispose: () => queue.clear(),
+  };
+}
+
 /** Registers the service worker's message router and returns its cleanup. */
 export function startBackground(): () => void {
   // One inference at a time; a full queue answers queue_full instead of growing.
@@ -165,9 +195,14 @@ export function startBackground(): () => void {
   // What each watch page last reported (16 tabs): the context and glossary of its captions. Kept
   // in storage.session too, so the batches after a service worker restart still have them.
   const pages = tabPagesStore(browser.storage.session);
+  // Whether each watch page last had its video in front (16 tabs), for the capture (Task 13) and
+  // the side panel (Task 14). Reported again on each change.
+  const fronts = createLruCache<number, FrontState>({ max: TAB_PAGES_MAX });
+  const subtitles = subtitleSettingsStore(browser.storage.local);
+  const display = displaySwitch(subtitles);
   const captions = captionTranslation({
     settings: settingsStore(browser.storage.local),
-    subtitles: subtitleSettingsStore(browser.storage.local),
+    subtitles,
     glossary: glossaryStore(browser.storage.local),
     fetch: fetcher,
   });
@@ -186,15 +221,35 @@ export function startBackground(): () => void {
         const page = await pages.get(tabId);
         return page.ok ? captions.translate(request, page.value) : page;
       },
+      'subs/front': ({ state, reason }): Promise<Result<Record<string, never>>> => {
+        if (tabId === undefined) return forbidden();
+        fronts.set(tabId, reason === undefined ? { state } : { state, reason });
+        return Promise.resolve(Ok({}));
+      },
+      'subs/display': async ({ mode }): Promise<Result<Record<string, never>>> => {
+        const saved = await display.change(() => mode);
+        return saved.ok ? Ok({}) : saved;
+      },
     };
   }
+  /** The display shortcut; a failed save leaves the display as it was, for the next press. */
+  function onCommand(command: string): void {
+    if (command !== CYCLE_DISPLAY) return;
+    launch(
+      async () => {
+        await display.change(nextDisplay);
+      },
+      () => undefined,
+    );
+  }
   /**
-   * A closed tab's page is forgotten. The result is not used: an entry that stays ages out, and a
-   * translation uses a page only for the video it names. Tab updates are not followed: without a
-   * host permission Chrome leaves their URL out, and a listener would wake the service worker for
-   * every tab of every site; a tab's next `subs/page` replaces its page (S43).
+   * A closed tab's page and front are forgotten. The result is not used: an entry that stays ages
+   * out, and a translation uses a page only for the video it names. Tab updates are not followed:
+   * without a host permission Chrome leaves their URL out, and a listener would wake the service
+   * worker for every tab of every site; a tab's next `subs/page` replaces its page (S43).
    */
   function onTabRemoved(tabId: number): void {
+    fronts.delete(tabId);
     launch(
       async () => {
         await pages.forget(tabId);
@@ -222,10 +277,13 @@ export function startBackground(): () => void {
   }
   browser.runtime.onMessage.addListener(onMessage);
   browser.tabs.onRemoved.addListener(onTabRemoved);
+  browser.commands.onCommand.addListener(onCommand);
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
     browser.tabs.onRemoved.removeListener(onTabRemoved);
+    browser.commands.onCommand.removeListener(onCommand);
     queue.clear();
     captions.dispose();
+    display.dispose();
   };
 }

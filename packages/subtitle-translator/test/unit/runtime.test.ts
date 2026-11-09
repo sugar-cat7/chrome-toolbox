@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
@@ -15,6 +15,27 @@ import {
 } from '../../src/runtime.ts';
 import { addressed, isFor } from '../../src/protocol.ts';
 
+/** `commands.onCommand`, which the fake browser leaves unimplemented. */
+function fakeCommands() {
+  const listeners = new Set<(command: string) => void>();
+  vi.spyOn(fakeBrowser.commands.onCommand, 'addListener').mockImplementation((listener) => {
+    listeners.add(listener);
+  });
+  vi.spyOn(fakeBrowser.commands.onCommand, 'removeListener').mockImplementation((listener) => {
+    listeners.delete(listener);
+  });
+  return {
+    /** The viewer presses the shortcut of `command`. */
+    press(command: string): void {
+      for (const listener of listeners) listener(command);
+    },
+    listening: () => listeners.size,
+  };
+}
+let commands: ReturnType<typeof fakeCommands>;
+beforeEach(() => {
+  commands = fakeCommands();
+});
 afterEach(() => {
   fakeBrowser.reset();
   vi.unstubAllGlobals();
@@ -347,6 +368,104 @@ describe('caption translation routes', () => {
     expect(await stored(watch.id)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk' } });
     second();
     expect(fakeBrowser.tabs.onRemoved.hasListeners()).toBe(false);
+  });
+});
+
+/** Starts the service worker and asks its message listener as `sender` would. */
+function background() {
+  const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+  const stop = startBackground();
+  const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
+    new Promise((resolve) => {
+      add.mock.calls.at(-1)?.[0]?.(message, sender, resolve);
+    });
+  return { stop, ask };
+}
+/** The senders other than a YouTube top frame. */
+const strangers = (tab: Browser.tabs.Tab): Browser.runtime.MessageSender[] => [
+  { url: 'https://example.com/', tab, frameId: 0 },
+  { url: youtube, tab, frameId: 2 },
+  { url: fakeBrowser.runtime.getURL('/sidepanel.html') },
+  { url: fakeBrowser.runtime.getURL('/offscreen.html') },
+];
+const display = (mode: unknown) => ({ type: 'subs/display', payload: { mode } });
+
+describe('display and front routes', () => {
+  it('saves the display sent by a YouTube top frame and cycles it from the command', async () => {
+    const store = subtitleSettingsStore(fakeBrowser.storage.local);
+    const saved = { ...defaultSubtitleSettings, translator: 'plamo' } as const;
+    expect(await store.save(saved)).toMatchObject({ ok: true });
+    const shownAs = async (mode: string) => {
+      await vi.waitFor(async () => {
+        expect(await store.load()).toEqual(Ok({ ...saved, display: mode }));
+      });
+    };
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+
+    expect(await ask(display('ja'), topFrame(watch))).toEqual(Ok({}));
+    await shownAs('ja');
+    commands.press('cycle-display');
+    await shownAs('both');
+    // Two quick presses step twice.
+    commands.press('cycle-display');
+    commands.press('cycle-display');
+    await shownAs('off');
+    // Another shortcut leaves the display alone.
+    commands.press('toggle-audio');
+    commands.press('cycle-display');
+    await shownAs('ja');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await shownAs('ja');
+    expect(await ask(display('dim'), topFrame(watch))).toMatchObject({
+      ok: false,
+      error: { internalCode: 'input_invalid' },
+    });
+    await shownAs('ja');
+    stop();
+    expect(commands.listening()).toBe(0);
+  });
+
+  it('refuses subs/display from another site with sender_forbidden', async () => {
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    for (const sender of strangers(watch)) {
+      for (const message of [display('off'), display('dim'), { type: 'subs/display' }]) {
+        expect(await ask(message, sender)).toMatchObject({
+          ok: false,
+          error: { internalCode: 'sender_forbidden' },
+        });
+      }
+    }
+    expect(await fakeBrowser.storage.local.get('subtitles')).toEqual({});
+    stop();
+  });
+
+  it('takes the front of a YouTube top frame, checked, and refuses it from anyone else', async () => {
+    const { stop, ask } = background();
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const front = (payload: unknown) => ({ type: 'subs/front', payload });
+    for (const state of [
+      { state: 'active' },
+      { state: 'pause', reason: 'muted' },
+      { state: 'away', reason: 'display-off' },
+    ])
+      expect(await ask(front(state), topFrame(watch))).toEqual(Ok({}));
+    for (const state of [
+      { state: 'gone' },
+      { state: 'away', reason: 'nap' },
+      { state: 'active', since: 0 },
+    ])
+      expect(await ask(front(state), topFrame(watch))).toMatchObject({
+        ok: false,
+        error: { internalCode: 'input_invalid' },
+      });
+    for (const sender of strangers(watch))
+      expect(await ask(front({ state: 'active' }), sender)).toMatchObject({
+        ok: false,
+        error: { internalCode: 'sender_forbidden' },
+      });
+    stop();
   });
 });
 
