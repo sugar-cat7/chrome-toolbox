@@ -1,9 +1,10 @@
 // The llama.cpp address of the subtitle extension's browser tests. Opening the side panel asks
 // the server what it can do (`subs/capability`: `/props` for the speech model and `/v1/models`),
 // which would otherwise reach whatever listens on the default address: a developer's real router,
-// where `/props` for the speech model can make it load a model. The side panel fixture below
-// points the extension at `NO_SERVER` before the panel opens, refuses every request of the service
-// worker to the default address (as a network error), and fails a test that made one.
+// where `/props` for the speech model can make it load a model. The fixtures below point the
+// extension at `NO_SERVER` before every test (before the side panel opens), refuse every request
+// of the service worker to the default address (as a network error), and fail a test that made
+// one. The offscreen document takes its address from the service worker when a capture starts.
 import type { Worker } from '@playwright/test';
 import { defaultSettings } from '@chrome-toolbox/extension-core';
 import { expect, test as base } from '@chrome-toolbox/extension-core/testing';
@@ -59,20 +60,31 @@ async function fetchedUrls(serviceWorker: Worker): Promise<string[] | undefined>
     : undefined;
 }
 
-/** The shared fixtures, with a side panel that never reaches the default llama.cpp address. */
-export const test = base.extend({
-  sidePanel: async ({ context, extensionId, serviceWorker }, provide) => {
-    await setServer(serviceWorker, NO_SERVER);
-    await recordFetches(serviceWorker, defaultSettings.llamaBaseUrl);
+/**
+ * The shared fixtures, kept off the default llama.cpp address: before each test the extension
+ * points at `NO_SERVER` (a test that wants the stub calls `setServer` with its origin), and every
+ * request of the service worker to the default address is refused and fails the test. The side
+ * panel opens after that.
+ */
+export const test = base.extend<{ serverGuard: undefined }>({
+  serverGuard: [
+    async ({ serviceWorker }, provide) => {
+      await setServer(serviceWorker, NO_SERVER);
+      await recordFetches(serviceWorker, defaultSettings.llamaBaseUrl);
+      await provide(undefined);
+      const fetched = await fetchedUrls(serviceWorker);
+      expect(fetched, 'the service worker kept its record of requests').toBeDefined();
+      expect(
+        fetched?.filter((url) => url.startsWith(defaultSettings.llamaBaseUrl)),
+        `requests to the default address ${defaultSettings.llamaBaseUrl}`,
+      ).toEqual([]);
+    },
+    { auto: true },
+  ],
+  sidePanel: async ({ context, extensionId, serverGuard: _guarded }, provide) => {
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     await provide(page);
-    const fetched = await fetchedUrls(serviceWorker);
-    expect(fetched, 'the service worker kept its record of requests').toBeDefined();
-    expect(
-      fetched?.filter((url) => url.startsWith(defaultSettings.llamaBaseUrl)),
-      `requests to the default address ${defaultSettings.llamaBaseUrl}`,
-    ).toEqual([]);
   },
 });
 

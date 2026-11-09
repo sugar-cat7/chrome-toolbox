@@ -115,6 +115,30 @@ Decisions:
   - A second click on the captured tab stops it. Anywhere else, including a tab whose page or URL is unknown, the click only opens the panel.
   - Alt+Shift+S starts and stops as before. The side panel only stops a capture and says how to start one.
 
+## Browser tests of the subtitles (subtitle-translator Task 15), 2026-11-09
+
+Step 0, 2026-11-09: Playwright 1.64.0 with its Chromium (build 1248, Chrome for Testing 156) in the new headless mode, the production build loaded with `--load-extension`, the made-up watch page served at `https://www.youtube.com/watch` by the test, and the repository's llama.cpp stub. No real site or model server was reached.
+
+(a) A real `tabCapture` works in the headless E2E:
+
+- The panel has no start button since S46, so only the action was tried. CDP `Extensions.triggerAction` on the watch page's `tab` target fired `action.onClicked`; the service worker took a stream id, opened `offscreen.html`, and the tones of the page's `<video>` were recognized and translated on slot 0 within 2–3 s. This is the toolbar icon's own path (S46), so the e2e build of (b) is not needed.
+- `triggerAction` needed no `--enable-unsafe-extension-debugging`, as page-translator Task 1 found; Task 13's headed spike had added it. It works over Playwright's own connection (`launchPersistentContext`, whose `context.browser()` is set) and over the `realVisibility` one. The helper is extension-core `testing/playwright.ts` `triggerAction(context, page)`, copied unchanged from the page branch (S32).
+- The browser must start without Playwright's `--mute-audio` (Task 13 (d)): the fixture option `captureAudio` drops it (`ignoreDefaultArgs`, or leaves it out of the `realVisibility` arguments) and adds `--disable-audio-output`, so nothing plays on the host and the capture still hears the tab.
+- The page may call `video.play()` with sound and no gesture in Playwright's Chromium.
+- The Alt+Shift+S shortcut still cannot be pressed from a test (Task 13 (a)); the shortcut path is left to Task 16.
+
+(b) Not needed: no `starter.e2eBuild`, no `wxt build --mode e2e` and no fixture audio path in the extension.
+
+(c) The offscreen document's heap and long tasks: Chromium lists it as a target of type `background_page`, and Playwright attaches to none (`context.pages()` and `context.backgroundPages()` stay empty), so candidate 1 fails. Candidate 2 works with one change: `Target.attachToTarget` on a browser CDP session with `flatten: false`, then `Target.sendMessageToTarget` and `Target.receivedMessageFromTarget`. With `flatten: true` the child session needs a `sessionId` on each command, which Playwright's `CDPSession.send` cannot add. Through that session `HeapProfiler.collectGarbage`, `Performance.getMetrics` (`JSHeapUsedSize`), `HeapProfiler.takeHeapSnapshot` (its chunks come as events) and `Runtime.evaluate` (the `longtask` observer) all answered. The helper is `offscreenTarget(context, '/offscreen.html')`; finding the target by its URL is `extensionTarget` (`testing/targets.ts`, unit tested).
+
+Other choices for the tests:
+
+- The caption path's overlay follows `requestVideoFrameCallback`, which needs video frames. Playwright's Chromium has no H.264, so the test encodes one 16×16 VP8 key frame with WebCodecs (in a tab of a test-only `https://video-encoder.test/`, because `about:blank` has no `VideoEncoder`) and writes a WebM that repeats it every 100 ms, with a cue per 10 s cluster. A 30-minute video is about 0.8 MB, made in the test; seeking and `playbackRate` 16 work. The audio path plays a WAV of 220 Hz sawtooth tones made in the test (600 ms tone, 500 ms silence, 48 kHz 16-bit), looped.
+- The platform stub answers a `Range` request with 206 and the range, as a media server does.
+- The overlay's shadow root stays closed: the tests find it with `DOM.getDocument` (`pierce: true`) and read it with `Runtime.callFunctionOn`, and record each change of its rows with the video's `currentTime` from a `MutationObserver` added the same way.
+- Every browser test of the package starts pointed at `http://127.0.0.1:9`, and the service worker refuses and reports any request to the default address (`127.0.0.1:18083`); a test that wants the stub sets its address first. The offscreen document takes the address from the service worker at the start of a capture.
+- The bound on the caption timeline is checked from the page's heap: the strings of translated lines (`訳:Fixture line <n>.`) in a heap snapshot, against the lines within 10 minutes of the position. The timeline itself is a closure of the content script, out of a test's reach.
+
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 
 Status: **PARTIAL (updated 2026-10-28).** The benchmark tools are implemented and unit-tested (`packages/bench/`), and the procedure was first run on 2026-10-28 against a llama.cpp router server ([setup](llama-server.md)) with synthetic data only (see "Real-server results" below). Cells in the sections that follow remain `PENDING` unless that section lists a number. Still PENDING: measurements on real stream data (100 lines per language), the user's 20-sentence translation check, and the Qwen-family comparison. The decisions below are provisional (R8 / R10) until those close.
