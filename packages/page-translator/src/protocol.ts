@@ -23,6 +23,8 @@ export const MAX_REQUEST_UNITS = 6;
 /** Longest page title (UTF-16 code units, as the page script cuts it) and site (a host name). */
 const TITLE_LENGTH = 200;
 const SITE_LENGTH = 253;
+/** Longest site pattern: `https://`, a host name and `/*`. */
+const PATTERN_LENGTH = 'https://'.length + SITE_LENGTH + '/*'.length;
 
 /**
  * What the page script asks the background to translate: the page's paragraphs (`page`, one
@@ -116,6 +118,17 @@ export const pageProtocolSpec = {
    */
   'page/start': {
     request: z.strictObject({ tabId: z.int(), url: z.optional(z.string()) }),
+    response: z.strictObject({}),
+  },
+  /** Restore the tab's original text: the background sends its page script `restore`. */
+  'page/restore': { request: z.strictObject({ tabId: z.int() }), response: z.strictObject({}) },
+  /**
+   * Always translate the site of `pattern` (`siteOf`). The popup sends it just before it asks
+   * Chrome for the site's permission, which closes the popup: the background adds the site once
+   * Chrome grants it (`permissions.onAdded`), or at once when it already does.
+   */
+  'page/always': {
+    request: z.strictObject({ pattern: z.string().check(z.maxLength(PATTERN_LENGTH)) }),
     response: z.strictObject({}),
   },
 };

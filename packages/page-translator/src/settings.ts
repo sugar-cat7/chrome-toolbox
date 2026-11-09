@@ -1,5 +1,13 @@
 import { z } from 'zod/mini';
-import { capture, decode, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
+import {
+  capture,
+  captureSync,
+  decode,
+  Err,
+  failure,
+  Ok,
+  type Result,
+} from '@chrome-toolbox/contracts';
 import type { StorageArea } from '@chrome-toolbox/extension-core';
 import { DISPLAY_MODES, PAGE_TRANSLATORS } from './protocol.ts';
 
@@ -39,6 +47,68 @@ export const defaultPageSettings: PageSettings = {
   always: [],
   never: [],
 };
+
+/**
+ * A site as the page settings name it: `host` (the lower-case host name, for the never list) and
+ * `pattern` (`<protocol>//<host>/*`, the match pattern of the always list and of the host
+ * permission Chrome grants for it).
+ */
+export type Site = Readonly<{ host: string; pattern: string }>;
+
+/** An IPv6 address as URL writes it, in brackets. */
+const IPV6_HOST = /^\[[\d.:a-f]+\]$/u;
+/** One label of a host name or a part of an IPv4 address (URL has lowered the letters). */
+const HOST_LABEL = /^[\w-]{1,63}$/u;
+/**
+ * Whether `host` (from URL, without a trailing dot) is a host name or an address. A `*` or any
+ * other sign would make a match pattern for more than one site.
+ */
+const isHostName = (host: string): boolean =>
+  IPV6_HOST.test(host) ||
+  (host.length <= PAGE_SETTINGS_LIMITS.host &&
+    host.split('.').every((label) => HOST_LABEL.test(label)));
+const withoutTrailingDot = (host: string): string => host.replace(/\.$/u, '');
+
+/**
+ * The site of a page at `url`. Only `http:` and `https:` pages are sites; any other page (the
+ * browser's, a file, another extension's) is `page_restricted`.
+ */
+export function siteOf(url: string): Result<Site> {
+  const parsed = captureSync(() => new URL(url), 'page_restricted');
+  if (!parsed.ok) return parsed;
+  const { protocol, hostname } = parsed.value;
+  if ((protocol !== 'http:' && protocol !== 'https:') || !isHostName(withoutTrailingDot(hostname)))
+    return Err(failure('page_restricted'));
+  return Ok({ host: hostname, pattern: `${protocol}//${hostname}/*` });
+}
+
+/**
+ * The host name in what the viewer typed into the options page's never list: a bare name, or a
+ * URL whose scheme, port, path and trailing dot are dropped. Anything else is `input_invalid`.
+ */
+export function normalizeHost(input: string): Result<string> {
+  const text = input.trim();
+  const url = /^[a-z][\d+.a-z-]*:\/\//iu.test(text) ? text : `https://${text}`;
+  const parsed = captureSync(() => new URL(url), 'input_invalid');
+  if (!parsed.ok) return parsed;
+  const { protocol, hostname } = parsed.value;
+  const host = withoutTrailingDot(hostname);
+  if ((protocol !== 'http:' && protocol !== 'https:') || !isHostName(host))
+    return Err(failure('input_invalid'));
+  return Ok(host);
+}
+
+/** Whether `host` is excluded: it is an entry of `never`, or a subdomain of one. */
+export function isNever(host: string, never: readonly string[]): boolean {
+  const name = withoutTrailingDot(host);
+  return never.some((entry) => name === entry || name.endsWith(`.${entry}`));
+}
+
+/** Whether the page at `url` is on a site of the always list (the same scheme and host). */
+export function isAlways(url: string, always: readonly string[]): boolean {
+  const site = siteOf(url);
+  return site.ok && always.includes(site.value.pattern);
+}
 
 export type PageSettingsStore = {
   load(this: void): Promise<Result<PageSettings>>;

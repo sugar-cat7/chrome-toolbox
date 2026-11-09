@@ -1,6 +1,6 @@
 import { browser } from 'wxt/browser';
 import type { ScriptPublicPath } from 'wxt/utils/inject-script';
-import { capture, Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
+import { Err, failure, launch, Ok, type Result } from '@chrome-toolbox/contracts';
 import {
   connectionPort,
   createQueue,
@@ -10,7 +10,14 @@ import {
   type HostPermissions,
   type StorageArea,
 } from '@chrome-toolbox/extension-core';
-import { injectPage, PAGE_SCRIPT, type ScriptingApi } from './control.ts';
+import {
+  COMMAND_ID,
+  createControl,
+  MENU_ID,
+  PAGE_SCRIPT,
+  type ControlApi,
+  type ScriptingApi,
+} from './control.ts';
 import { pageProtocol, type PageProtocolHandlers } from './protocol.ts';
 import { pageSettingsStore } from './settings.ts';
 import { createPageTranslator } from './translator.ts';
@@ -69,12 +76,41 @@ const scripting: ScriptingApi = {
     }),
 };
 
+/** The extension APIs behind the control: the scripting adapter above and Chrome's own. */
+function controlApi(): ControlApi {
+  return {
+    scripting: {
+      ...scripting,
+      registerContentScripts: (scripts) => browser.scripting.registerContentScripts(scripts),
+      updateContentScripts: (scripts) => browser.scripting.updateContentScripts(scripts),
+      unregisterContentScripts: (filter) => browser.scripting.unregisterContentScripts(filter),
+      getRegisteredContentScripts: (filter) =>
+        browser.scripting.getRegisteredContentScripts(filter),
+    },
+    tabs: {
+      sendMessage: (tabId, message, options) => browser.tabs.sendMessage(tabId, message, options),
+    },
+    permissions: { contains: (permissions) => browser.permissions.contains(permissions) },
+    storage: { local: browser.storage.local, session: browser.storage.session },
+  };
+}
+
+/** The part of `contextMenus.OnClickData` the menu listener reads. */
+type MenuClick = Readonly<{ menuItemId: string | number; selectionText?: string | undefined }>;
+/** The part of a `tabs.Tab` the listeners read. */
+type TabRef = Readonly<{ id?: number | undefined }>;
+/** The part of `permissions.Permissions` the permission listeners read. */
+type Origins = Readonly<{ origins?: string[] | undefined }>;
+
 /** Routes only this extension's pages may use: they let the extension into a tab. */
-type PageRoute = 'page/start';
+type PageRoute = 'page/start' | 'page/restore' | 'page/always';
 /** Routes only the page script in a tab's top frame may use: they translate for that tab. */
 type ContentRoute = 'page/translate' | 'page/cancel';
 /** The storage keys of the settings the translator reads: the shared ones and the page's. */
 const SETTINGS_KEYS = ['settings', 'page'] as const;
+/** A route's empty answer for a done step. */
+const answered = (result: Result<void>): Result<Record<string, never>> =>
+  result.ok ? Ok({}) : result;
 
 /** Registers the service worker's message router and returns its cleanup. */
 export function startBackground(): () => void {
@@ -89,23 +125,19 @@ export function startBackground(): () => void {
     settings: settingsStore(browser.storage.local),
     pageSettings: pageSettingsStore(browser.storage.local),
   });
+  const control = createControl(controlApi());
   const pageHandlers: Pick<PageProtocolHandlers, PageRoute> = {
     // The popup's tab got `activeTab` from the toolbar button: the page script goes into its top
-    // frame and is told to translate. A second press injects again; the script already there
-    // keeps the page (claimPage).
-    'page/start': async ({ tabId }): Promise<Result<Record<string, never>>> => {
-      const injected = await injectPage(scripting, tabId);
-      if (!injected.ok) return injected;
-      const told = await capture(
-        () =>
-          browser.tabs.sendMessage(
-            tabId,
-            { type: 'page/command', payload: { action: 'translate' } },
-            { frameId: 0 },
-          ),
-        'ipc_failed',
-      );
-      return told.ok ? Ok({}) : told;
+    // frame and is told to translate, unless the site is on the never list. A second press
+    // injects again; the script already there keeps the page (claimPage).
+    'page/start': async ({ tabId, url }): Promise<Result<Record<string, never>>> =>
+      answered(await control.start(tabId, url)),
+    'page/restore': async ({ tabId }): Promise<Result<Record<string, never>>> =>
+      answered(await control.restore(tabId)),
+    'page/always': async ({ pattern }): Promise<Result<Record<string, never>>> => {
+      const asked = await control.ask(pattern);
+      if (!asked.ok) return asked;
+      return answered(await control.syncAlways());
     },
   };
   /** The page script's routes for the tab it runs in: requests and cancels are that tab's. */
@@ -118,7 +150,11 @@ export function startBackground(): () => void {
     },
   });
   const forbidden = (): Promise<Result<never>> => Promise.resolve(Err(failure('sender_forbidden')));
-  const notPage: Pick<PageProtocolHandlers, PageRoute> = { 'page/start': forbidden };
+  const notPage: Pick<PageProtocolHandlers, PageRoute> = {
+    'page/start': forbidden,
+    'page/restore': forbidden,
+    'page/always': forbidden,
+  };
   const notContent: Pick<PageProtocolHandlers, ContentRoute> = {
     'page/translate': forbidden,
     'page/cancel': forbidden,
@@ -154,17 +190,78 @@ export function startBackground(): () => void {
   function onTabRemoved(tabId: number): void {
     translator.cancel(tabId);
   }
-  /** The options page or the popup saved settings: the next request reads them again. */
+  /**
+   * Runs what a browser event asks for, step after step. An event has nobody to answer: a page
+   * Chrome lets no extension script shows no bubble, and a registration left behind is aligned
+   * again at the next settings change, permission change or service worker start.
+   */
+  function inBackground(...steps: (() => Promise<Result<void>>)[]): void {
+    launch(
+      async () => {
+        for (const step of steps) void (await step());
+      },
+      () => undefined,
+    );
+  }
+  /**
+   * The options page or the popup saved settings: the next request reads them again, and the
+   * always registration follows the page settings' lists.
+   */
   function onStorageChanged(changes: Record<string, unknown>): void {
     if (SETTINGS_KEYS.some((key) => Object.hasOwn(changes, key))) translator.reload();
+    if (Object.hasOwn(changes, 'page')) inBackground(control.syncAlways);
+  }
+  /**
+   * The context menu item lives as long as the extension's install: Chrome keeps it across
+   * service worker restarts. After a browser update it can still be there; Chrome's duplicate-id
+   * error is read (lastError) and the existing item stays.
+   */
+  function onInstalled(): void {
+    browser.contextMenus.create(
+      { id: MENU_ID, title: '選択範囲を翻訳', contexts: ['selection'] },
+      () => browser.runtime.lastError,
+    );
+  }
+  /** 「選択範囲を翻訳」 in the context menu: its text goes along, for a selection in a frame. */
+  function onMenuClicked(info: MenuClick, tab?: TabRef): void {
+    const tabId = tab?.id;
+    if (info.menuItemId !== MENU_ID || tabId === undefined) return;
+    inBackground(() => control.selection(tabId, info.selectionText));
+  }
+  /** The shortcut: the page script reads the selection itself. */
+  function onCommand(command: string, tab?: TabRef): void {
+    const tabId = tab?.id;
+    if (command !== COMMAND_ID || tabId === undefined) return;
+    inBackground(() => control.selection(tabId, undefined));
+  }
+  /** Chrome granted sites: the one the popup asked for joins the always list. */
+  function onPermissionsAdded({ origins = [] }: Origins): void {
+    inBackground(() => control.granted(origins), control.syncAlways);
+  }
+  /** The viewer took sites' permissions away: they leave the always list first. */
+  function onPermissionsRemoved({ origins = [] }: Origins): void {
+    inBackground(() => control.forget(origins), control.syncAlways);
   }
   browser.runtime.onMessage.addListener(onMessage);
   browser.tabs.onRemoved.addListener(onTabRemoved);
   browser.storage.local.onChanged.addListener(onStorageChanged);
+  browser.runtime.onInstalled.addListener(onInstalled);
+  browser.contextMenus.onClicked.addListener(onMenuClicked);
+  browser.commands.onCommand.addListener(onCommand);
+  browser.permissions.onAdded.addListener(onPermissionsAdded);
+  browser.permissions.onRemoved.addListener(onPermissionsRemoved);
+  // Each start aligns the registration: an alignment cut short when the last service worker
+  // stopped, or a registration an older version left, is put right.
+  inBackground(control.syncAlways);
   return () => {
     browser.runtime.onMessage.removeListener(onMessage);
     browser.tabs.onRemoved.removeListener(onTabRemoved);
     browser.storage.local.onChanged.removeListener(onStorageChanged);
+    browser.runtime.onInstalled.removeListener(onInstalled);
+    browser.contextMenus.onClicked.removeListener(onMenuClicked);
+    browser.commands.onCommand.removeListener(onCommand);
+    browser.permissions.onAdded.removeListener(onPermissionsAdded);
+    browser.permissions.onRemoved.removeListener(onPermissionsRemoved);
     translator.dispose();
     queue.clear();
   };

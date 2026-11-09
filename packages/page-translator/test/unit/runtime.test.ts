@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
@@ -8,8 +8,14 @@ import { claimPage } from '../../src/content/claim.ts';
 import { injectPage, PAGE_SCRIPT, type ScriptingApi } from '../../src/control.ts';
 import { optionsPort, senderKind, startBackground, type PanelApi } from '../../src/runtime.ts';
 import { defaultPageSettings } from '../../src/settings.ts';
+import { fakeBackground } from './chrome.ts';
 import { gate, llama } from './llama.ts';
 
+// The background also listens to the context menu, the shortcut and permission changes, which
+// WXT's fake browser leaves out.
+beforeEach(() => {
+  fakeBackground();
+});
 afterEach(() => {
   fakeBrowser.reset();
   vi.unstubAllGlobals();
@@ -45,6 +51,8 @@ const translate = {
   },
 };
 const cancel = { type: 'page/cancel', payload: {} };
+const restore = { type: 'page/restore', payload: { tabId: 3 } };
+const always = { type: 'page/always', payload: { pattern: 'https://wiki.fixture.test/*' } };
 const cancelled = { ok: false, error: { internalCode: 'operation_cancelled' } };
 
 describe('extension runtime wiring', () => {
@@ -215,6 +223,12 @@ describe('extension runtime wiring', () => {
     { route: 'page/cancel', sender: 'page', expected: 'sender_forbidden' },
     { route: 'page/cancel', sender: 'iframe', expected: 'sender_forbidden' },
     { route: 'page/start', sender: 'content', expected: 'sender_forbidden' },
+    { route: 'page/restore', sender: 'content', expected: 'sender_forbidden' },
+    { route: 'page/restore', sender: 'iframe', expected: 'sender_forbidden' },
+    { route: 'page/restore', sender: 'other extension', expected: 'sender_forbidden' },
+    { route: 'page/always', sender: 'content', expected: 'sender_forbidden' },
+    { route: 'page/always', sender: 'iframe', expected: 'sender_forbidden' },
+    { route: 'page/always', sender: 'other extension', expected: 'sender_forbidden' },
   ] as const)('$route from $sender', async ({ route, sender, expected }) => {
     const server = llama();
     vi.stubGlobal('fetch', vi.fn(server.fetch));
@@ -226,12 +240,40 @@ describe('extension runtime wiring', () => {
       'other extension': { url: 'chrome-extension://other-extension-id/popup.html' },
       content: { tab, frameId: 0, url: 'https://wiki.fixture.test/a' },
     };
-    const messages = { 'page/translate': translate, 'page/cancel': cancel, 'page/start': start };
+    const messages = {
+      'page/translate': translate,
+      'page/cancel': cancel,
+      'page/start': start,
+      'page/restore': restore,
+      'page/always': always,
+    };
     expect(await ask(messages[route], senders[sender])).toMatchObject({
       ok: false,
       error: { internalCode: expected },
     });
     expect(server.calls).toEqual([]);
+    expect(fakeBrowser.scripting.executeScript).not.toHaveBeenCalled();
+    expect(fakeBrowser.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+    stop();
+  });
+
+  it('answers page/start on an excluded site with page_excluded and page/restore with the restore command', async () => {
+    const execute = vi.spyOn(fakeBrowser.scripting, 'executeScript').mockResolvedValue(undefined);
+    const deliver = vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+    await fakeBrowser.storage.local.set({
+      page: { ...defaultPageSettings, never: ['wiki.fixture.test'] },
+    });
+    const { ask, stop } = background();
+    expect(await ask(start, options)).toMatchObject({
+      ok: false,
+      error: { internalCode: 'page_excluded' },
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(await ask(restore, options)).toEqual(Ok({}));
+    expect(deliver.mock.calls).toEqual([
+      [3, { type: 'page/command', payload: { action: 'restore' } }, { frameId: 0 }],
+    ]);
     stop();
   });
 

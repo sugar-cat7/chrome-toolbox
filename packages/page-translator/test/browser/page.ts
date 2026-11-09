@@ -53,6 +53,16 @@ export async function tabIdOf(serviceWorker: Worker, page: Page): Promise<number
   return tabId;
 }
 
+/** The page script's answer to `ping` in the tab's top frame, or the reason there is none. */
+export const ping = (serviceWorker: Worker, tabId: number): Promise<unknown> =>
+  serviceWorker.evaluate(
+    (tabId) =>
+      (globalThis as unknown as { chrome: WorkerChrome }).chrome.tabs
+        .sendMessage(tabId, { type: 'page/command', payload: { action: 'ping' } }, { frameId: 0 })
+        .catch((error: unknown) => (error instanceof Error ? error.message : String(error))),
+    tabId,
+  );
+
 /**
  * Starts translating `page` as the popup's "このページを翻訳" does. The toolbar button is pressed
  * (CDP `Extensions.triggerAction`), which grants `activeTab`; Playwright does not attach to the

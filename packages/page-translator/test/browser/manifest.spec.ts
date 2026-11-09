@@ -3,7 +3,14 @@ import path from 'node:path';
 import type { Worker } from '@playwright/test';
 import { expect, test, triggerAction } from '@chrome-toolbox/extension-core/testing';
 import { PAGE_SCRIPT } from '../../src/control.ts';
-import { fingerprint, servePage, startTranslation, tabIdOf, type WorkerChrome } from './page.ts';
+import {
+  fingerprint,
+  ping,
+  servePage,
+  startTranslation,
+  tabIdOf,
+  type WorkerChrome,
+} from './page.ts';
 
 // What the extension may touch at install, and how it gets into a page later: only when the
 // viewer presses the toolbar button (activeTab), into the tab's top frame.
@@ -22,15 +29,6 @@ const plainHtml = `<!doctype html>
   </body>
 </html>`;
 
-/** The page script's answer to `ping` in the tab's top frame, or the reason there is none. */
-const ping = (serviceWorker: Worker, tabId: number): Promise<unknown> =>
-  serviceWorker.evaluate(
-    (tabId) =>
-      (globalThis as unknown as { chrome: WorkerChrome }).chrome.tabs
-        .sendMessage(tabId, { type: 'page/command', payload: { action: 'ping' } }, { frameId: 0 })
-        .catch((error: unknown) => (error instanceof Error ? error.message : String(error))),
-    tabId,
-  );
 /** Injects the page script as the background does; `'injected'` or Chrome's refusal. */
 const inject = (serviceWorker: Worker, tabId: number): Promise<string> =>
   serviceWorker.evaluate(

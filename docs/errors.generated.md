@@ -38,3 +38,4 @@ Internal to public projection:
 - `capture_failed` → `unavailable`
 - `capture_not_invoked` → `permission_denied`
 - `page_restricted` → `permission_denied`
+- `page_excluded` → `permission_denied`
