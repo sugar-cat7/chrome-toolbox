@@ -1983,7 +1983,7 @@ it('language tally follows the majority of the last 20 lines', () => {
   - 結果を `docs/adoption.md` に記録する。
   - (b) が通っても、取得の保ち方は変えない（ユーザーの決定、2026-11-05。判断 S8）。結果は記録だけする。
   - 結果（2026-11-09、`docs/adoption.md` の Task 13 の節）: (a) パネルのボタンは、アイコンでパネルを開いた後もだめ。`action.onClicked` を受けるアイコンは通る。ショートカットは CDP のキー入力では確かめられない（Task 16）。(b) 通る。(c) `chrome.runtime` だけ、`fetch` は届く。(d) ミュートでも裏でも音は取れ、取得中のページは裏でも `visible` のまま。`--mute-audio` では無音。(e) 48 kHz、ページから offscreen まで約 50 ms。(f) 8 秒は通り、10 秒は切れる。
-  - (f) の結果もコントローラーに知らせる。サイドパネルの経路では、パネルを開いたときの `subs/capability` でモデルが読み込まれ、その答えが出るまでボタンを押せない（Task 14）ので、`start` の `props` はふつう待たない。ショートカットの経路は、`props` の後に stream id を取るので切れない。
+  - (f) の結果もコントローラーに知らせる。アイコンの経路もショートカットの経路も、`props` の後に stream id を取るので切れない。サイドパネルからは始めない（判断 S46）。
   - (a) で通らない操作は、サイドパネルの案内（Task 14）から外す。
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -2125,7 +2125,8 @@ it('opens the side panel before anything is awaited', async () => {
     - 表示は `subs/display` で送る（`page` からの経路を足す）。Task 10 の background のキューを通る。
     - 取得元、話されている言語、翻訳モデルも、変えた欄だけを background に送り、同じキューで読み直した最新の値に重ねて保存する（例: `subs/settings` `{ patch }`）。パネルが持つ欄だけを書く。
 
-- `TabState = Readonly<{ tabId: number; page?: PageInfo; source: 'captions' | 'audio' | 'none'; front: FrontState; session?: SessionState; translator: TranslatorStatus }>`
+- `TabState = Readonly<{ tabId: number; page?: PageInfo; source: 'captions' | 'audio' | 'none'; front: FrontState; starting?: true; session?: SessionState; translator: TranslatorStatus }>`
+  - `subs/tab-state` は取得の開始を待たない。`Sessions.current()` はキューに並ばず（起動し直した後の復元だけを待つ）、開始の途中のタブは `Sessions.starting()` で `starting: true` にする。パネルは「開始しています…」と出し、開始の始めと終わりに届く `subs/state-changed` で読み直す。
   - `front` は Task 10 の `tabFronts`（`storage.session` に覚えたもの）から読む。報告のないタブは away（`UNKNOWN_FRONT`）。
   - `translator` は background の字幕トラックの訳（Task 8 の `createSubtitleTranslator().status()`）。音声の経路のタブでは、パネルは `session.translator`（offscreen の訳）を出す。
 - `'subs/capability'`（page から）→ `{ audio: boolean | undefined; plamo: boolean | undefined }`。
@@ -2281,7 +2282,7 @@ it('ignores runtime messages that are not addressed to the panel before decoding
 
 - [ ] **Step 0: 確かめる**
   - (a) E2E で本物の `tabCapture` を使えるか。headless の Chrome for Testing 156 で、次を順に試す。
-    1. サイドパネルのページ（タブで開いたもの）のボタンを、Playwright でクリックする。Task 13 の Step 0（headed）では通らなかった。
+    1. サイドパネルには開始のボタンがない（判断 S46。Task 13 の Step 0（headed）で、パネルのボタンでは通らなかった）。試すのは次の 2 だけ。
     2. CDP で拡張のアクションを起動する。Task 13 の Step 0（headed）では、`--enable-unsafe-extension-debugging` と種類が `tab` の target で `Extensions.triggerAction` を呼ぶと `action.onClicked` が届き、タブが呼び出された。判断 S46 の後は、これが本番のアイコンの経路そのもの。
        - アクションの起動を補助の関数にするときは、`packages/extension-core/testing/playwright.ts` の `triggerAction(context: BrowserContext, page: Page): Promise<void>`（CDP の `Extensions.triggerAction`）にする。③ page-translator の Task 1 も同じ名前と形で使う。先に入った方を使い、後の方は足さない（判断 S32）。
   - (b) どちらもだめなら、次の代わりの方式にする。

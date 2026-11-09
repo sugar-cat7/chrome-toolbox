@@ -24,7 +24,7 @@ Speech subtitles:
 - The capture stops when you close the tab, press Alt+Shift+S or the icon again on the captured tab, press "停止", leave www.youtube.com, start another tab, or after 10 minutes without processing. Moving to another video within YouTube keeps it and switches the context and glossary.
 - "話されている言語" in the side panel fixes the spoken language ("自動" detects it from the speech).
 
-The side panel also shows the shown tab's state ("状態": source, spoken language, latency, segments it could not process in time and silent ones, and why it is not processing), asked when the panel opens, when the shown tab changes or finishes loading, when a capture starts or stops, and on "更新", never by polling; and a glossary per streamer ("用語集": up to 50 pairs; an empty translation keeps the source as it is).
+The side panel also shows the shown tab's state ("状態": source, spoken language, latency, segments it could not process in time and silent ones, and why it is not processing), asked when the panel opens, when the shown tab changes or finishes loading, when a capture starts or stops, and on "更新", never by polling (language, latency and the counts appear only on the audio path: the caption path has none of them); and a glossary per streamer ("用語集": up to 50 pairs; an empty translation keeps the source as it is).
 
 ## Audio projector
 
