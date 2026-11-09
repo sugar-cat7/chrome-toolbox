@@ -31,12 +31,20 @@ export type LineInput = Readonly<{
 export type FallbackReason = 'not_listed' | 'refused' | 'language';
 /**
  * The chosen translator; `fallback` only once Gemma translated a line while PLaMo was chosen:
- * the latest reason and the number of those lines.
+ * the latest reason and, for each reason, the number of those lines (S44).
  */
 export type TranslatorStatus = Readonly<{
   chosen: SubtitleTranslator;
-  fallback?: Readonly<{ reason: FallbackReason; lines: number }>;
+  fallback?: Readonly<{
+    latest: FallbackReason;
+    lines: Readonly<Record<FallbackReason, number>>;
+  }>;
 }>;
+const NO_FALLBACK_LINES: Readonly<Record<FallbackReason, number>> = {
+  not_listed: 0,
+  refused: 0,
+  language: 0,
+};
 /** A translation and the model that made it. */
 export type LineTranslation = Readonly<{ ja: string; by: SubtitleTranslator }>;
 export type LineTranslator = {
@@ -122,7 +130,10 @@ export function createLineTranslator({
     const asked = epoch;
     const ja = await gemmaLine(client, model, input);
     if (!ja.ok) return ja;
-    if (asked === epoch) fallback = { reason, lines: (fallback?.lines ?? 0) + 1 };
+    if (asked === epoch) {
+      const lines = fallback?.lines ?? NO_FALLBACK_LINES;
+      fallback = { latest: reason, lines: { ...lines, [reason]: lines[reason] + 1 } };
+    }
     return Ok({ ja: ja.value, by: 'gemma' });
   }
 

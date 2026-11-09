@@ -19,7 +19,11 @@ import {
   type SubtitleSettings,
   type SubtitleTranslator,
 } from '../../src/settings.ts';
-import { CAPTION_CACHE_ENTRIES, createSubtitleTranslator } from '../../src/translate.ts';
+import {
+  CAPTION_CACHE_ENTRIES,
+  createSubtitleTranslator,
+  type CaptionCacheEntry,
+} from '../../src/translate.ts';
 
 type ChatBody = {
   model: string;
@@ -43,18 +47,22 @@ function lineOf(body: ChatBody): string {
 /**
  * A llama.cpp router at the HTTP boundary. `GET /v1/models` lists `server.models`. Gemma
  * answers `訳:<line>` and a newline, or what `reply` says for a line; unreachable for a line
- * `reply` answers with undefined. PLaMo answers `訳P:<line>` (made up).
+ * `reply` answers with undefined. PLaMo answers `訳P:<line>` (made up), or `server.plamoStatus`
+ * when it is set.
  */
 function fakeServer(reply: (line: string) => string | undefined = (line) => `訳:${line}\n`) {
   const bodies: ChatBody[] = [];
-  const server: { models: readonly string[] } = {
+  const server: { models: readonly string[]; plamoStatus: number | undefined } = {
     models: ['gemma4-e4b', PLAMO_TRANSLATE_MODEL],
+    plamoStatus: undefined,
   };
   const fetch: Fetch = async (input, init) => {
     if (input.endsWith('/v1/models'))
       return Response.json({ data: server.models.map((id) => ({ id })) });
     const body: ChatBody = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
     bodies.push(body);
+    if (body.model === PLAMO_TRANSLATE_MODEL && server.plamoStatus !== undefined)
+      return new Response('', { status: server.plamoStatus });
     const content =
       body.model === PLAMO_TRANSLATE_MODEL
         ? `訳P:${body.messages[0]?.content ?? ''}`
@@ -149,7 +157,7 @@ describe('caption translator', () => {
   it('serves repeated sentences from the cache, keyed by translator, language, context and glossary', async () => {
     const { bodies, client } = fakeServer();
     let entries = GLOSSARY;
-    const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+    const cache = createLruCache<string, CaptionCacheEntry>({ max: CAPTION_CACHE_ENTRIES });
     const translator = createSubtitleTranslator({
       client,
       settings: async () => Ok(defaultSettings),
@@ -164,7 +172,7 @@ describe('caption translator', () => {
       cache.get(
         `gemma\u0000en\u0000${contextHash(CONTEXT)}\u0000${contextHash(JSON.stringify(toPromptGlossary(GLOSSARY)))}\u0000Okay chat.`,
       ),
-    ).toBe('訳:Okay chat.');
+    ).toEqual({ ja: '訳:Okay chat.', chosen: 'gemma' });
     // The same sentence after other lines: the previous lines are not part of the key.
     expect(await translator.translate(request({ previous: ['Zero.'] }), PAGE)).toEqual(answer);
     expect(bodies).toHaveLength(1);
@@ -235,9 +243,9 @@ describe('caption translator', () => {
     async (code) => {
       const { client } = fakeServer();
       const chat = vi.fn<LlamaClient['chat']>(async () => Err(failure(code)));
-      const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+      const cache = createLruCache<string, CaptionCacheEntry>({ max: CAPTION_CACHE_ENTRIES });
       const keyHead = `gemma\u0000en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000`;
-      cache.set(`${keyHead}Known.`, '訳:Known.');
+      cache.set(`${keyHead}Known.`, { ja: '訳:Known.', chosen: 'gemma' });
       const translator = createSubtitleTranslator({
         client: { ...client, chat },
         settings: async () => Ok(defaultSettings),
@@ -333,7 +341,7 @@ describe('caption translator', () => {
 
   it('keys the cache by the translator that produced the line', async () => {
     const { bodies, client } = fakeServer();
-    const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+    const cache = createLruCache<string, CaptionCacheEntry>({ max: CAPTION_CACHE_ENTRIES });
     let chosen: SubtitleTranslator = 'gemma';
     const translator = createSubtitleTranslator({
       client,
@@ -348,11 +356,11 @@ describe('caption translator', () => {
 
     expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
     chosen = 'plamo';
-    // Gemma's line is not served for PLaMo.
+    // A line Gemma translated while Gemma was chosen is not served for PLaMo.
     expect(await translator.translate(request(), PAGE)).toEqual(byPlamo);
     expect(bodies.map((body) => body.model)).toEqual(['gemma4-e4b', 'plamo-3-translate-2b']);
-    expect(cache.get(`gemma\u0000${keyTail}`)).toBe('訳:Okay chat.');
-    expect(cache.get(`plamo\u0000${keyTail}`)).toBe('訳P:Okay chat.');
+    expect(cache.get(`gemma\u0000${keyTail}`)).toEqual({ ja: '訳:Okay chat.', chosen: 'gemma' });
+    expect(cache.get(`plamo\u0000${keyTail}`)).toEqual({ ja: '訳P:Okay chat.', chosen: 'plamo' });
     chosen = 'gemma';
     expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
     chosen = 'plamo';
@@ -360,10 +368,10 @@ describe('caption translator', () => {
     expect(bodies).toHaveLength(2);
   });
 
-  it('keeps a line Gemma translated for PLaMo under the Gemma key and reports the fallback', async () => {
+  it('keeps a line Gemma translated for PLaMo under the Gemma key and serves it again for PLaMo', async () => {
     const { bodies, client, server } = fakeServer();
-    server.models = ['gemma4-e4b'];
-    const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+    server.plamoStatus = 503;
+    const cache = createLruCache<string, CaptionCacheEntry>({ max: CAPTION_CACHE_ENTRIES });
     let chosen: SubtitleTranslator = 'plamo';
     const translator = createSubtitleTranslator({
       client,
@@ -372,26 +380,26 @@ describe('caption translator', () => {
       glossary: async () => Ok([]),
       cache,
     });
+    const byGemma = Ok({ lines: [translated('a', 'Okay chat.')] });
     const keyTail = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000Okay chat.`;
     // Before any request: the default translator.
     expect(translator.status()).toEqual({ chosen: 'gemma' });
 
-    expect(await translator.translate(request(), PAGE)).toEqual(
-      Ok({ lines: [translated('a', 'Okay chat.')] }),
-    );
+    // PLaMo refuses the line, and Gemma translates it.
+    expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
+    expect(bodies.map((body) => body.model)).toEqual(['plamo-3-translate-2b', 'gemma4-e4b']);
     expect(translator.status()).toEqual({
       chosen: 'plamo',
-      fallback: { reason: 'not_listed', lines: 1 },
+      fallback: { latest: 'refused', lines: { not_listed: 0, refused: 1, language: 0 } },
     });
-    expect(cache.get(`gemma\u0000${keyTail}`)).toBe('訳:Okay chat.');
+    expect(cache.get(`gemma\u0000${keyTail}`)).toEqual({ ja: '訳:Okay chat.', chosen: 'plamo' });
     expect(cache.get(`plamo\u0000${keyTail}`)).toBeUndefined();
-    // Looked up with the chosen translator's key: translated again.
-    await translator.translate(request(), PAGE);
+    // Asked again with PLaMo chosen, the line comes from the cache: neither PLaMo nor Gemma.
+    server.plamoStatus = undefined;
+    expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
     expect(bodies).toHaveLength(2);
     chosen = 'gemma';
-    expect(await translator.translate(request(), PAGE)).toEqual(
-      Ok({ lines: [translated('a', 'Okay chat.')] }),
-    );
+    expect(await translator.translate(request(), PAGE)).toEqual(byGemma);
     expect(bodies).toHaveLength(2);
     expect(translator.status()).toEqual({ chosen: 'gemma' });
   });

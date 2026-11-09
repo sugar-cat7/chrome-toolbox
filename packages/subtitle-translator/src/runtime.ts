@@ -26,6 +26,7 @@ import {
 import {
   CAPTION_CACHE_ENTRIES,
   createSubtitleTranslator,
+  type CaptionCacheEntry,
   type CaptionTranslator,
 } from './translate.ts';
 
@@ -128,7 +129,7 @@ function captionTranslation({
   dispose(this: void): void;
 } {
   const queue = createQueue({ concurrency: 1, maxPending: 4 });
-  const cache = createLruCache<string, string>({ max: CAPTION_CACHE_ENTRIES });
+  const cache = createLruCache<string, CaptionCacheEntry>({ max: CAPTION_CACHE_ENTRIES });
   let active: { baseUrl: string; translator: CaptionTranslator } | undefined;
   async function translate(
     request: TranslateRequest,

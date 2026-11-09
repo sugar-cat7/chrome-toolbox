@@ -10,7 +10,12 @@ import {
   type Fetch,
   type LlamaClient,
 } from '@chrome-toolbox/extension-core';
-import { createLineTranslator, type LineInput } from '../../src/line-translator.ts';
+import {
+  createLineTranslator,
+  type FallbackReason,
+  type LineInput,
+  type TranslatorStatus,
+} from '../../src/line-translator.ts';
 import type { SubtitleTranslator } from '../../src/settings.ts';
 
 type ChatBody = {
@@ -98,6 +103,15 @@ function translatorFor(client: LlamaClient, first: SubtitleTranslator) {
   };
 }
 
+/** The fallback of a status: the latest reason and the lines Gemma translated for each reason. */
+const fellBack = (
+  latest: FallbackReason,
+  lines: Partial<Record<FallbackReason, number>>,
+): TranslatorStatus['fallback'] => ({
+  latest,
+  lines: { not_listed: 0, refused: 0, language: 0, ...lines },
+});
+
 const CONTEXT = 'Title: Fixture Quest day 3\nChannel: Fixture Ch';
 const line = (over: Partial<LineInput> = {}): LineInput => ({
   source: 'Okay chat, the bridge is out.',
@@ -178,7 +192,16 @@ describe('line translator', () => {
     expect(lines.status()).toEqual({ chosen: 'plamo' });
   });
 
-  it.each([
+  it.each<{
+    name: string;
+    reason: FallbackReason;
+    plamo: number;
+    models?: string[];
+    plamoStatus?: number;
+    source?: string;
+    sourceLang?: string;
+    listings?: number;
+  }>([
     { name: 'ルーターに載っていない', models: ['gemma4-e4b'], reason: 'not_listed', plamo: 0 },
     { name: 'HTTP 404', plamoStatus: 404, reason: 'refused', plamo: 1 },
     { name: 'HTTP 503', plamoStatus: 503, reason: 'refused', plamo: 1 },
@@ -202,7 +225,10 @@ describe('line translator', () => {
     ]);
     expect(plamoChats()).toHaveLength(row.plamo);
     expect(server.listings).toBe(row.listings ?? 1);
-    expect(lines.status()).toEqual({ chosen: 'plamo', fallback: { reason: row.reason, lines: 1 } });
+    expect(lines.status()).toEqual({
+      chosen: 'plamo',
+      fallback: fellBack(row.reason, { [row.reason]: 1 }),
+    });
   });
 
   it('tries PLaMo again on the next line after a refusal', async () => {
@@ -220,21 +246,35 @@ describe('line translator', () => {
     expect(plamoChats()).toHaveLength(2);
     expect(gemmaChats()).toHaveLength(1);
     // The fallback stays until the translator changes.
-    expect(lines.status()).toEqual({ chosen: 'plamo', fallback: { reason: 'refused', lines: 1 } });
-  });
-
-  it('counts every line Gemma translated for PLaMo and keeps the latest reason', async () => {
-    const { client } = fakeServer({ plamo: (source) => (source === 'Refused.' ? 500 : 'ok') });
-    const { lines } = translatorFor(client, 'plamo');
-
-    await lines.translate(line({ source: 'Hola.', sourceLang: 'pt' }));
     expect(lines.status()).toEqual({
       chosen: 'plamo',
-      fallback: { reason: 'language', lines: 1 },
+      fallback: fellBack('refused', { refused: 1 }),
+    });
+  });
+
+  it('counts the lines Gemma translated for PLaMo by reason and keeps the latest reason', async () => {
+    const { client } = fakeServer({
+      plamo: (source) => (source.startsWith('Refused') ? 500 : 'ok'),
+    });
+    const { lines } = translatorFor(client, 'plamo');
+
+    await lines.translate(line({ source: 'Olá.', sourceLang: 'pt' }));
+    expect(lines.status()).toEqual({
+      chosen: 'plamo',
+      fallback: { latest: 'language', lines: { not_listed: 0, refused: 0, language: 1 } },
     });
     await lines.translate(line({ source: 'Fine.' }));
-    await lines.translate(line({ source: 'Refused.' }));
-    expect(lines.status()).toEqual({ chosen: 'plamo', fallback: { reason: 'refused', lines: 2 } });
+    await lines.translate(line({ source: 'Refused one.' }));
+    await lines.translate(line({ source: 'Refused two.' }));
+    expect(lines.status()).toEqual({
+      chosen: 'plamo',
+      fallback: { latest: 'refused', lines: { not_listed: 0, refused: 2, language: 1 } },
+    });
+    await lines.translate(line({ source: 'Tchau.', sourceLang: 'pt' }));
+    expect(lines.status()).toEqual({
+      chosen: 'plamo',
+      fallback: { latest: 'language', lines: { not_listed: 0, refused: 2, language: 2 } },
+    });
   });
 
   it('returns the error of a fallback line that Gemma could not translate, without counting it', async () => {
@@ -253,27 +293,37 @@ describe('line translator', () => {
     const { server, client, gemmaChats } = fakeServer();
     const { lines, choose } = translatorFor(client, 'plamo');
 
-    expect(await lines.translate(line({ source: 'One.' }))).toMatchObject(Ok({ by: 'plamo' }));
-    expect(await lines.translate(line({ source: 'Dos.', sourceLang: 'pt' }))).toMatchObject(
-      Ok({ by: 'gemma' }),
+    expect(await lines.translate(line({ source: 'One.' }))).toEqual(
+      Ok({ ja: '訳P:One.', by: 'plamo' }),
     );
-    expect(await lines.translate(line({ source: 'Three.' }))).toMatchObject(Ok({ by: 'plamo' }));
+    expect(await lines.translate(line({ source: 'Dois.', sourceLang: 'pt' }))).toEqual(
+      Ok({ ja: '訳:Dois.', by: 'gemma' }),
+    );
+    expect(await lines.translate(line({ source: 'Three.' }))).toEqual(
+      Ok({ ja: '訳P:Three.', by: 'plamo' }),
+    );
     expect(server.listings).toBe(1);
     expect(lines.status()).toEqual({
       chosen: 'plamo',
-      fallback: { reason: 'language', lines: 1 },
+      fallback: fellBack('language', { language: 1 }),
     });
 
     choose('gemma');
     // A change of the chosen translator clears the fallback.
     expect(lines.status()).toEqual({ chosen: 'gemma' });
-    expect(await lines.translate(line({ source: 'Four.' }))).toMatchObject(Ok({ by: 'gemma' }));
+    expect(await lines.translate(line({ source: 'Four.' }))).toEqual(
+      Ok({ ja: '訳:Four.', by: 'gemma' }),
+    );
     expect(gemmaChats()).toHaveLength(2);
     expect(server.listings).toBe(1);
 
     choose('plamo');
-    expect(await lines.translate(line({ source: 'Five.' }))).toMatchObject(Ok({ by: 'plamo' }));
-    expect(await lines.translate(line({ source: 'Six.' }))).toMatchObject(Ok({ by: 'plamo' }));
+    expect(await lines.translate(line({ source: 'Five.' }))).toEqual(
+      Ok({ ja: '訳P:Five.', by: 'plamo' }),
+    );
+    expect(await lines.translate(line({ source: 'Six.' }))).toEqual(
+      Ok({ ja: '訳P:Six.', by: 'plamo' }),
+    );
     expect(server.listings).toBe(2);
     expect(lines.status()).toEqual({ chosen: 'plamo' });
   });
@@ -298,7 +348,7 @@ describe('line translator', () => {
     expect(server.listings).toBe(2);
     expect(lines.status()).toEqual({
       chosen: 'plamo',
-      fallback: { reason: 'not_listed', lines: 2 },
+      fallback: fellBack('not_listed', { not_listed: 2 }),
     });
   });
 
