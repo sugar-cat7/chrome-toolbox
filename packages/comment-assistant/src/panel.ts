@@ -17,6 +17,7 @@ import {
 } from './filters.ts';
 import {
   commentProtocol,
+  hiddenChangedMessageSchema,
   messageType,
   streamChangedMessageSchema,
   type CommentStats,
@@ -26,6 +27,7 @@ import {
   type Summary,
   type SummaryWindow,
 } from './protocol.ts';
+import type { Site } from './sites/types.ts';
 import { partitionsOf, type StreamContext } from './stream-context.ts';
 
 /** An extension event as the side panel uses it: add and remove one listener. */
@@ -89,9 +91,14 @@ export type PanelPort = {
   ): Promise<Result<{ persisted: boolean }>>;
   /**
    * Calls `changed` when another tab becomes active, the shown tab finishes loading, or a page
-   * reports a change of its stream; returns the removal of every listener it added.
+   * reports a change of its stream; `hiddenChanged` when a channel's comments taken out of the
+   * chat changed. Returns the removal of every listener it added.
    */
-  watch(this: void, changed: () => void): () => void;
+  watch(
+    this: void,
+    changed: () => void,
+    hiddenChanged?: (site: Site, channel: string, count: number) => void,
+  ): () => void;
   /** The stream's hidden comments (on YouTube its chat and its video comments), newest first. */
   hidden(this: void, stream: StreamContext): Promise<Result<HiddenEntry[]>>;
   /** The viewer's verdict on one hidden comment; `persisted: false` means it is saved later. */
@@ -143,7 +150,7 @@ export function panelPort(api: PanelApi = browser): PanelPort {
         partition: stream.partition,
         ...(genre === undefined ? {} : { genre }),
       }),
-    watch(changed) {
+    watch(changed, hiddenChanged) {
       function onActivated(): void {
         changed();
       }
@@ -153,8 +160,17 @@ export function panelPort(api: PanelApi = browser): PanelPort {
       // Content scripts' messages reach extension pages too: only the stream change counts, and
       // only it is decoded.
       function onMessage(message: unknown): void {
-        if (messageType(message) !== 'comments/stream-changed') return;
-        if (streamChangedMessageSchema.safeParse(message).success) changed();
+        const type = messageType(message);
+        if (type === 'comments/stream-changed') {
+          if (streamChangedMessageSchema.safeParse(message).success) changed();
+          return;
+        }
+        if (type !== 'comments/hidden-changed' || hiddenChanged === undefined) return;
+        const decoded = hiddenChangedMessageSchema.safeParse(message);
+        if (decoded.success) {
+          const { site, channel, count } = decoded.data.payload;
+          hiddenChanged(site, channel, count);
+        }
       }
       api.tabs.onActivated.addListener(onActivated);
       api.tabs.onUpdated.addListener(onUpdated);

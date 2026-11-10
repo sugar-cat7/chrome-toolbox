@@ -282,6 +282,19 @@ function announceStreamChange(): void {
     () => undefined,
   );
 }
+/** Tells open extension pages (the side panel) that a channel's hidden comments changed. */
+function announceHiddenChange(site: Site, channel: string, count: number): void {
+  // Rejects when no extension page listens: there is nothing to tell then.
+  launch(
+    async () => {
+      await browser.runtime.sendMessage({
+        type: 'comments/hidden-changed',
+        payload: { site, channel, count },
+      });
+    },
+    () => undefined,
+  );
+}
 /**
  * The stream a tab's top frame shows (partition, streamer, title, and what decides its genre),
  * if it has one.
@@ -437,7 +450,10 @@ export function startBackground(): () => void {
     fetch: fetcher,
     queue,
     clefQueue,
-    onHiddenChange: badge.counted,
+    onHiddenChange: (site, channel, count) => {
+      badge.counted(site, channel, count);
+      announceHiddenChange(site, channel, count);
+    },
   });
   /**
    * The stream's one genre guess (R63 step 5), when nothing on its page decided the genre; asked

@@ -34,6 +34,7 @@ import {
   subtitleMaxTokens,
   subtitlePrompt,
   systemTimers,
+  type ChatReply,
   type ChatRequest,
   type CommentBatchItem,
   type CommentCategory,
@@ -220,6 +221,12 @@ const MINUTE = 60_000;
 export const MAX_COMMENT_CONCURRENCY = 4;
 /** A comment that waited this long without reaching the model is shown in the original (R19). */
 const STALE_AFTER_MS = 8_000;
+/**
+ * How long a batch waits past its own calls for PLaMo's lines before a line still unanswered
+ * falls back to Gemma alone: PLaMo is best-effort, and a backed-up queue must never hold the
+ * batch's comment slot — the flow keeps its pace and the translation catches up or is skipped.
+ */
+const PLAMO_WAIT_MS = 5_000;
 /** Channels kept at once; the least recently processed one goes for a new one (R53). */
 const MAX_CHANNELS = 4;
 /**
@@ -1149,13 +1156,14 @@ export function createCommentPipeline(deps: {
     return true;
   }
 
+  const timers = deps.timers ?? systemTimers;
   const subtitles =
     deps.subtitleSlotBusy === undefined
       ? undefined
       : createSubtitleYield({
           probe: deps.subtitleSlotBusy,
           now: deps.now,
-          timers: deps.timers ?? systemTimers,
+          timers,
           // As `setServerSlots`: a slot may be open now.
           changed: () => {
             if (busy() < allowed()) batcher.flush();
@@ -1165,7 +1173,7 @@ export function createCommentPipeline(deps: {
         });
   const batcher = createBatcher<Entry>({
     ...commentLimits.batcher,
-    timers: deps.timers ?? systemTimers,
+    timers,
     flush: (entries) => {
       backlog.push(...entries);
       // Inside `ingest` the whole message is taken first and pumped at its end, so its newest
@@ -1399,8 +1407,21 @@ export function createCommentPipeline(deps: {
         );
         const maxTokens = commentBatchMaxTokens(promptComments);
         const plamo = deps.plamo;
+        // PLaMo's lines run in parallel with the batch on their own queue, but the batch waits
+        // for them only `PLAMO_WAIT_MS` past its own calls: a line still unanswered then is
+        // aborted where it waits and falls back to Gemma alone, so a backed-up PLaMo queue
+        // never holds the batch's comment slot.
+        const plamoDeadline = new AbortController();
+        const plamoPending = plans.map((plan) =>
+          plan === undefined || plamo === undefined
+            ? Promise.resolve(undefined)
+            : plamo.chat({
+                ...plan.request,
+                signal: AbortSignal.any([signal, plamoDeadline.signal]),
+              }),
+        );
         // Clef, PLaMo and the translation model are separate llama.cpp processes, so they overlap.
-        const [judged, replied, plamoReplies] = await Promise.all([
+        const [judged, replied] = await Promise.all([
           abusiveScores(
             texts.filter((_text, i) => cued[i]),
             signal,
@@ -1420,14 +1441,14 @@ export function createCommentPipeline(deps: {
             maxTokens,
             signal,
           }),
-          Promise.all(
-            plans.map((plan) =>
-              plan === undefined || plamo === undefined
-                ? Promise.resolve(undefined)
-                : plamo.chat({ ...plan.request, signal }),
-            ),
-          ),
         ]);
+        const plamoTimer = timers.set(() => plamoDeadline.abort(), PLAMO_WAIT_MS);
+        let plamoReplies: (Result<ChatReply> | undefined)[];
+        try {
+          plamoReplies = await Promise.all(plamoPending);
+        } finally {
+          timers.clear(plamoTimer);
+        }
         const parsed: BatchReply = replied.ok
           ? Ok(
               parseCommentBatch(replied.value.text, promptComments, {

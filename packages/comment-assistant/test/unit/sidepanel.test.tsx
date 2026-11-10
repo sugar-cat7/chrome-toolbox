@@ -642,6 +642,42 @@ describe('side panel', () => {
     expect(list.textContent).not.toContain('fixture text h1');
   });
 
+  it('reads the hidden list again when the service worker reports a change of its stream', async () => {
+    const { api, events, of } = fakeApi();
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('非表示');
+    const list = await within(panel).findByRole('list', {
+      name: 'チャットから外したコメント',
+    });
+    await vi.waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(3));
+    const asked = of('comments/hidden').length;
+    const send = (message: unknown): void => {
+      for (const listener of events.message.listeners)
+        (listener as (message: unknown) => void)(message);
+    };
+    // Another channel's change leaves this stream's list alone.
+    send({
+      type: 'comments/hidden-changed',
+      payload: { site: 'youtube', channel: 'other0001', count: 1 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(of('comments/hidden')).toHaveLength(asked);
+    // This stream's chat partition changed: both of its partitions' lists are read again.
+    send({
+      type: 'comments/hidden-changed',
+      payload: { site: 'youtube', channel: 'fixture0001', count: 4 },
+    });
+    await vi.waitFor(() => expect(of('comments/hidden').length).toBeGreaterThan(asked));
+    // Its video-comments partition counts too.
+    const before = of('comments/hidden').length;
+    send({
+      type: 'comments/hidden-changed',
+      payload: { site: 'youtube', channel: 'fixture0001#comments', count: 2 },
+    });
+    await vi.waitFor(() => expect(of('comments/hidden').length).toBeGreaterThan(before));
+  });
+
   it.each([
     { category: 'instruction', reason: '指示' },
     { category: 'relay', reason: '他配信の話題' },

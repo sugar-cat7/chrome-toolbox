@@ -282,6 +282,16 @@ export const commentStatsSchema = z.strictObject({
 });
 export type CommentStats = z.infer<typeof commentStatsSchema>;
 
+/**
+ * Service worker → extension pages: a channel's comments taken out of the chat changed (a new
+ * one, a verdict, a restore); `count` is how many still wait for a verdict. The side panel
+ * re-reads its hidden list and count.
+ */
+export const hiddenChangedMessageSchema = z.strictObject({
+  type: z.literal('comments/hidden-changed'),
+  payload: z.strictObject({ site: siteSchema, channel: channelSchema, count: countSchema }),
+});
+
 export const commentProtocolSpec = {
   ...llmProtocolSpec,
   'comments/ingest': {

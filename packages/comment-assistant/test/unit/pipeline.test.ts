@@ -379,6 +379,74 @@ describe('comment pipeline', () => {
     ]);
   });
 
+  it('does not hold the batch for a PLaMo line that never answers', async () => {
+    // PLaMo is listed but its chat hangs until the request is aborted, as a backed-up queue
+    // would leave it; Gemma batches classify and one-line fallbacks answer.
+    const requests: { path: string; model: string }[] = [];
+    let plamoAborted = 0;
+    const fetch: Fetch = async (input, init) => {
+      const url = new URL(input);
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        model?: string;
+        grammar?: string;
+        messages?: { content: string }[];
+      };
+      requests.push({ path: url.pathname, model: body.model ?? '' });
+      if (url.pathname === '/v1/models')
+        return Response.json({ object: 'list', data: [{ id: 'plamo-3-translate-2b' }] });
+      if (body.model === 'plamo-3-translate-2b')
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = (): void => {
+            plamoAborted += 1;
+            reject(new DOMException('aborted', 'AbortError'));
+          };
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      if (body.grammar !== undefined && !body.grammar.includes('code ::='))
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: 'Gemmaの訳\n' } }],
+        });
+      const comments = (body.messages?.[1]?.content ?? '')
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as PromptComment);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: replyLines(echo()(comments)) } }],
+      });
+    };
+    const { clock, annotations, pipeline } = setup({ fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() =>
+      expect(requests.some((r) => r.model === 'plamo-3-translate-2b')).toBe(true),
+    );
+    // The batch's own calls answered; only the PLaMo grace period keeps the comment waiting.
+    await flushMicrotasks();
+    expect(annotations()).toEqual([]);
+    clock.advance(5_000);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(plamoAborted).toBe(1);
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'Gemmaの訳', category: 'chatter', state: 'done' },
+    ]);
+    // The flow went on: the next comment's batch ran and fell back the same way.
+    pipeline.ingest(target, { ...channel, comments: [comment('2', 'next one')] });
+    clock.advance(500);
+    await vi.waitFor(() =>
+      expect(requests.filter((r) => r.model === 'plamo-3-translate-2b')).toHaveLength(2),
+    );
+    clock.advance(5_000);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    expect(annotations()[1]).toEqual({
+      id: '2',
+      translation: 'Gemmaの訳',
+      category: 'chatter',
+      state: 'done',
+    });
+    expect(pipeline.stats(channel.site, channel.channel)).toMatchObject({ pending: 0 });
+  });
+
   it('asks the model for short batch-local ids instead of echoing long platform ids', async () => {
     const llama = fakeLlama(echo());
     const { annotations, pipeline } = setup({ fetch: llama.fetch });
