@@ -57,7 +57,7 @@ export function sidePanelPort(
   return connectionPort({
     settings: settingsStore(api.storage.local),
     permissions: api.permissions,
-    send: (message) => api.runtime.sendMessage(message),
+    send: (message) => api.runtime.sendMessage(addressed('background', message)),
   });
 }
 

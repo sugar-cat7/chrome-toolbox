@@ -91,6 +91,7 @@ describe('extension runtime wiring', () => {
     expect(send).toHaveBeenCalledWith({
       type: 'llm/status',
       payload: { baseUrl: 'http://127.0.0.1:8081' },
+      target: 'background',
     });
     expect(await fakeBrowser.storage.local.get('settings')).toEqual({
       settings: {

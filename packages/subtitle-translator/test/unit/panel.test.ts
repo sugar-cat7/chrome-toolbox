@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { Ok } from '@chrome-toolbox/contracts';
-import { panelPort, type PanelApi } from '../../src/panel.ts';
+import { panelPort, sidePanelPort, type PanelApi } from '../../src/panel.ts';
 import { stateChangedSchema, type TabState } from '../../src/protocol.ts';
 import { defaultSubtitleSettings, subtitleSettingsStore } from '../../src/settings.ts';
 
@@ -57,6 +57,7 @@ function fakeApi() {
         sent.push(message);
         if (typeOf(message) === 'subs/tab-state') return Ok(TAB);
         if (typeOf(message) === 'subs/capability') return Ok({ audio: true });
+        if (typeOf(message) === 'llm/status') return Ok({ models: ['gemma4-e4b'] });
         return Ok({});
       },
       onMessage: events.message,
@@ -163,6 +164,19 @@ describe('side panel port', () => {
     expect(changed).not.toHaveBeenCalled();
     expect(new Set(read)).toEqual(new Set(['target']));
     stop();
+  });
+
+  it('addresses the connection check to the background like every other panel message', async () => {
+    const { api, sent } = fakeApi();
+    const checked = await sidePanelPort(api).check('http://127.0.0.1:18083');
+    expect(checked).toEqual(Ok({ models: ['gemma4-e4b'] }));
+    expect(sent).toEqual([
+      {
+        type: 'llm/status',
+        payload: { baseUrl: 'http://127.0.0.1:18083' },
+        target: 'background',
+      },
+    ]);
   });
 
   it('follows the saved subtitle settings only while asked to', async () => {
