@@ -97,7 +97,13 @@ function readStored(value: unknown): SubtitleSettings | undefined {
   if (parsed.success) return parsed.data;
   const legacy = legacySubtitleSettingsSchema.safeParse(value);
   return legacy.success
-    ? { ...legacy.data, position: defaultSubtitleSettings.position }
+    ? {
+        ...legacy.data,
+        position: defaultSubtitleSettings.position,
+        // These records predate the PLaMo default: a stored 'gemma' is the old default, not a
+        // choice (an explicit one needs `position` to be told apart), so it reads as 'plamo'.
+        translator: legacy.data.translator === 'gemma' ? 'plamo' : legacy.data.translator,
+      }
     : undefined;
 }
 

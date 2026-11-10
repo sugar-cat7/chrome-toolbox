@@ -61,7 +61,7 @@ describe('subtitle settings', () => {
       display: 'ja',
       source: 'audio',
       sourceLang: 'ko',
-      translator: 'gemma',
+      translator: 'plamo',
     } as const;
     const store = subtitleSettingsStore(fakeBrowser.storage.local);
     await fakeBrowser.storage.local.set({ subtitles: legacy });
@@ -74,6 +74,44 @@ describe('subtitle settings', () => {
     await fakeBrowser.storage.local.set({ subtitles: { ...legacy, display: 'off' } });
     unwatch();
     expect(seen).toEqual([{ ...legacy, display: 'off', position: 0 }]);
+  });
+
+  it('reads a legacy gemma translator as plamo, but keeps a current one', async () => {
+    const store = subtitleSettingsStore(fakeBrowser.storage.local);
+    // Saved while Gemma was the default and before `position` existed: 'gemma' was the
+    // default, not a choice, so the record reads as the current default 'plamo'.
+    await fakeBrowser.storage.local.set({
+      subtitles: {
+        display: 'ja',
+        source: 'auto',
+        sourceLang: 'auto',
+        translator: 'gemma',
+      },
+    });
+    expect(await store.load()).toEqual(Ok({ ...defaultSubtitleSettings, display: 'ja' }));
+    // A legacy record that already says 'plamo' stays 'plamo'.
+    await fakeBrowser.storage.local.set({
+      subtitles: {
+        display: 'both',
+        source: 'auto',
+        sourceLang: 'en',
+        translator: 'plamo',
+      },
+    });
+    expect(await store.load()).toEqual(
+      Ok({
+        display: 'both',
+        source: 'auto',
+        sourceLang: 'en',
+        translator: 'plamo',
+        position: 0,
+      }),
+    );
+    // A current record (with `position`) keeps an explicit 'gemma' choice.
+    await fakeBrowser.storage.local.set({
+      subtitles: { ...defaultSubtitleSettings, translator: 'gemma' },
+    });
+    expect(await store.load()).toEqual(Ok({ ...defaultSubtitleSettings, translator: 'gemma' }));
   });
 
   it.each([
