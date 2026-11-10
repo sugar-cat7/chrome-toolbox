@@ -139,6 +139,8 @@ Other choices for the tests:
 - Every browser test of the package starts pointed at `http://127.0.0.1:9`, and the service worker refuses and reports any request to the default address (`127.0.0.1:18083`); a test that wants the stub sets its address first. The offscreen document takes the address from the service worker at the start of a capture.
 - The bound on the caption timeline is checked from the page's heap: the strings of translated lines (`訳:Fixture line <n>.`) in a heap snapshot, against the lines within 10 minutes of the position. The timeline itself is a closure of the content script, out of a test's reach.
 
+Two-hour soak, 2026-11-11 (`SOAK_MINUTES=120 pnpm --filter @chrome-toolbox/subtitle-translator test:e2e -- soak`, stub server, headless Chromium): PASS. 13,094 chats / 6,547 recognitions over 120 minutes; watch-page heap stayed ~3.2 MB and offscreen ~2.7–2.9 MB across all 120 samples; zero long tasks in either context; zero dropped, expired, skipped or failed segments; translation p50 ~305 ms and p95 ~309 ms flat for the whole run.
+
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 
 Status: **PARTIAL (updated 2026-10-28).** The benchmark tools are implemented and unit-tested (`packages/bench/`), and the procedure was first run on 2026-10-28 against a llama.cpp router server ([setup](llama-server.md)) with synthetic data only (see "Real-server results" below). Cells in the sections that follow remain `PENDING` unless that section lists a number. Still PENDING: measurements on real stream data (100 lines per language), the user's 20-sentence translation check, and the Qwen-family comparison. The decisions below are provisional (R8 / R10) until those close.
