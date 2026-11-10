@@ -184,6 +184,19 @@ describe('parsePlamoLine', () => {
     { name: '上限ちょうど', text: 'あ'.repeat(34), finish: 'stop', expected: 'あ'.repeat(34) },
     { name: '絵文字は 1 文字', text: '😀'.repeat(34), finish: 'stop', expected: '😀'.repeat(34) },
     { name: '上限を超えた', text: 'あ'.repeat(35), finish: 'stop', expected: 'response_invalid' },
+    {
+      name: '言語タグ（タブ）',
+      text: 'en\tよしチャット',
+      finish: 'stop',
+      expected: 'よしチャット',
+    },
+    { name: '言語タグ（空白）', text: 'en よしチャット', finish: 'stop', expected: 'よしチャット' },
+    {
+      name: '小文字の英単語で始まる行は残す',
+      text: 'it was great',
+      finish: 'stop',
+      expected: 'it was great',
+    },
   ])('parsePlamoLine: $name', ({ text, finish, expected }) => {
     const result = parsePlamoLine(
       { text, timing: undefined, finishReason: finish },

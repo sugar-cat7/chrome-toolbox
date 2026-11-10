@@ -392,8 +392,17 @@ export const subtitlePrompt = (
 };
 
 /**
- * The translation line of a reply, without its newline. A line that is missing its newline (cut),
- * reached the length bound, or is empty fails: that sentence stays in its source language.
+ * The language tag a model copies from the transcribe reply format into a translation
+ * (`en⇥…`, `en …`, `en: …`): two lowercase letters and a tab; before other separators only
+ * when the next character cannot continue an English word, so `it was …` is kept; and a bare
+ * code, which leaves nothing.
+ */
+export const REPLY_LANGUAGE_TAG = /^[a-z]{2}(?:\t|[ \t:]+(?=[^a-z\s])|\s*$)/u;
+
+/**
+ * The translation line of a reply, without its newline or a leading language tag. A line that
+ * is missing its newline (cut), reached the length bound, or is empty fails: that sentence
+ * stays in its source language.
  */
 export function parseSubtitleLine(
   reply: ChatReply,
@@ -402,7 +411,7 @@ export function parseSubtitleLine(
 ): Result<string> {
   if (cutByMaxTokens(reply, maxTokens) || !reply.text.endsWith('\n'))
     return Err(failure('response_invalid'));
-  const line = reply.text.slice(0, -1);
+  const line = reply.text.slice(0, -1).replace(REPLY_LANGUAGE_TAG, '');
   if (line.trim() === '' || line.includes('\n') || codePoints(line) >= subtitleLimit(source))
     return Err(failure('response_invalid'));
   return Ok(line);

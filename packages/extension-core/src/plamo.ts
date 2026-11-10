@@ -1,6 +1,6 @@
 import { Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import { cutByMaxTokens, type ChatReply, type ChatRequest } from './llm.ts';
-import { translationLimit, type GlossaryEntry } from './prompts.ts';
+import { REPLY_LANGUAGE_TAG, translationLimit, type GlossaryEntry } from './prompts.ts';
 
 /** The preset section of PLaMo 3 Translate 2B in `models.ini`; settings do not change it. */
 export const PLAMO_TRANSLATE_MODEL = 'plamo-3-translate-2b';
@@ -112,7 +112,10 @@ export function plamoTranslateRequest(
  */
 export function parsePlamoLine(reply: ChatReply, maxTokens: number, line: string): Result<string> {
   if (cutByMaxTokens(reply, maxTokens)) return Err(failure('response_invalid'));
-  const text = reply.text.trim().replace(/\s*\n\s*/gu, ' ');
+  const text = reply.text
+    .trim()
+    .replace(/\s*\n\s*/gu, ' ')
+    .replace(REPLY_LANGUAGE_TAG, '');
   if (text === '' || text.includes(RESERVED) || Array.from(text).length > translationLimit(line))
     return Err(failure('response_invalid'));
   return Ok(text);

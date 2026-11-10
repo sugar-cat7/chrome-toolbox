@@ -193,6 +193,32 @@ describe('parseSubtitleLine', () => {
     { name: '空白だけ', text: ' \u3000\t\n', finish: 'stop', expected: 'response_invalid' },
     { name: '途中に改行', text: 'よし\nチャット\n', finish: 'stop', expected: 'response_invalid' },
     {
+      name: '言語タグ（タブ）',
+      text: 'en\tOh, nice\n',
+      finish: 'stop',
+      expected: 'Oh, nice',
+    },
+    {
+      name: '言語タグ（空白）',
+      text: 'en 続けて。何が？\n',
+      finish: 'stop',
+      expected: '続けて。何が？',
+    },
+    {
+      name: '言語タグ（コロン）',
+      text: 'en: 続けて\n',
+      finish: 'stop',
+      expected: '続けて',
+    },
+    {
+      name: '小文字の英単語で始まる行は残す',
+      text: 'it was great\n',
+      finish: 'stop',
+      expected: 'it was great',
+    },
+    { name: '言語タグだけ', text: 'en\n', finish: 'stop', expected: 'response_invalid' },
+    { name: '言語タグと空白だけ', text: 'en \n', finish: 'stop', expected: 'response_invalid' },
+    {
       name: 'length で切れた（改行つき）',
       text: 'よし\n',
       finish: 'length',
