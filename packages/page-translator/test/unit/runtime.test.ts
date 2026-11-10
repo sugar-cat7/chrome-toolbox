@@ -258,6 +258,10 @@ describe('extension runtime wiring', () => {
     const held = gate();
     const server = llama({ door: () => held.promise });
     vi.stubGlobal('fetch', server.fetch);
+    // Gemma is chosen explicitly: this test is about cancel and tab close, not the default.
+    await fakeBrowser.storage.local.set({
+      page: { ...defaultPageSettings, translator: 'gemma' },
+    });
     const { ask, stop } = background();
     const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
     const other = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/b' });
@@ -306,6 +310,10 @@ describe('extension runtime wiring', () => {
   it('reads the settings again when the shared or the page settings change', async () => {
     const server = llama();
     vi.stubGlobal('fetch', server.fetch);
+    // Start on Gemma so both changes below are seen: the shared model name, then PLaMo.
+    await fakeBrowser.storage.local.set({
+      page: { ...defaultPageSettings, translator: 'gemma' },
+    });
     const { ask, stop } = background();
     const tab = await fakeBrowser.tabs.create({ url: 'https://wiki.fixture.test/a' });
     const top: Browser.runtime.MessageSender = {

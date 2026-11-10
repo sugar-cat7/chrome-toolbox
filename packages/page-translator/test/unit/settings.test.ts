@@ -23,7 +23,7 @@ describe('page settings', () => {
   it('loads page settings with defaults and rejects an unknown translator', async () => {
     const store = pageSettingsStore(fakeBrowser.storage.local);
     expect(await store.load()).toEqual(
-      Ok({ v: 1, mode: 'replace', translator: 'gemma', always: [], never: [] }),
+      Ok({ v: 1, mode: 'replace', translator: 'plamo', always: [], never: [] }),
     );
     const other = await store.save({ ...defaultPageSettings, translator: 'other' } as never);
     expect(other).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });

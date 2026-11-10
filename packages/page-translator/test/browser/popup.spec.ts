@@ -6,7 +6,7 @@ import {
   triggerAction,
 } from '@chrome-toolbox/extension-core/testing';
 import { LONG_COUNT, LONG_HEIGHT, LONG_URL, longHtml } from './fixtures/long.ts';
-import { fingerprint, servePage, tabIdOf, useServer } from './page.ts';
+import { fingerprint, servePage, tabIdOf, usePageSettings, useServer } from './page.ts';
 
 // The popup against a tab, as the viewer uses it: the toolbar button grants `activeTab`, then
 // 「このページを翻訳」 asks the background (`page/start`), the progress comes over the popup's port
@@ -52,6 +52,8 @@ test('the popup translates, restores and shows progress', async ({
   llama,
 }) => {
   await useServer(serviceWorker, llama.origin);
+  // The stub serves no PLaMo: Gemma keeps the progress line to the count alone (no plamo_missing).
+  await usePageSettings(serviceWorker, { translator: 'gemma' });
   await servePage(context, LONG_URL, longHtml());
   const page = await context.newPage();
   await page.goto(LONG_URL);

@@ -77,6 +77,11 @@ const RICH_PIECES = [
   `${STUB_PAGE_PREFIX}backward`,
   `${STUB_PAGE_PREFIX} to dodge.`,
 ];
+/**
+ * The rich unit's pieces as PLaMo's stub writes them (`訳P:` + the whole line once, markers
+ * kept): only the first text node carries the prefix, and each piece is trimmed.
+ */
+const PLAMO_RICH_PIECES = [`${STUB_PLAMO_PREFIX}Roll`, 'backward', 'to dodge.'];
 function request(
   units: readonly (string | PageToken[])[],
   {
@@ -415,11 +420,11 @@ describe('PLaMo', () => {
   it.each([
     { name: 'every unit came from PLaMo', units: ['Final Boss Guide'], translator: 'plamo' },
     {
-      name: 'PLaMo and Gemma shared the units',
+      name: 'PLaMo translated plain and rich units',
       units: ['Final Boss Guide', rich],
       translator: 'plamo',
     },
-    { name: 'every unit was rich', units: [rich], translator: 'gemma' },
+    { name: 'every unit was rich', units: [rich], translator: 'plamo' },
     { name: 'PLaMo refused every unit', units: ['Refused line.'], translator: 'gemma' },
     { name: 'no unit was valid', units: [unclosed], translator: 'gemma' },
   ])('reports PLaMo only when it translated a unit: $name', async ({ units, translator: by }) => {
@@ -463,9 +468,35 @@ describe('PLaMo', () => {
     expect(context('Tips')).toBe('Items\nMaps');
   });
 
-  it('sends rich units to Gemma while PLAMO_TAKES_RICH is false', async () => {
-    expect(PLAMO_TAKES_RICH).toBe(false);
+  it('sends rich units to PLaMo too while PLAMO_TAKES_RICH is true', async () => {
+    expect(PLAMO_TAKES_RICH).toBe(true);
     const server = llama();
+    const translator = await translatorFor(server, { translator: 'plamo' });
+    const reply = await translator.translate(1, request(['Final Boss Guide', rich]));
+    expect(reply).toEqual(
+      Ok({
+        results: [
+          { id: 1, pieces: plamoPieces('Final Boss Guide') },
+          { id: 2, pieces: PLAMO_RICH_PIECES },
+        ],
+        translator: 'plamo',
+      }),
+    );
+    // The rich unit's markers travel as `<1>`/`</1>` in its line.
+    expect(sorted(server.chats(PLAMO).map(lineOf))).toEqual(
+      sorted(['Final Boss Guide', 'Roll <1>backward</1> to dodge.']),
+    );
+    expect(server.chats(GEMMA)).toEqual([]);
+  });
+
+  it('falls back to Gemma for a rich unit whose PLaMo reply loses its markers', async () => {
+    const server = llama({
+      respond: (chat) =>
+        chat.model === PLAMO && lineOf(chat).includes('<1>')
+          ? // The markers are gone: the unit does not read back (P21).
+            chatCompletion(`${STUB_PLAMO_PREFIX}Roll backward to dodge.`)
+          : undefined,
+    });
     const translator = await translatorFor(server, { translator: 'plamo' });
     const reply = await translator.translate(1, request(['Final Boss Guide', rich]));
     expect(reply).toEqual(
@@ -477,7 +508,6 @@ describe('PLaMo', () => {
         translator: 'plamo',
       }),
     );
-    expect(server.chats(PLAMO).map(lineOf)).toEqual(['Final Boss Guide']);
     expect(server.chats(GEMMA).map(batchTexts)).toEqual([['Roll <1>backward</1> to dodge.']]);
   });
 
@@ -593,7 +623,13 @@ describe('PLaMo', () => {
 
   it('fails the whole request when the Gemma batch after PLaMo fails', async () => {
     const server = llama({
-      respond: (chat) => (chat.model === GEMMA ? { status: 503, body: {} } : undefined),
+      respond: (chat) => {
+        if (chat.model === GEMMA) return { status: 503, body: {} };
+        // PLaMo refuses the rich unit, so it is left for the Gemma batch that fails.
+        if (chat.model === PLAMO && lineOf(chat).includes('<1>'))
+          return { status: 503, body: { error: { code: 503 } } };
+        return undefined;
+      },
     });
     const translator = await translatorFor(server, { translator: 'plamo' });
     expect(await translator.translate(1, request(['Final Boss Guide', rich]))).toMatchObject({
@@ -718,11 +754,11 @@ describe('settings', () => {
     // The settings are read by the first request: a corrupt record does not lock translation.
     await fakeBrowser.storage.local.set({ page: { ...defaultPageSettings, translator: 'other' } });
     expect(await translator.translate(1, request(['Final Boss Guide']))).toEqual(
-      Ok({ results: [{ id: 1, pieces: gemmaPieces('Final Boss Guide') }], translator: 'gemma' }),
+      Ok({ results: [{ id: 1, pieces: plamoPieces('Final Boss Guide') }], translator: 'plamo' }),
     );
-    // Gemma is the default: no model list, no PLaMo.
-    expect(server.asked()).toEqual([`/props?${GEMMA}`]);
-    expect(server.chats(PLAMO)).toEqual([]);
+    // PLaMo is the default: the model list and PLaMo's slots are asked; Gemma is not.
+    expect(server.asked()).toEqual(['/v1/models', `/props?${PLAMO}`]);
+    expect(server.chats(GEMMA)).toEqual([]);
   });
 
   it('fails a request when the page settings cannot be read from storage', async () => {

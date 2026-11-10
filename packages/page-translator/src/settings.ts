@@ -39,11 +39,11 @@ export const pageSettingsSchema = z.strictObject({
     .check(z.maxLength(PAGE_SETTINGS_LIMITS.never)),
 });
 export type PageSettings = z.infer<typeof pageSettingsSchema>;
-/** Gemma translates until the page bench (Task 3) decides for PLaMo. */
+/** PLaMo translates by default; Gemma stays the fallback for what PLaMo cannot read back. */
 export const defaultPageSettings: PageSettings = {
   v: 1,
   mode: 'replace',
-  translator: 'gemma',
+  translator: 'plamo',
   always: [],
   never: [],
 };

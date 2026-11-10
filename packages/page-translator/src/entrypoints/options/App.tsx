@@ -7,8 +7,8 @@ import { PAGE_SETTINGS_LIMITS, siteOf, type PageSettings } from '../../settings.
 
 type Translator = PageSettings['translator'];
 const TRANSLATORS: readonly Readonly<{ value: Translator; label: string }>[] = [
+  { value: 'plamo', label: 'PLaMo 3 Translate 2B（既定。Built with PLaMo）' },
   { value: 'gemma', label: 'Gemma' },
-  { value: 'plamo', label: 'PLaMo 3 Translate 2B（任意。Built with PLaMo）' },
 ];
 
 const messages: Partial<Record<AppError['internalCode'], string>> = {
@@ -32,7 +32,7 @@ export function App({ port }: { port: OptionsPort }) {
   /** The page settings as last read or saved; the always list shows from them. */
   const [page, setPage] = useState<PageSettings | undefined>();
   const [modelLoaded, setModelLoaded] = useState(false);
-  const [translator, setTranslator] = useState<Translator>('gemma');
+  const [translator, setTranslator] = useState<Translator>('plamo');
   const [model, setModel] = useState('');
   const [never, setNever] = useState('');
   const [message, setMessage] = useState('');

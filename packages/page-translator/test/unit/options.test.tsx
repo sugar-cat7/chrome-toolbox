@@ -27,7 +27,7 @@ afterEach(() => {
 const REQUIRED = ['http://localhost/*', 'http://127.0.0.1/*'];
 const WIKI = 'https://wiki.fixture.test/*';
 const LLAMA = 'http://llm.fixture.test/*';
-const PLAMO = 'PLaMo 3 Translate 2B（任意。Built with PLaMo）';
+const PLAMO = 'PLaMo 3 Translate 2B（既定。Built with PLaMo）';
 
 /**
  * The options page's Chrome: storage is WXT's fake browser's, `granted` the sites Chrome grants;
@@ -136,7 +136,7 @@ describe('options page', () => {
         models: { ...defaultSettings.models, translate: 'gemma4-e2b' },
       },
     });
-    await storePage({ never: ['bank.example', 'mail.example'] });
+    await storePage({ never: ['bank.example', 'mail.example'], translator: 'gemma' });
     await openOptions(api);
     expect(field('llama.cpp の接続先').value).toBe('http://127.0.0.1:18083');
     expect(radio('Gemma').checked).toBe(true);
@@ -154,6 +154,7 @@ describe('options page', () => {
 
   it('shows Built with PLaMo and the license link only while PLaMo is chosen', async () => {
     const { api } = fakeApi();
+    await storePage({ translator: 'gemma' });
     await openOptions(api);
     expect(screen.queryByText('Built with PLaMo')).toBeNull();
     expect(screen.queryByRole('link', { name: 'PLaMo Community License' })).toBeNull();
