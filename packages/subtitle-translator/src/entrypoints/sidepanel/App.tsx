@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { launch, type Result } from '@chrome-toolbox/contracts';
 import type { PanelPort } from '../../panel.ts';
 import type { SubtitleSettings } from '../../settings.ts';
@@ -10,27 +10,36 @@ import {
 } from './AudioSection.tsx';
 import { DisplaySection } from './DisplaySection.tsx';
 import { GlossarySection } from './GlossarySection.tsx';
+import { PositionSection } from './PositionSection.tsx';
 import { ServerSection } from './ServerSection.tsx';
 import { StatusSection, type TabView } from './StatusSection.tsx';
 import { NO_VIDEO, explain } from './text.ts';
 import { TranslatorSection } from './TranslatorSection.tsx';
 
 /** A subtitle setting the panel changes, and why its change failed. */
-type Field = 'display' | 'source' | 'sourceLang' | 'translator';
+type Field = 'display' | 'source' | 'sourceLang' | 'translator' | 'position';
 type Failure = Readonly<{ field: Field; message: string }>;
+
+const TABS = [
+  { id: 'simple', label: 'かんたん' },
+  { id: 'details', label: '詳細設定' },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
 
 /**
  * The side panel: the shown tab's state (asked on open, when another tab becomes active, the shown
  * tab finishes loading or the service worker says a state changed, and on 更新; no polling), the
- * display, speech, source, spoken language and translator settings, the streamer's glossary and
- * the connection. The subtitle settings follow every change saved anywhere; a change made here
- * saves only its own field. Every listener goes when the panel closes.
+ * display, speech, source, spoken language, position, translator, glossary and connection
+ * settings. かんたん shows what a viewer needs; 詳細設定 the rest. The subtitle settings follow
+ * every change saved anywhere; a change made here saves only its own field. Every listener goes
+ * when the panel closes.
  */
 export function App({ port }: { port: PanelPort }) {
   const [view, setView] = useState<TabView>({ status: 'loading' });
   const [capability, setCapability] = useState<CapabilityView>({ status: 'loading' });
   const [settings, setSettings] = useState<SubtitleSettings | undefined>();
   const [failure, setFailure] = useState<Failure | undefined>();
+  const [tabId, setTabId] = useState<TabId>('simple');
   const mounted = useRef(true);
   /** Only the newest answer of each kind is shown. */
   const latest = useRef({ tab: 0, capability: 0 });
@@ -115,6 +124,18 @@ export function App({ port }: { port: PanelPort }) {
   const failed = (field: Field): string | undefined =>
     failure?.field === field ? failure.message : undefined;
 
+  /** Arrow keys move between the tabs (WAI-ARIA tabs pattern). */
+  function onTabKey(event: KeyboardEvent<HTMLButtonElement>): void {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const index = TABS.findIndex((item) => item.id === tabId);
+    const next = TABS[(index + step + TABS.length) % TABS.length];
+    if (next === undefined) return;
+    setTabId(next.id);
+    event.currentTarget.ownerDocument.getElementById(`tab-${next.id}`)?.focus();
+  }
+
   const tab = view.status === 'ready' ? view.tab : undefined;
   const page = tab?.page;
   const plamoListed = capability.status === 'ready' ? capability.capability.plamo : undefined;
@@ -137,58 +158,108 @@ export function App({ port }: { port: PanelPort }) {
             </p>
           ))}
       </header>
-      <StatusSection
-        view={view}
-        onRefresh={() => {
-          refresh();
-          check();
-        }}
-      />
-      <DisplaySection
-        mode={settings?.display}
-        failure={failed('display')}
-        onChange={(mode) => choose('display', { display: mode }, () => port.display(mode))}
-      />
-      <AudioSection
-        tab={tab}
-        capability={capability}
-        onStop={async (): Promise<Result<void>> => {
-          const stopped = await port.stopAudio();
-          if (mounted.current) refresh();
-          return stopped;
-        }}
-      />
-      <SourceSection
-        source={settings?.source}
-        failure={failed('source')}
-        onChange={(source) => choose('source', { source }, () => port.saveSubtitles({ source }))}
-      />
-      <LanguageSection
-        sourceLang={settings?.sourceLang}
-        failure={failed('sourceLang')}
-        onChange={(sourceLang) =>
-          choose('sourceLang', { sourceLang }, () => port.saveSubtitles({ sourceLang }))
-        }
-      />
-      <TranslatorSection
-        chosen={settings?.translator}
-        status={translator}
-        plamoListed={plamoListed}
-        failure={failed('translator')}
-        onChange={(chosen) =>
-          choose('translator', { translator: chosen }, () =>
-            port.saveSubtitles({ translator: chosen }),
-          )
-        }
-      />
-      {/* Another streamer starts afresh: no entry or typing of the previous one. */}
-      <GlossarySection
-        key={page?.streamer ?? 'none'}
-        glossary={port.glossary}
-        streamer={page?.streamer}
-        name={page?.author ?? page?.streamer}
-      />
-      <ServerSection port={port} />
+      <div
+        role="tablist"
+        aria-label="配信字幕翻訳の表示"
+        className="flex border-b border-slate-200"
+      >
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            id={`tab-${item.id}`}
+            type="button"
+            role="tab"
+            aria-selected={tabId === item.id}
+            aria-controls={`panel-${item.id}`}
+            tabIndex={tabId === item.id ? 0 : -1}
+            onClick={() => setTabId(item.id)}
+            onKeyDown={onTabKey}
+            className={`flex-1 py-2 text-center ${
+              tabId === item.id
+                ? 'border-b-2 border-blue-600 font-semibold text-slate-900'
+                : 'text-slate-500'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <section
+        role="tabpanel"
+        id={`panel-${tabId}`}
+        aria-labelledby={`tab-${tabId}`}
+        className="flex flex-col gap-2"
+      >
+        {tabId === 'simple' && (
+          <>
+            <StatusSection
+              view={view}
+              onRefresh={() => {
+                refresh();
+                check();
+              }}
+            />
+            <DisplaySection
+              mode={settings?.display}
+              failure={failed('display')}
+              onChange={(mode) => choose('display', { display: mode }, () => port.display(mode))}
+            />
+            <AudioSection
+              tab={tab}
+              capability={capability}
+              onStop={async (): Promise<Result<void>> => {
+                const stopped = await port.stopAudio();
+                if (mounted.current) refresh();
+                return stopped;
+              }}
+            />
+            <SourceSection
+              source={settings?.source}
+              failure={failed('source')}
+              onChange={(source) =>
+                choose('source', { source }, () => port.saveSubtitles({ source }))
+              }
+            />
+            <LanguageSection
+              sourceLang={settings?.sourceLang}
+              failure={failed('sourceLang')}
+              onChange={(sourceLang) =>
+                choose('sourceLang', { sourceLang }, () => port.saveSubtitles({ sourceLang }))
+              }
+            />
+          </>
+        )}
+        {tabId === 'details' && (
+          <>
+            <TranslatorSection
+              chosen={settings?.translator}
+              status={translator}
+              plamoListed={plamoListed}
+              failure={failed('translator')}
+              onChange={(chosen) =>
+                choose('translator', { translator: chosen }, () =>
+                  port.saveSubtitles({ translator: chosen }),
+                )
+              }
+            />
+            {/* Another streamer starts afresh: no entry or typing of the previous one. */}
+            <GlossarySection
+              key={page?.streamer ?? 'none'}
+              glossary={port.glossary}
+              streamer={page?.streamer}
+              name={page?.author ?? page?.streamer}
+            />
+            <ServerSection port={port} />
+            <PositionSection
+              position={settings?.position}
+              failure={failed('position')}
+              onChange={(position) =>
+                choose('position', { position }, () => port.saveSubtitles({ position }))
+              }
+            />
+          </>
+        )}
+      </section>
     </main>
   );
 }

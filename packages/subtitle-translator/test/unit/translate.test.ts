@@ -383,7 +383,7 @@ describe('caption translator', () => {
     const byGemma = Ok({ lines: [translated('a', 'Okay chat.')] });
     const keyTail = `en\u0000${contextHash(CONTEXT)}\u0000${contextHash('[]')}\u0000Okay chat.`;
     // Before any request: the default translator.
-    expect(translator.status()).toEqual({ chosen: 'gemma' });
+    expect(translator.status()).toEqual({ chosen: 'plamo' });
 
     // PLaMo refuses the line, and Gemma translates it.
     expect(await translator.translate(request(), PAGE)).toEqual(byGemma);

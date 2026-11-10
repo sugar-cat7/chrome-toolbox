@@ -154,7 +154,8 @@ function pageInfo(video: VideoMessage['video'], tracks: number): PageInfo {
  * page is `active`. An ad clears the line until the video's frames come back, or until the ad
  * ends on a paused video (drawn from its `currentTime`). A new video or navigation starts over
  * with a new timeline, live view and feeder; leaving the watch page reports it `away`. The display mode is read live: a change saved anywhere (the pill, which sends
- * `subs/display`, the shortcut, the side panel) redraws every tab at once.
+ * `subs/display`, the shortcut, the side panel) redraws every tab at once, and the position
+ * setting moves the lines the same way.
  *
  * While the service worker captures this tab's audio (`subs/status`, from this extension's service
  * worker only, target `content`), the audio is the source: the caption feeder stops, the lines of
@@ -455,6 +456,7 @@ export function startWatchPage(
     settings = next;
     const at = visit;
     if (at === undefined) return;
+    if (before?.position !== next.position) at.overlay.position(next.position);
     if (at.front === undefined) ready(at);
     else if (before?.display !== next.display) onDisplay(at);
   }
@@ -499,7 +501,10 @@ export function startWatchPage(
       shown: undefined,
     };
     visit = started;
-    if (settings !== undefined) ready(started);
+    if (settings !== undefined) {
+      started.overlay.position(settings.position);
+      ready(started);
+    }
   }
 
   /** The first read; a change seen meanwhile is newer and stays. */

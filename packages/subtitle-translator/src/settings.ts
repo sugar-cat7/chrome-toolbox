@@ -1,5 +1,5 @@
 import { z } from 'zod/mini';
-import { capture, decode, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
+import { capture, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import type { StorageArea } from '@chrome-toolbox/extension-core';
 
 /** How the subtitles show: Japanese only, source and Japanese, source only, or nothing. */
@@ -61,23 +61,45 @@ void _everyLanguageListed;
 export const SUBTITLE_TRANSLATORS = ['gemma', 'plamo'] as const;
 export type SubtitleTranslator = (typeof SUBTITLE_TRANSLATORS)[number];
 export const TRANSLATOR_LABELS = {
-  gemma: 'Gemma（既定）',
-  plamo: 'PLaMo 3 Translate 2B（速い・任意）',
+  gemma: 'Gemma',
+  plamo: 'PLaMo 3 Translate 2B（既定）',
 } as const satisfies Record<SubtitleTranslator, string>;
+
+/** The vertical offset's bounds, in percent of the player's height. */
+export const POSITION_LIMITS = { min: -50, max: 50 } as const;
 
 export const subtitleSettingsSchema = z.strictObject({
   display: z.enum(DISPLAY_MODES),
   source: z.enum(['auto', 'captions', 'audio']),
   sourceLang: z.union([z.literal('auto'), z.enum(SOURCE_LANGUAGE_CODES)]),
   translator: z.enum(SUBTITLE_TRANSLATORS),
+  /**
+   * Vertical offset of the subtitle lines over the player, in percent of the player's height:
+   * negative moves them up, positive down (down stops at the player's bottom edge).
+   */
+  position: z.number().check(z.minimum(POSITION_LIMITS.min), z.maximum(POSITION_LIMITS.max)),
 });
 export type SubtitleSettings = z.infer<typeof subtitleSettingsSchema>;
 export const defaultSubtitleSettings: SubtitleSettings = {
   display: 'both',
   source: 'auto',
   sourceLang: 'auto',
-  translator: 'gemma',
+  translator: 'plamo',
+  position: 0,
 };
+
+/** Settings saved before `position` existed held no offset: it reads as the default. */
+const legacySubtitleSettingsSchema = z.omit(subtitleSettingsSchema, { position: true });
+
+/** A stored value: the current schema, or the one saved before `position` existed. */
+function readStored(value: unknown): SubtitleSettings | undefined {
+  const parsed = subtitleSettingsSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const legacy = legacySubtitleSettingsSchema.safeParse(value);
+  return legacy.success
+    ? { ...legacy.data, position: defaultSubtitleSettings.position }
+    : undefined;
+}
 
 /** Checks a value of unknown origin (a message) against the schema: `input_invalid` when it fails. */
 export function parseSubtitleSettings(value: unknown): Result<SubtitleSettings> {
@@ -97,9 +119,9 @@ export function subtitleSettingsStore(area: StorageArea, key = 'subtitles'): Sub
       const stored = await capture(() => area.get(key), 'storage_failed');
       if (!stored.ok) return stored;
       const value = stored.value[key];
-      return value === undefined
-        ? Ok(defaultSubtitleSettings)
-        : decode(subtitleSettingsSchema, value);
+      if (value === undefined) return Ok(defaultSubtitleSettings);
+      const read = readStored(value);
+      return read === undefined ? Err(failure('response_invalid')) : Ok(read);
     },
     save: async (settings): Promise<Result<SubtitleSettings>> => {
       // The type guards callers; the check guards values that arrive in messages.
@@ -135,8 +157,8 @@ export function watchSubtitleSettings(
     const change = changes[key];
     if (change === undefined) return;
     const value = change.newValue;
-    const parsed = value === undefined ? undefined : subtitleSettingsSchema.safeParse(value);
-    onChange(parsed?.success === true ? parsed.data : defaultSubtitleSettings);
+    const read = value === undefined ? undefined : readStored(value);
+    onChange(read ?? defaultSubtitleSettings);
   }
   area.onChanged.addListener(listener);
   return () => area.onChanged.removeListener(listener);

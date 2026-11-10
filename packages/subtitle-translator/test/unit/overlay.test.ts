@@ -290,6 +290,26 @@ describe('subtitle overlay', () => {
     expect(host.hasAttribute('data-st-latency')).toBe(false);
   });
 
+  it('moves the lines by the position offset, in percent of the player height', () => {
+    const { root, overlay } = setup();
+    const lines = root.querySelector('.lines');
+    if (!(lines instanceof HTMLElement)) throw new Error('no lines');
+    const offset = () => lines.style.getPropertyValue('--st-offset');
+    const css = root.querySelector('style')?.textContent ?? '';
+    expect(css).toContain('bottom: max(8px, calc(max(54px, 9cqh) - var(--st-offset, 0cqh)))');
+    expect(offset()).toBe('');
+    overlay.position(-20);
+    expect(offset()).toBe('-20cqh');
+    overlay.position(0);
+    expect(offset()).toBe('0cqh');
+    // The same offset again writes nothing.
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(root, { subtree: true, attributes: true });
+    overlay.position(0);
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+  });
+
   it('mounts a closed shadow root unless told otherwise', () => {
     const player = document.createElement('div');
     document.body.append(player);

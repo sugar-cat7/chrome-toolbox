@@ -7,14 +7,14 @@ Chrome MV3 extension that shows two-line subtitles over YouTube videos and live 
 1. Start `llama-server` as described in [docs/llama-server.md](../../docs/llama-server.md). Speech subtitles also need Gemma's audio projector (below).
 2. Build: `pnpm --filter @chrome-toolbox/subtitle-translator build` (from the repository root).
 3. In `chrome://extensions`, turn on Developer mode, choose "Load unpacked" and select `packages/subtitle-translator/dist/chrome-mv3`.
-4. Click the toolbar icon to open the side panel. Under "llama.cpp の接続", enter the server URL (default `http://127.0.0.1:18083`) and press "接続を確認".
+4. Click the toolbar icon to open the side panel. It has two tabs: "かんたん" for everyday use and "詳細設定" for the translator, glossary, server and subtitle position. Under "詳細設定"'s "llama.cpp の接続", enter the server URL (default `http://127.0.0.1:18083`) and press "接続を確認".
 
 Where the subtitles come from ("取得元" in the side panel):
 
 - "自動" (the default): a video with a caption track (including auto-generated ones) uses it; the extension reads the track the player already fetched and translates ahead of the playback position. A live stream, or a video without a track, shows "字幕なし・Alt+Shift+S で音声字幕" on the player button and runs no inference until you start speech subtitles.
 - "字幕トラック": the caption track only. "音声": speech subtitles only, after you start them.
 
-Display: "日本語のみ", "原語と日本語" (the default), "原語のみ" or "オフ". Switch it with the small button at the top right of the player (Japanese → both → original → off), with Alt+Shift+J, or in the side panel ("表示"). Every tab follows at once. Japanese speech and Japanese tracks are shown as they are, on one line. "原語のみ" translates nothing; "オフ" processes nothing.
+Display: "日本語のみ", "原語と日本語" (the default), "原語のみ" or "オフ". Switch it with the small button at the top right of the player (Japanese → both → original → off), with Alt+Shift+J, or in the side panel ("表示"). Every tab follows at once. Japanese speech and Japanese tracks are shown as they are, on one line. "原語のみ" translates nothing; "オフ" processes nothing. "字幕の表示位置" on the "詳細設定" tab moves the lines up or down over the player, in percent of the player's height.
 
 Speech subtitles:
 
@@ -41,8 +41,8 @@ Without the projector the side panel says "音声入力が使えません。llam
 
 "字幕の翻訳" in the side panel chooses who translates the subtitles:
 
-- "Gemma（既定）": `models.translate` (default `gemma4-e4b`), the same model as the comment extension.
-- "PLaMo 3 Translate 2B（速い・任意）": `plamo-3-translate-2b` by Preferred Networks, optional and faster (121 ms against Gemma's 329 ms subtitle p50 on the tested server). You install it on the server yourself ([llama-server.md](../../docs/llama-server.md#plamo-3-translate)).
+- "PLaMo 3 Translate 2B（既定）": `plamo-3-translate-2b` by Preferred Networks, the default and faster (121 ms against Gemma's 329 ms subtitle p50 on the tested server). You install it on the server yourself ([llama-server.md](../../docs/llama-server.md#plamo-3-translate)).
+- "Gemma": `models.translate` (default `gemma4-e4b`), the same model as the comment extension.
 
 PLaMo is under the [PLaMo Community License](https://plamo.preferredai.jp/info/plamo-community-license-ja). In short: personal and non-commercial use is free without registration; commercial use needs registration in advance and annual revenue of at most 1 billion yen; anyone who gives its translations to others must state "Built with PLaMo" and mark them as PLaMo output. While PLaMo is chosen, the side panel shows "Built with PLaMo" and a link to the license. Read the license itself before you use it.
 
@@ -60,14 +60,14 @@ This repository contains no PLaMo outputs: the tests and fixtures use made-up tr
 
 ## Privacy
 
-The audio is never written to disk or to extension storage: it stays in bounded memory buffers until it is sent to your llama.cpp server, and no transcript history is kept (only the line on screen and the three sentences before it). The extension saves only its settings (server URL, model names, display, source, spoken language, translator) and the glossaries, in `chrome.storage.local`. It reads the caption track the player fetched. The one extra request to YouTube is at most one per video, made by the player when the extension puts back the caption language you had turned on.
+The audio is never written to disk or to extension storage: it stays in bounded memory buffers until it is sent to your llama.cpp server, and no transcript history is kept (only the line on screen and the three sentences before it). The extension saves only its settings (server URL, model names, display, source, spoken language, translator, subtitle position) and the glossaries, in `chrome.storage.local`. It reads the caption track the player fetched. The one extra request to YouTube is at most one per video, made by the player when the extension puts back the caption language you had turned on.
 
 ## Layout
 
 | Path                            | Role                                                                                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `src/entrypoints/background.ts` | Service worker entry: message routing, caption translation, the capture sessions, the shortcuts and the icon. |
-| `src/entrypoints/sidepanel/`    | Side panel (React): state, display, speech, source, language, translator, glossary and connection.            |
+| `src/entrypoints/sidepanel/`    | Side panel (React): state, display, speech, source, language, translator, glossary, position and connection.  |
 | `src/entrypoints/offscreen/`    | Offscreen document: the tab's audio and the live speech pipeline.                                             |
 | `src/panel.ts`                  | The side panel's port to storage and the service worker.                                                      |
 | `src/runtime.ts`                | Message routing in the service worker.                                                                        |

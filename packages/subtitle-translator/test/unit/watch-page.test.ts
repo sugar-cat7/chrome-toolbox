@@ -493,6 +493,26 @@ describe('watch page', () => {
     expect(server.of('subs/front').at(-1)?.payload).toEqual({ state: 'active' });
   });
 
+  it('moves the lines when the position setting changes, and keeps it over a navigation', async () => {
+    await fakeBrowser.storage.local.set({
+      subtitles: { ...defaultSubtitleSettings, position: -20 },
+    });
+    const { player } = await start();
+    const offset = () => {
+      const lines = player.querySelector('[data-st-overlay]')?.shadowRoot?.querySelector('.lines');
+      return lines instanceof HTMLElement ? lines.style.getPropertyValue('--st-offset') : undefined;
+    };
+    expect(offset()).toBe('-20cqh');
+    await fakeBrowser.storage.local.set({
+      subtitles: { ...defaultSubtitleSettings, position: 15 },
+    });
+    await settle();
+    expect(offset()).toBe('15cqh');
+    navigate(`/watch?v=${OTHER}`);
+    await settle();
+    expect(offset()).toBe('15cqh');
+  });
+
   it('shows the line at once when the display comes back on while paused', async () => {
     await fakeBrowser.storage.local.set({
       subtitles: { ...defaultSubtitleSettings, display: 'off' },

@@ -215,6 +215,7 @@ export const subtitlePatchSchema = z.strictObject({
   source: z.exactOptional(subtitleSettingsSchema.shape.source),
   sourceLang: z.exactOptional(subtitleSettingsSchema.shape.sourceLang),
   translator: z.exactOptional(subtitleSettingsSchema.shape.translator),
+  position: z.exactOptional(subtitleSettingsSchema.shape.position),
 });
 
 /**

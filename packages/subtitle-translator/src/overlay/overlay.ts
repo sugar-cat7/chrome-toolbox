@@ -33,6 +33,8 @@ export type PillState = Readonly<{
 export type OverlayHandle = {
   render(this: void, view: OverlayView): void;
   status(this: void, pill: PillState): void;
+  /** Moves the lines `offset` percent of the player's height (negative: up, positive: down). */
+  position(this: void, offset: number): void;
   unmount(this: void): void;
 };
 
@@ -62,7 +64,9 @@ const STYLE = `
   position: absolute;
   left: 4%;
   right: 4%;
-  bottom: max(54px, 9cqh);
+  /* --st-offset is the viewer's offset in % of the player's height (positive: down); the
+     floor keeps the lines inside the player however far down they are asked to go. */
+  bottom: max(8px, calc(max(54px, 9cqh) - var(--st-offset, 0cqh)));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -158,7 +162,8 @@ function keepPress(event: KeyboardEvent): void {
  *
  * The pill is a `<button>` from the first `status` on, also while the display is `off`, so the
  * viewer can turn it back on. A press asks `onDisplay` for the next mode (ja → both → source →
- * off → ja); the display changes when a `status` brings it.
+ * off → ja); the display changes when a `status` brings it. `position` sets how far the lines
+ * sit from their usual place near the bottom, in percent of the player's height.
  */
 export function mountOverlay(
   player: HTMLElement,
@@ -228,6 +233,7 @@ export function mountOverlay(
   let pillDisplay: DisplayMode | undefined;
   let pillText = '';
   let pillState = '';
+  let offset = 0;
 
   const hide = (target: HTMLElement, hidden: boolean): void => {
     if (target.hidden !== hidden) target.hidden = hidden;
@@ -286,6 +292,11 @@ export function mountOverlay(
         pillState = next.state;
       }
       follow();
+    },
+    position(next) {
+      if (next === offset) return;
+      offset = next;
+      lines.style.setProperty('--st-offset', `${next}cqh`);
     },
     unmount() {
       host.remove();

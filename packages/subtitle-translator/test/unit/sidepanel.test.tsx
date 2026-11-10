@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
@@ -186,6 +186,9 @@ async function open(api: PanelApi, chosen: DisplayMode = 'both'): Promise<void> 
   await screen.findByRole('radio', { name: DISPLAY_LABELS[chosen], checked: true });
   await screen.findByText('Fixture Quest day 3');
 }
+/** Opens the 詳細設定 tab, where the translator, glossary, server and position settings are. */
+const showDetails = (): Promise<void> =>
+  userEvent.click(screen.getByRole('tab', { name: '詳細設定' }));
 const region = (name: string): HTMLElement => screen.getByRole('region', { name });
 /** The value next to a row name of the status. */
 const statusValue = (name: string): string | null | undefined =>
@@ -246,15 +249,11 @@ describe('side panel', () => {
   it('shows Built with PLaMo and the license link only while PLaMo is chosen', async () => {
     const { api, of } = fakeApi();
     await open(api);
-    const gemma = screen.getByRole('radio', { name: 'Gemma（既定）' });
-    expect(gemma).toHaveProperty('checked', true);
-    expect(screen.queryByText('Built with PLaMo')).toBeNull();
-    expect(screen.queryByRole('link', { name: 'PLaMo Community License' })).toBeNull();
-
-    await userEvent.click(
-      screen.getByRole('radio', { name: 'PLaMo 3 Translate 2B（速い・任意）' }),
-    );
-    expect(await screen.findByText('Built with PLaMo')).toBeTruthy();
+    await showDetails();
+    // PLaMo is the default translator.
+    const plamo = screen.getByRole('radio', { name: 'PLaMo 3 Translate 2B（既定）' });
+    expect(plamo).toHaveProperty('checked', true);
+    expect(screen.getByText('Built with PLaMo')).toBeTruthy();
     const link = screen.getByRole('link', { name: 'PLaMo Community License' });
     expect(link.getAttribute('href')).toBe(PLAMO_LICENSE_URL);
     expect(link.getAttribute('target')).toBe('_blank');
@@ -262,20 +261,29 @@ describe('side panel', () => {
     expect(
       screen.getByText('PLaMo は llama.cpp のサーバーに別に入れます（docs/llama-server.md）'),
     ).toBeTruthy();
-    expect(of('subs/settings')).toEqual([{ patch: { translator: 'plamo' } }]);
-    await vi.waitFor(async () => {
-      expect(await store().load()).toEqual(Ok({ ...defaultSubtitleSettings, translator: 'plamo' }));
-    });
 
+    const gemma = screen.getByRole('radio', { name: 'Gemma' });
     await userEvent.click(gemma);
     await vi.waitFor(() => {
       expect(screen.queryByText('Built with PLaMo')).toBeNull();
     });
     expect(screen.queryByRole('link', { name: 'PLaMo Community License' })).toBeNull();
-    expect(of('subs/settings')).toEqual([
-      { patch: { translator: 'plamo' } },
-      { patch: { translator: 'gemma' } },
-    ]);
+    await vi.waitFor(() => {
+      expect(of('subs/settings')).toEqual([{ patch: { translator: 'gemma' } }]);
+    });
+    await vi.waitFor(async () => {
+      expect(await store().load()).toEqual(Ok({ ...defaultSubtitleSettings, translator: 'gemma' }));
+    });
+
+    await userEvent.click(plamo);
+    expect(await screen.findByText('Built with PLaMo')).toBeTruthy();
+    expect(await screen.findByRole('link', { name: 'PLaMo Community License' })).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(of('subs/settings')).toEqual([
+        { patch: { translator: 'gemma' } },
+        { patch: { translator: 'plamo' } },
+      ]);
+    });
   });
 
   /** A caption translator status that must not show on the audio path. */
@@ -340,6 +348,7 @@ describe('side panel', () => {
     });
     await open(api);
     await screen.findByText('音声入力: 使えます');
+    await showDetails();
     const list = await screen.findByRole('list', { name: 'Gemma で訳した行' });
     expect(
       within(list)
@@ -349,6 +358,7 @@ describe('side panel', () => {
   });
 
   it('says nothing about Gemma while Gemma is chosen, and uses the caption translator on the caption path', async () => {
+    await store().save({ ...defaultSubtitleSettings, translator: 'gemma' });
     const fallback: TranslatorStatus['fallback'] = {
       latest: 'refused',
       lines: { not_listed: 0, refused: 6, language: 0 },
@@ -360,10 +370,9 @@ describe('side panel', () => {
     });
     await open(api);
     await screen.findByText('音声入力: 使えます');
+    await showDetails();
     expect(screen.queryByRole('list', { name: 'Gemma で訳した行' })).toBeNull();
-    await userEvent.click(
-      screen.getByRole('radio', { name: 'PLaMo 3 Translate 2B（速い・任意）' }),
-    );
+    await userEvent.click(screen.getByRole('radio', { name: 'PLaMo 3 Translate 2B（既定）' }));
     const list = await screen.findByRole('list', { name: 'Gemma で訳した行' });
     expect(
       within(list)
@@ -427,6 +436,61 @@ describe('side panel', () => {
     expect(screen.getByRole('radio', { name: 'オフ' })).toHaveProperty('checked', true);
   });
 
+  it('shows only the open tab, starting on かんたん', async () => {
+    const { api } = fakeApi();
+    await open(api);
+    const simple = screen.getByRole('tab', { name: 'かんたん' });
+    const details = screen.getByRole('tab', { name: '詳細設定' });
+    expect(simple.getAttribute('aria-selected')).toBe('true');
+    expect(details.getAttribute('aria-selected')).toBe('false');
+    // The simple tab needs no configuration: status, display, audio, source and language.
+    expect(region('状態')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: '原語と日本語' })).toBeTruthy();
+    expect(region('音声')).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: '話されている言語' })).toBeTruthy();
+    // The detailed settings stay hidden until asked for.
+    expect(screen.queryByRole('radio', { name: 'Gemma' })).toBeNull();
+    expect(screen.queryByRole('slider')).toBeNull();
+    expect(screen.queryByRole('region', { name: '用語集' })).toBeNull();
+
+    await userEvent.click(details);
+    expect(details.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByRole('region', { name: '状態' })).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Gemma' })).toBeTruthy();
+    expect(screen.getByRole('slider', { name: '字幕の表示位置' })).toBeTruthy();
+    expect(region('用語集')).toBeTruthy();
+
+    await userEvent.click(simple);
+    expect(screen.getByRole('region', { name: '状態' })).toBeTruthy();
+    expect(screen.queryByRole('slider')).toBeNull();
+  });
+
+  it('saves the subtitle position when the slider gesture ends', async () => {
+    const { api, of } = fakeApi();
+    await open(api);
+    await showDetails();
+    const slider = screen.getByRole('slider', { name: '字幕の表示位置' });
+    expect(slider).toHaveProperty('disabled', false);
+    expect(slider).toHaveProperty('value', '0');
+    // A drag only moves the draft: nothing is saved before the gesture ends.
+    fireEvent.change(slider, { target: { value: '-20' } });
+    expect(of('subs/settings')).toEqual([]);
+    fireEvent.pointerUp(slider);
+    await vi.waitFor(() => {
+      expect(of('subs/settings')).toEqual([{ patch: { position: -20 } }]);
+    });
+    await vi.waitFor(async () => {
+      expect(await store().load()).toEqual(Ok({ ...defaultSubtitleSettings, position: -20 }));
+    });
+    expect(screen.getByText(/上へ 20%/)).toBeTruthy();
+    // A position saved elsewhere (another tab, the watch page) reaches the slider too.
+    await store().save({ ...defaultSubtitleSettings, position: 15 });
+    await vi.waitFor(() => {
+      expect(slider).toHaveProperty('value', '15');
+    });
+    expect(screen.getByText(/下へ 15%/)).toBeTruthy();
+  });
+
   it('adds and removes glossary entries and refuses the 51st', async () => {
     const terms: GlossaryEntry[] = Array.from({ length: 49 }, (_, index) => ({
       source: `Term${index + 1}`,
@@ -436,6 +500,7 @@ describe('side panel', () => {
     expect(await glossary.save('UC-fixture', terms)).toMatchObject({ ok: true });
     const { api } = fakeApi();
     await open(api);
+    await showDetails();
     const section = region('用語集');
     // The streamer's name heads the glossary.
     expect(within(section).getByRole('heading', { name: 'Fixture Ch' })).toBeTruthy();
@@ -467,6 +532,7 @@ describe('side panel', () => {
     const { streamer: _unknown, ...page } = PAGE;
     const { api } = fakeApi({ 'subs/tab-state': async () => Ok({ ...CAPTION_TAB, page }) });
     await open(api);
+    await showDetails();
     const section = region('用語集');
     expect(
       await within(section).findByText('配信者が分からないため、用語集は使えません'),
@@ -502,6 +568,7 @@ describe('side panel', () => {
         }}
       />,
     );
+    await showDetails();
     const translate = await screen.findByLabelText('翻訳モデル（Gemma）');
     await userEvent.type(translate, 'gemma4-e2b');
     await act(async () => {
@@ -610,6 +677,7 @@ describe('side panel', () => {
     render(<App port={panelPort(api)} />);
     expect(await screen.findByText('このタブには YouTube の動画がありません')).toBeTruthy();
     expect(statusValue('字幕の取得元')).toBe('なし');
+    await showDetails();
     expect(
       within(region('用語集')).getByText('配信者が分からないため、用語集は使えません'),
     ).toBeTruthy();

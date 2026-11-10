@@ -21,13 +21,14 @@ import {
   type Chat,
 } from './subtitles.ts';
 
-// The translator of the caption lines (Tasks 0 and 8): PLaMo 3 Translate 2B when the viewer picks
-// it in the side panel and the router serves it (the stub's `withPlamo`), Gemma otherwise, with a
-// notice in the panel.
+// The translator of the caption lines (Tasks 0 and 8): PLaMo 3 Translate 2B, the default the
+// viewer can also pick in the side panel's 詳細設定 tab, when the router serves it (the stub's
+// `withPlamo`); Gemma otherwise, with a notice in the panel.
 
-/** Picks PLaMo in the side panel, pointed at the stub. */
+/** Picks PLaMo in the side panel's 詳細設定 tab, pointed at the stub. */
 async function choosePlamo(sidePanel: Page): Promise<void> {
   await sidePanel.reload();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
   await sidePanel.getByRole('radio', { name: TRANSLATOR_LABELS.plamo }).check();
   await expect(sidePanel.getByRole('radio', { name: TRANSLATOR_LABELS.plamo })).toBeChecked();
 }

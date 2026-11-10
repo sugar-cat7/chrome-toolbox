@@ -266,6 +266,11 @@ describe('caption translation routes', () => {
   it('answers subs/translate only for a YouTube top frame and uses that tab page context', async () => {
     const bodies = stubChat();
     await saveGlossary();
+    // The page context goes into Gemma's prompt; PLaMo's has none to check here.
+    await subtitleSettingsStore(fakeBrowser.storage.local).save({
+      ...defaultSubtitleSettings,
+      translator: 'gemma',
+    });
     const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
     const stop = startBackground();
     const listener = add.mock.calls[0]?.[0];
@@ -352,6 +357,11 @@ describe('caption translation routes', () => {
   it('keeps the tab page across a service worker restart and forgets it when the tab closes', async () => {
     const bodies = stubChat();
     await saveGlossary();
+    // The page context goes into Gemma's prompt; PLaMo's has none to check here.
+    await subtitleSettingsStore(fakeBrowser.storage.local).save({
+      ...defaultSubtitleSettings,
+      translator: 'gemma',
+    });
     const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
     // The listener of the service worker started last.
     const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
@@ -786,7 +796,7 @@ describe('side panel routes (Task 14)', () => {
         page: page.payload.info,
         source: 'captions',
         front: muted,
-        translator: { chosen: 'gemma' },
+        translator: { chosen: 'plamo' },
       }),
     );
     // A tab without a watch page: no page, and away like any tab that reported nothing.
@@ -795,7 +805,7 @@ describe('side panel routes (Task 14)', () => {
         tabId: other.id,
         source: 'none',
         front: { state: 'away' },
-        translator: { chosen: 'gemma' },
+        translator: { chosen: 'plamo' },
       }),
     );
     // With the audio chosen as the source, a tab that is not captured has none.
@@ -882,7 +892,7 @@ describe('side panel routes (Task 14)', () => {
         source: 'audio',
         front: { state: 'away' },
         session,
-        translator: { chosen: 'gemma' },
+        translator: { chosen: 'plamo' },
       }),
     );
     // Another tab is not the captured one: nothing stops.
@@ -901,7 +911,7 @@ describe('side panel routes (Task 14)', () => {
         page: page.payload.info,
         source: 'captions',
         front: { state: 'away' },
-        translator: { chosen: 'gemma' },
+        translator: { chosen: 'plamo' },
       }),
     );
     stop();
@@ -945,7 +955,7 @@ describe('side panel routes (Task 14)', () => {
         source: 'captions',
         front: { state: 'away' },
         starting: true,
-        translator: { chosen: 'gemma' },
+        translator: { chosen: 'plamo' },
       }),
     );
     release();
@@ -1001,15 +1011,27 @@ describe('side panel routes (Task 14)', () => {
     expect(await store.load()).toEqual(
       Ok({ ...defaultSubtitleSettings, display: 'off', source: 'audio' }),
     );
-    expect(await ask(patch({ sourceLang: 'ko', translator: 'plamo' }), panelSender())).toEqual(
-      Ok({}),
-    );
+    expect(
+      await ask(patch({ sourceLang: 'ko', translator: 'plamo', position: -20 }), panelSender()),
+    ).toEqual(Ok({}));
     // The panel's display goes through the same queue as the player button's.
     expect(await ask(display('ja'), panelSender())).toEqual(Ok({}));
-    const saved = { display: 'ja', source: 'audio', sourceLang: 'ko', translator: 'plamo' };
+    const saved = {
+      display: 'ja',
+      source: 'audio',
+      sourceLang: 'ko',
+      translator: 'plamo',
+      position: -20,
+    };
     expect(await store.load()).toEqual(Ok(saved));
     // The display is not a field of the patch, and every value is checked.
-    for (const fields of [{ display: 'off' }, { source: 'tv' }, { sourceLang: 'xx' }])
+    for (const fields of [
+      { display: 'off' },
+      { source: 'tv' },
+      { sourceLang: 'xx' },
+      { position: 51 },
+      { position: 'up' },
+    ])
       expect(await ask(patch(fields), panelSender())).toMatchObject({
         ok: false,
         error: { internalCode: 'input_invalid' },

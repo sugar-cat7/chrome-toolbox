@@ -5,6 +5,7 @@ import {
   DISPLAY_MODES,
   defaultSubtitleSettings,
   nextDisplay,
+  POSITION_LIMITS,
   SOURCE_LANGUAGES,
   SOURCE_LANGUAGE_CODES,
   SUBTITLE_TRANSLATORS,
@@ -37,11 +38,55 @@ describe('subtitle settings', () => {
   it('loads the defaults and round-trips saved subtitle settings', async () => {
     const store = subtitleSettingsStore(fakeBrowser.storage.local);
     expect(await store.load()).toEqual(
-      Ok({ display: 'both', source: 'auto', sourceLang: 'auto', translator: 'gemma' }),
+      Ok({
+        display: 'both',
+        source: 'auto',
+        sourceLang: 'auto',
+        translator: 'plamo',
+        position: 0,
+      }),
     );
-    const next = { ...defaultSubtitleSettings, sourceLang: 'ko', translator: 'plamo' } as const;
+    const next = {
+      ...defaultSubtitleSettings,
+      sourceLang: 'ko',
+      translator: 'gemma',
+      position: -12.5,
+    } as const;
     expect(await store.save(next)).toEqual(Ok(next));
     expect(await subtitleSettingsStore(fakeBrowser.storage.local).load()).toEqual(Ok(next));
+  });
+
+  it('reads settings saved before position existed with the default offset', async () => {
+    const legacy = {
+      display: 'ja',
+      source: 'audio',
+      sourceLang: 'ko',
+      translator: 'gemma',
+    } as const;
+    const store = subtitleSettingsStore(fakeBrowser.storage.local);
+    await fakeBrowser.storage.local.set({ subtitles: legacy });
+    expect(await store.load()).toEqual(Ok({ ...legacy, position: 0 }));
+    // The watcher migrates them the same way, not to the defaults.
+    const seen: unknown[] = [];
+    const unwatch = watchSubtitleSettings(fakeBrowser.storage.local, (settings) => {
+      seen.push(settings);
+    });
+    await fakeBrowser.storage.local.set({ subtitles: { ...legacy, display: 'off' } });
+    unwatch();
+    expect(seen).toEqual([{ ...legacy, display: 'off', position: 0 }]);
+  });
+
+  it.each([
+    { position: POSITION_LIMITS.min, ok: true },
+    { position: 0, ok: true },
+    { position: POSITION_LIMITS.max, ok: true },
+    { position: 12.5, ok: true },
+    { position: POSITION_LIMITS.min - 1, ok: false },
+    { position: POSITION_LIMITS.max + 1, ok: false },
+    { position: 'up', ok: false },
+  ])('position $position is accepted: $ok', ({ position, ok }) => {
+    const value: unknown = { ...defaultSubtitleSettings, position };
+    expect(parseSubtitleSettings(value).ok).toBe(ok);
   });
 
   it('follows the saved settings, with the defaults for a removed or unreadable value', async () => {

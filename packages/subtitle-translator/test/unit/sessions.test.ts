@@ -28,7 +28,7 @@ const CONFIG = {
   sourceLang: 'auto',
   context: 'Title: Fixture Quest day 3\nChannel: Fixture Ch',
   glossary: [],
-  translator: 'gemma',
+  translator: 'plamo',
 };
 const SETTINGS = { baseUrl: defaultSettings.llamaBaseUrl, models: defaultSettings.models };
 /** What Chrome 156 says when the extension was not invoked on the tab (Task 13 Step 0). */
