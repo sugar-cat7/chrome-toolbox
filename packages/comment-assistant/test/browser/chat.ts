@@ -17,7 +17,8 @@ const watchUrl = (video: string, rate: number): string =>
 
 /** Points the extension at `origin` from the settings tab, as a viewer would. */
 export async function connect(sidePanel: Page, origin: string): Promise<void> {
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
   await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();

@@ -194,6 +194,7 @@ test('at 50 msg/s, concealed lines cost about what shown ones do, and the displa
       translate: true,
       showOriginal: false,
       holdUntilJudged: hold,
+      strength: 'normal',
       modes: {
         chatter: mode,
         question: mode,

@@ -145,9 +145,15 @@ function fakeApi(
   };
 }
 
+/** The tabs 詳細設定 nests: they need the view opened first. */
+const ADVANCED_TABS = ['フィルター', '非表示', '設定'];
 const openTab = async (name: string): Promise<HTMLElement> => {
+  if (ADVANCED_TABS.includes(name))
+    await userEvent.click(screen.getByRole('tab', { name: '詳細設定' }));
   await userEvent.click(screen.getByRole('tab', { name }));
-  return screen.getByRole('tabpanel');
+  // The detailed view nests a tabpanel in its own: the innermost is the tab's content.
+  const panels = screen.getAllByRole('tabpanel');
+  return panels.at(-1) as HTMLElement;
 };
 
 describe('side panel', () => {
@@ -157,10 +163,8 @@ describe('side panel', () => {
     expect(await screen.findByText('Fixture Quest Part 3')).toBeTruthy();
     expect(screen.getByText('@FixtureStreamer')).toBeTruthy();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '要約',
-      'フィルター',
-      '非表示',
-      '設定',
+      'かんたん',
+      '詳細設定',
     ]);
     expect(of('comments/stream')).toEqual([{ type: 'comments/stream', payload: { tabId: 7 } }]);
     // The panel opens on the summary of the stream's chat.
@@ -334,10 +338,10 @@ describe('side panel', () => {
     expect(asked()).toBe(5);
     await userEvent.click(toggle);
     expect(vi.getTimerCount()).toBe(1);
-    // Another tab of the panel and closing it both end the timer.
-    await userEvent.click(screen.getByRole('tab', { name: 'フィルター' }));
+    // Another view of the panel and closing it both end the timer.
+    await userEvent.click(screen.getByRole('tab', { name: '詳細設定' }));
     expect(vi.getTimerCount()).toBe(0);
-    await userEvent.click(screen.getByRole('tab', { name: '要約' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'かんたん' }));
     await within(screen.getByRole('tabpanel')).findByText('ボス戦の攻略');
     expect(vi.getTimerCount()).toBe(1);
     unmount();
@@ -411,7 +415,7 @@ describe('side panel', () => {
     expect(await within(panel).findByText('この配信者用に保存しました')).toBeTruthy();
     expect((spoiler as HTMLSelectElement).value).toBe('hide');
     expect(await fakeBrowser.storage.local.get(filterKey('youtube', '@FixtureStreamer'))).toEqual({
-      [filterKey('youtube', '@FixtureStreamer')]: { v: 2, ...expected },
+      [filterKey('youtube', '@FixtureStreamer')]: { v: 3, ...expected },
     });
 
     await userEvent.click(within(panel).getByLabelText('原文を表示'));
@@ -450,11 +454,93 @@ describe('side panel', () => {
     expect(await within(panel).findByText('この配信者用に保存しました')).toBeTruthy();
     expect(await fakeBrowser.storage.local.get(filterKey('youtube', '@FixtureStreamer'))).toEqual({
       [filterKey('youtube', '@FixtureStreamer')]: {
-        v: 2,
+        v: 3,
         ...defaultFilterSettings,
         holdUntilJudged: false,
       },
     });
+  });
+
+  it('saves the filter strength for the streamer and shows its defaults', async () => {
+    const { api } = fakeApi();
+    const port = panelPort(api);
+    const save = vi.spyOn(port.filters, 'save');
+    render(<App port={port} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = await openTab('フィルター');
+    const strength = await within(panel).findByLabelText('フィルターの強さ');
+    expect((strength as HTMLSelectElement).value).toBe('normal');
+    // ふつう: a spoiler defaults to 伏せる, a question to ハイライト.
+    expect(
+      within(within(panel).getByLabelText('ネタバレ')).getByRole('option', {
+        name: '既定（伏せる）',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(within(panel).getByLabelText('質問')).getByRole('option', {
+        name: '既定（ハイライト）',
+      }),
+    ).toBeTruthy();
+
+    await userEvent.selectOptions(strength, '強め');
+    const strict = { ...defaultFilterSettings, strength: 'strict' };
+    expect(save).toHaveBeenLastCalledWith('youtube', '@FixtureStreamer', strict);
+    expect(await within(panel).findByText('この配信者用に保存しました')).toBeTruthy();
+    // 強め shifts the defaults one step toward hiding: spoiler 消す, question 伏せる.
+    expect(
+      within(within(panel).getByLabelText('ネタバレ')).getByRole('option', {
+        name: '既定（消す）',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(within(panel).getByLabelText('質問')).getByRole('option', {
+        name: '既定（伏せる）',
+      }),
+    ).toBeTruthy();
+    expect(await fakeBrowser.storage.local.get(filterKey('youtube', '@FixtureStreamer'))).toEqual({
+      [filterKey('youtube', '@FixtureStreamer')]: { v: 3, ...strict },
+    });
+
+    await userEvent.selectOptions(strength, '弱め');
+    expect(save).toHaveBeenLastCalledWith('youtube', '@FixtureStreamer', {
+      ...defaultFilterSettings,
+      strength: 'mild',
+    });
+    // 弱め removes nothing outright and marks nothing.
+    expect(
+      within(within(panel).getByLabelText('ネタバレ')).getByRole('option', {
+        name: '既定（伏せる）',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(within(panel).getByLabelText('質問')).getByRole('option', {
+        name: '既定（表示）',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('keeps the かんたん view to the summary, the strength and the translation switches', async () => {
+    const { api } = fakeApi();
+    render(<App port={panelPort(api)} />);
+    await screen.findByText('Fixture Quest Part 3');
+    const panel = screen.getByRole('tabpanel');
+    // The summary and the two simple controls are there.
+    expect(await within(panel).findByText('ボス戦の攻略')).toBeTruthy();
+    expect(within(panel).getByLabelText('フィルターの強さ')).toBeTruthy();
+    expect(within(panel).getByLabelText('翻訳を表示')).toBeTruthy();
+    expect(within(panel).getByLabelText('原文を表示')).toBeTruthy();
+    // Nothing detailed: no per-category modes, genre, note or judgement switch.
+    expect(within(panel).queryByLabelText('ネタバレ対象')).toBeNull();
+    expect(within(panel).queryByLabelText('ネタバレ')).toBeNull();
+    expect(within(panel).queryByText('カテゴリごとの表示')).toBeNull();
+    expect(
+      within(panel).queryByRole('checkbox', { name: '判定してから表示する（最大 2 秒）' }),
+    ).toBeNull();
+    expect(within(panel).queryByText('ジャンル')).toBeNull();
+    // The detailed tabs are one click away.
+    await userEvent.click(screen.getByRole('tab', { name: '詳細設定' }));
+    const panels = screen.getAllByRole('tabpanel');
+    expect(await within(panels.at(-1) as HTMLElement).findByLabelText('ネタバレ対象')).toBeTruthy();
   });
 
   it('saves the spoiler targets for the stream, after a short pause in typing (R30)', async () => {
@@ -515,7 +601,8 @@ describe('side panel', () => {
     current = { ...stream, partition: 'fixture0002', title: 'Fixture Quest Part 4' };
     for (const listener of events.activated.listeners) listener();
     expect(await screen.findByText('Fixture Quest Part 4')).toBeTruthy();
-    panel = screen.getByRole('tabpanel');
+    const panels = screen.getAllByRole('tabpanel');
+    panel = panels.at(-1) as HTMLElement;
     await vi.waitFor(() =>
       expect((within(panel).getByLabelText('ネタバレ') as HTMLSelectElement).value).toBe('hide'),
     );

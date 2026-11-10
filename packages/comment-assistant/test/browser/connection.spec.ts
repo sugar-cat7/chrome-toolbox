@@ -4,8 +4,9 @@ const connect = async (
   sidePanel: import('@playwright/test').Page,
   origin: string,
 ): Promise<void> => {
-  // The connection lives in the settings tab; the panel opens on the summary.
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  // The connection lives in the settings tab of 詳細設定; the panel opens on かんたん.
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
 };

@@ -33,8 +33,9 @@ const batches = (sent: readonly Sent[]): Sent[] =>
 /**
  * Fake llama.cpp router: chat translates every translatable comment as `訳:<text>` and calls a
  * "menace" abusive, everything else chatter, and answers a genre guess with `genre`; Clef scores
- * 0.01 (0.95 for a "menace"). Requests other than `/props` wait for `door` (or the door it
- * returns when asked); the first `propsFailures` `/props` requests find the server down.
+ * 0.01 (0.95 for a "menace"). `/v1/models` answers at once with `models` (no PLaMo unless named);
+ * other requests wait for `door` (or the door it returns when asked); the first `propsFailures`
+ * `/props` requests find the server down.
  */
 const stubLlama = (
   door: Promise<void> | (() => Promise<void>) = Promise.resolve(),
@@ -43,11 +44,14 @@ const stubLlama = (
     propsFailures = 0,
     genre = 'other',
     processing = [],
+    models = ['gemma4-e4b', 'clef-flash'],
   }: {
     propsFailures?: number;
     genre?: string;
     /** The slots `/slots` reports processing (none by default). */
     processing?: readonly number[];
+    /** The model ids `/v1/models` lists (PLaMo absent unless named). */
+    models?: readonly string[];
   } = {},
 ): Sent[] => {
   const sent: Sent[] = [];
@@ -61,6 +65,10 @@ const stubLlama = (
         string,
         unknown
       >;
+      if (path === '/v1/models') {
+        sent.push({ path, body });
+        return Response.json({ object: 'list', data: models.map((id) => ({ id })) });
+      }
       if (path === '/props') {
         sent.push({ path: `${path}${url.search}`, body });
         failures -= 1;
@@ -1332,6 +1340,7 @@ describe('extension runtime wiring', () => {
       expect(sent.map((s) => s.path).sort()).toEqual([
         '/props?model=gemma4-e4b',
         '/v1/chat/completions',
+        '/v1/models',
         '/v1/systemone',
       ]),
     );

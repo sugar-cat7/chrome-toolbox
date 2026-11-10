@@ -97,6 +97,9 @@ function commentPipelines({
   // LanguageDetector is exposed to windows only (Translator and Language Detector APIs IDL,
   // `[Exposed=Window]`), so the service worker always uses the script guess.
   const detector = createLanguageDetector(undefined);
+  // PLaMo translates the comments it lists support for, one line each; its own queue keeps a
+  // burst of lines from taking the batches' slots (the requests name the PLaMo model).
+  const plamoQueue = createQueue({ concurrency: MAX_COMMENT_CONCURRENCY, maxPending: 32 });
   let loading: Promise<Result<Settings>> | undefined;
   /** The pipeline of the current settings and the abort of its slot-count request. */
   type Active = { key: string; pipeline: CommentPipeline; probe: AbortController };
@@ -155,6 +158,14 @@ function commentPipelines({
       emit: sendAnnotations,
       onHiddenChange,
       now: () => Date.now(),
+      // The same router, asking for `plamo-3-translate-2b`: the pipeline offers comments to it
+      // only while `/v1/models` lists the model, and every refusal falls back to Gemma.
+      plamo: createLlamaClient({
+        baseUrl,
+        fetch,
+        queue: plamoQueue,
+        timeoutMs: COMMENT_TIMEOUT_MS,
+      }),
       // Slot 0 of the model the batches use: only the subtitles' requests to that same model
       // contend for its decoding. The subtitle extension's settings are never read (S39).
       subtitleSlotBusy: async (signal: AbortSignal): Promise<Result<boolean>> => {

@@ -17,13 +17,22 @@ export const MAX_SPOILER_NOTES = 100;
 export const filterModeSchema = z.enum(['show', 'highlight', 'blur', 'hide']);
 /** How the chat shows a comment of one category. */
 export type FilterMode = z.infer<typeof filterModeSchema>;
+export const filterStrengthSchema = z.enum(['mild', 'normal', 'strict']);
+/**
+ * How hard the defaults filter a comment the viewer did not set a mode for: `mild` removes
+ * nothing outright (a 消す default becomes 伏せる) and marks nothing (ハイライト becomes 表示);
+ * `strict` conceals everything borderline (伏せる becomes 消す, ハイライト becomes 伏せる).
+ * 雑談 stays 表示 at every strength. A category with a chosen mode ignores the strength.
+ */
+export type FilterStrength = z.infer<typeof filterStrengthSchema>;
 /**
  * The version of a saved filter record (R56). A record without one was saved before it: the
- * pre-5d rule (`withoutLegacyDefaults`) applies to it only.
+ * pre-5d rule (`withoutLegacyDefaults`) applies to it only. Version 2 records load as they are
+ * (the strength they lack reads as `normal`); version 3 adds `strength`.
  */
-const FILTERS_VERSION = 2;
+const FILTERS_VERSION = 3;
 export const filterSettingsSchema = z.strictObject({
-  v: z.optional(z.literal(FILTERS_VERSION)),
+  v: z.optional(z.literal([2, FILTERS_VERSION])),
   /** Show translations at all. */
   translate: z.boolean(),
   /** Show the original text instead of the translation for now. */
@@ -35,30 +44,38 @@ export const filterSettingsSchema = z.strictObject({
    * before the switch existed have none: on.
    */
   holdUntilJudged: z._default(z.boolean(), true),
+  /**
+   * How hard the defaults filter (see `FilterStrength`); records saved before it existed
+   * have none: `normal`, the defaults they were saved with.
+   */
+  strength: z._default(filterStrengthSchema, 'normal'),
 });
 export type FilterSettings = Readonly<{
   translate: boolean;
   showOriginal: boolean;
   modes: Readonly<Partial<Record<CommentCategory, FilterMode>>>;
   holdUntilJudged: boolean;
+  strength: FilterStrength;
 }>;
 /**
- * No mode is chosen: every category shows as `defaultModeOf` says. A new line waits for its
- * judgement.
+ * No mode is chosen: every category shows as `defaultModeOf` says, at `normal` strength. A new
+ * line waits for its judgement.
  */
 export const defaultFilterSettings: FilterSettings = {
   translate: true,
   showOriginal: false,
   modes: {},
   holdUntilJudged: true,
+  strength: 'normal',
 };
 /**
- * How a category shows until the viewer chooses. Abusive and spam comments, and the genre
- * categories (instruction, relay, ghosting, privacy, sensitive, R62), are removed from the chat
- * (`hide`, 消す): highlighting or concealing them still draws the eye to them, and the side
- * panel lists them for review (R54). Spoilers are concealed as a bar (`blur`, 伏せる).
+ * How a category shows until the viewer chooses, at `normal` strength. Abusive and spam
+ * comments, and the genre categories (instruction, relay, ghosting, privacy, sensitive, R62),
+ * are removed from the chat (`hide`, 消す): highlighting or concealing them still draws the eye
+ * to them, and the side panel lists them for review (R54). Spoilers are concealed as a bar
+ * (`blur`, 伏せる). Questions and important comments are marked (`highlight`, ハイライト).
  */
-export function defaultModeOf(category: CommentCategory): FilterMode {
+function baseModeOf(category: CommentCategory): FilterMode {
   switch (category) {
     case 'abusive':
     case 'spam':
@@ -77,9 +94,37 @@ export function defaultModeOf(category: CommentCategory): FilterMode {
       return 'show';
   }
 }
+/** `mild`: nothing is removed outright and nothing is marked — 消す→伏せる, ハイライト→表示. */
+const MILD_MODES: Readonly<Record<FilterMode, FilterMode>> = {
+  show: 'show',
+  highlight: 'show',
+  blur: 'blur',
+  hide: 'blur',
+};
+/** `strict`: everything borderline is concealed — 伏せる→消す, ハイライト→伏せる. */
+const STRICT_MODES: Readonly<Record<FilterMode, FilterMode>> = {
+  show: 'show',
+  highlight: 'blur',
+  blur: 'hide',
+  hide: 'hide',
+};
+/**
+ * How a category shows until the viewer chooses, at the settings' strength: `mild` and
+ * `strict` shift the `normal` default one step toward showing or hiding (see
+ * `FilterStrength`); `normal` keeps it.
+ */
+export function defaultModeOf(
+  category: CommentCategory,
+  strength: FilterStrength = 'normal',
+): FilterMode {
+  const base = baseModeOf(category);
+  if (strength === 'mild') return MILD_MODES[base];
+  if (strength === 'strict') return STRICT_MODES[base];
+  return base;
+}
 /** The mode a comment shows with: the viewer's own choice for its category, else the default. */
 export const modeOf = (filters: FilterSettings, category: CommentCategory): FilterMode =>
-  filters.modes[category] ?? defaultModeOf(category);
+  filters.modes[category] ?? defaultModeOf(category, filters.strength);
 
 /**
  * The defaults of the panel before Task 5d, which saved the mode of each of its six categories
@@ -118,12 +163,14 @@ export const storedFilters = ({
   showOriginal,
   modes,
   holdUntilJudged,
+  strength,
 }: FilterSettings): z.input<typeof filterSettingsSchema> => ({
   v: FILTERS_VERSION,
   translate,
   showOriginal,
   modes,
   holdUntilJudged,
+  strength,
 });
 /**
  * Extension storage key of one streamer's filter settings (`ownerOf` in stream-context.ts: the

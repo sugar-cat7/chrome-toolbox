@@ -348,8 +348,9 @@ test('shows originals and a connection error while llama.cpp is down, then recov
     await sleep(150);
   }
   // The settings tab tells why (asked again each time the tab opens).
-  await sidePanel.getByRole('tab', { name: '要約' }).click();
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  await sidePanel.getByRole('tab', { name: 'かんたん' }).click();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   const judge = sidePanel.getByRole('region', { name: '有害判定' });
   await expect(judge).toContainText('llama.cpp に接続できません');
 
@@ -358,8 +359,9 @@ test('shows originals and a connection error while llama.cpp is down, then recov
   await expect
     .poll(async () => (await english(up)).filter((line) => line.translated).length)
     .toBeGreaterThanOrEqual(3);
-  await sidePanel.getByRole('tab', { name: '要約' }).click();
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  await sidePanel.getByRole('tab', { name: 'かんたん' }).click();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await expect(judge).toContainText('Clef で判定しています');
   await expect(judge).not.toContainText('接続できません');
 });
@@ -401,8 +403,8 @@ test('side panel summary reflects the last 5 minutes', async ({
     )
     .toEqual(['english', 'japanese']);
 
-  // The summary tab opens on the last 15 minutes.
-  await sidePanel.getByRole('tab', { name: '要約' }).click();
+  // The summary opens on the last 15 minutes.
+  await sidePanel.getByRole('tab', { name: 'かんたん' }).click();
   await expect(sidePanel.getByText('Fixture Raid Night: the clockwork tower')).toBeVisible();
   await expect(sidePanel.getByText(STUB_TOPIC)).toBeVisible();
   const five = sidePanel.getByRole('button', { name: '5分', exact: true });

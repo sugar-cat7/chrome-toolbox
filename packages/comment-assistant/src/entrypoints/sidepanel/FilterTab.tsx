@@ -12,6 +12,7 @@ import {
   defaultModeOf,
   type FilterMode,
   type FilterSettings,
+  type FilterStrength,
 } from '../../filters.ts';
 import type { PanelPort } from '../../panel.ts';
 import type { GenreView } from '../../protocol.ts';
@@ -24,11 +25,13 @@ import {
   GENRE_REASON_LABELS,
   HOLD_LABEL,
   MODE_LABELS,
+  STRENGTH_LABELS,
 } from './text.ts';
 
 /** The select value of the default option: no mode chosen. */
 const DEFAULT_MODE = '';
 const MODES: readonly FilterMode[] = ['show', 'highlight', 'blur', 'hide'];
+const STRENGTHS: readonly FilterStrength[] = ['mild', 'normal', 'strict'];
 
 type Status =
   | { kind: 'idle' }
@@ -139,22 +142,27 @@ function noteSaver(): NoteSaver {
 }
 
 /**
- * The stream's genre, detected or chosen for the stream (R63); how the chat shows each category
- * on for the stream (the genre's own and the ones every stream has, R62), translations and the
- * original text, and whether a new line waits for its judgement (R52), saved per streamer (or
- * per stream while the streamer is unknown, R29); and the spoiler targets, saved per stream
- * (R30). Filter and genre changes are saved at once; the spoiler targets after a short pause in
- * typing, when the field is left and when the panel closes.
+ * The stream's genre, detected or chosen for the stream (R63); how hard the defaults filter
+ * (the strength) and how the chat shows each category on for the stream (the genre's own and
+ * the ones every stream has, R62), translations and the original text, and whether a new line
+ * waits for its judgement (R52), saved per streamer (or per stream while the streamer is
+ * unknown, R29); and the spoiler targets, saved per stream (R30). Filter and genre changes are
+ * saved at once; the spoiler targets after a short pause in typing, when the field is left and
+ * when the panel closes. With `simple` only the strength and the translation switches show:
+ * the かんたん view of the panel, which needs no further configuration.
  */
 export function FilterTab({
   port,
   stream,
   genre,
+  simple = false,
 }: {
   port: PanelPort;
   stream: StreamContext | undefined;
   /** The stream's genre and categories; every category is listed without it. */
   genre?: GenreView | undefined;
+  /** The かんたん view: the strength and the translation switches only. */
+  simple?: boolean;
 }) {
   const site = stream?.site;
   const owner = stream && ownerOf(stream);
@@ -215,8 +223,9 @@ export function FilterTab({
       current = false;
     };
   }, [port, site, owner]);
+  // The かんたん view has no note field: its note is neither read nor waited for.
   useEffect(() => {
-    if (site === undefined || partition === undefined) return undefined;
+    if (simple || site === undefined || partition === undefined) return undefined;
     let current = true;
     launch(
       async () => {
@@ -232,11 +241,11 @@ export function FilterTab({
     return () => {
       current = false;
     };
-  }, [port, site, partition]);
+  }, [port, site, partition, simple]);
 
   if (stream === undefined || site === undefined || owner === undefined)
     return <p className="text-slate-500">配信を開くと、配信者ごとのフィルターを設定できます。</p>;
-  if (settings === undefined || note === undefined)
+  if (settings === undefined || (!simple && note === undefined))
     return <p className="text-slate-500">読み込んでいます…</p>;
   const shown = settings;
 
@@ -292,13 +301,37 @@ export function FilterTab({
     if (mode === undefined) return;
     save({ ...shown, modes: { ...shown.modes, [category]: mode } });
   }
+  function setStrength(value: string): void {
+    const strength = STRENGTHS.find((candidate) => candidate === value);
+    if (strength === undefined || strength === shown.strength) return;
+    save({ ...shown, strength });
+  }
 
   return (
     <form className="flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
-      <fieldset className="flex flex-col gap-1">
-        <legend className="mb-1 text-xs text-slate-500">ジャンル</legend>
-        <GenreField genre={genre} onChoose={choose} />
-      </fieldset>
+      {!simple && (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="mb-1 text-xs text-slate-500">ジャンル</legend>
+          <GenreField genre={genre} onChoose={choose} />
+        </fieldset>
+      )}
+      <label className="flex items-center justify-between gap-2">
+        フィルターの強さ
+        <select
+          value={shown.strength}
+          onChange={(event) => setStrength(event.target.value)}
+          className="rounded border border-slate-300 px-1 py-0.5"
+        >
+          {STRENGTHS.map((strength) => (
+            <option key={strength} value={strength}>
+              {STRENGTH_LABELS[strength]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="text-xs text-slate-500">
+        弱めは消さずに伏せて強調もしません。強めは質問やネタバレも伏せて消します。
+      </p>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-xs text-slate-500">翻訳</legend>
         <label className="flex items-center justify-between gap-2">
@@ -318,58 +351,66 @@ export function FilterTab({
           />
         </label>
       </fieldset>
-      <fieldset className="flex flex-col gap-1">
-        <legend className="mb-1 text-xs text-slate-500">カテゴリごとの表示</legend>
-        {genre !== undefined && (
-          <p className="text-xs text-slate-500">
-            この配信のジャンルで有効なカテゴリです。表示方法は配信者ごとに保存します。
-          </p>
-        )}
-        {categories.map((category) => (
-          <label key={category} className="flex items-center justify-between gap-2">
-            {filterLabel(category)}
-            <select
-              value={shown.modes[category] ?? DEFAULT_MODE}
-              onChange={(event) => setMode(category, event.target.value)}
-              className="rounded border border-slate-300 px-1 py-0.5"
-            >
-              <option value={DEFAULT_MODE}>既定（{MODE_LABELS[defaultModeOf(category)]}）</option>
-              {MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {MODE_LABELS[mode]}
+      {!simple && (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="mb-1 text-xs text-slate-500">カテゴリごとの表示</legend>
+          {genre !== undefined && (
+            <p className="text-xs text-slate-500">
+              この配信のジャンルで有効なカテゴリです。表示方法は配信者ごとに保存します。
+            </p>
+          )}
+          {categories.map((category) => (
+            <label key={category} className="flex items-center justify-between gap-2">
+              {filterLabel(category)}
+              <select
+                value={shown.modes[category] ?? DEFAULT_MODE}
+                onChange={(event) => setMode(category, event.target.value)}
+                className="rounded border border-slate-300 px-1 py-0.5"
+              >
+                <option value={DEFAULT_MODE}>
+                  既定（{MODE_LABELS[defaultModeOf(category, shown.strength)]}）
                 </option>
-              ))}
-            </select>
+                {MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {MODE_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <label className="mt-1 flex items-center justify-between gap-2">
+            {HOLD_LABEL}
+            <input
+              type="checkbox"
+              checked={shown.holdUntilJudged}
+              onChange={(event) => save({ ...shown, holdUntilJudged: event.target.checked })}
+            />
           </label>
-        ))}
-        <label className="mt-1 flex items-center justify-between gap-2">
-          {HOLD_LABEL}
-          <input
-            type="checkbox"
-            checked={shown.holdUntilJudged}
-            onChange={(event) => save({ ...shown, holdUntilJudged: event.target.checked })}
-          />
-        </label>
-      </fieldset>
-      <label className="flex flex-col gap-1">
-        <span className="text-xs text-slate-500">ネタバレ対象</span>
-        <textarea
-          value={note}
-          maxLength={MAX_SPOILER_NOTE}
-          rows={2}
-          placeholder="例: ゲーム名、どこまで進んだか"
-          aria-describedby="spoiler-note-hint"
-          onChange={(event) => {
-            setNote(event.target.value);
-            saver.schedule(event.target.value);
-          }}
-          onBlur={saver.flush}
-          className="rounded border border-slate-300 px-2 py-1"
-        />
-      </label>
-      <span id="spoiler-note-hint" className="text-xs text-slate-500">
-        この配信だけに使います（同じ配信者の次の配信には引き継ぎません）。
-      </span>
+        </fieldset>
+      )}
+      {!simple && (
+        <>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500">ネタバレ対象</span>
+            <textarea
+              value={note ?? ''}
+              maxLength={MAX_SPOILER_NOTE}
+              rows={2}
+              placeholder="例: ゲーム名、どこまで進んだか"
+              aria-describedby="spoiler-note-hint"
+              onChange={(event) => {
+                setNote(event.target.value);
+                saver.schedule(event.target.value);
+              }}
+              onBlur={saver.flush}
+              className="rounded border border-slate-300 px-2 py-1"
+            />
+          </label>
+          <span id="spoiler-note-hint" className="text-xs text-slate-500">
+            この配信だけに使います（同じ配信者の次の配信には引き継ぎません）。
+          </span>
+        </>
+      )}
       <output aria-live="polite" className="text-xs text-slate-500">
         {statusText(status, stream)}
       </output>

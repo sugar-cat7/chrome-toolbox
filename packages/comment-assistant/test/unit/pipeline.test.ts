@@ -149,6 +149,7 @@ const setup = ({
   client = (llama) => llama,
   onHiddenChange,
   subtitleSlotBusy,
+  plamo = false,
 }: {
   fetch: Fetch;
   judge?: ToxicityJudge;
@@ -160,17 +161,29 @@ const setup = ({
   client?: (llama: LlamaClient) => LlamaClient;
   /** Whether the subtitles' slot 0 is processing; without it comments never give way. */
   subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>;
+  /** Give the pipeline a PLaMo client on the same `fetch` (its requests name the PLaMo model). */
+  plamo?: boolean;
 }) => {
   const clock = fakeClock();
   const emitted: { target: Target; annotations: Annotation[] }[] = [];
+  const queue = () => createQueue({ concurrency: 4, maxPending: 16 });
   const pipeline = createCommentPipeline({
     client: client(
       createLlamaClient({
         baseUrl: 'http://127.0.0.1:18083',
         fetch,
-        queue: createQueue({ concurrency: 4, maxPending: 16 }),
+        queue: queue(),
       }),
     ),
+    ...(plamo
+      ? {
+          plamo: createLlamaClient({
+            baseUrl: 'http://127.0.0.1:18083',
+            fetch,
+            queue: queue(),
+          }),
+        }
+      : {}),
     ...(commentConcurrency === undefined ? {} : { commentConcurrency }),
     ...(feedback === undefined ? {} : { feedback }),
     ...(onHiddenChange === undefined ? {} : { onHiddenChange }),
@@ -257,6 +270,113 @@ describe('comment pipeline', () => {
     expect(promptComments(body).map((c) => c.translate)).toEqual([false, false]);
     expect(body.grammar).not.toMatch(/\bja\d/u);
     expect(annotations().map((a) => a.translation)).toEqual([undefined, undefined]);
+  });
+
+  /**
+   * A router that lists `plamo` (or not) and answers chat by model: PLaMo lines get `plamoJa`
+   * (or fail when `plamoDown`), Gemma batches classify with `echo` and one-line subtitle
+   * fallbacks get `gemmaJa`.
+   */
+  const plamoRouter = ({
+    listed = true,
+    plamoJa = 'PLaMoの訳',
+    plamoDown = false,
+    gemmaJa = 'Gemmaの訳',
+  }: {
+    listed?: boolean;
+    plamoJa?: string;
+    plamoDown?: boolean;
+    gemmaJa?: string;
+  } = {}) => {
+    const requests: { path: string; model: string; slot: number }[] = [];
+    const fetch: Fetch = async (input, init) => {
+      const url = new URL(input);
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        model?: string;
+        id_slot?: number;
+        grammar?: string;
+        messages?: { content: string }[];
+      };
+      requests.push({
+        path: url.pathname,
+        model: body.model ?? '',
+        slot: body.id_slot ?? -1,
+      });
+      if (url.pathname === '/v1/models')
+        return Response.json({
+          object: 'list',
+          data: [{ id: 'gemma4-e4b' }, ...(listed ? [{ id: 'plamo-3-translate-2b' }] : [])],
+        });
+      if (url.pathname !== '/v1/chat/completions') throw new Error(`unexpected ${url.pathname}`);
+      // `finish_reason` says the reply was not cut, as llama-server's does.
+      if (body.model === 'plamo-3-translate-2b') {
+        if (plamoDown) return new Response('busy', { status: 500 });
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: plamoJa } }],
+        });
+      }
+      // A one-line fallback has the subtitle grammar; a batch has the comment one.
+      if (body.grammar !== undefined && !body.grammar.includes('code ::='))
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: `${gemmaJa}\n` } }],
+        });
+      const comments = (body.messages?.[1]?.content ?? '')
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as PromptComment);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: replyLines(echo()(comments)) } }],
+      });
+    };
+    return { requests, fetch };
+  };
+
+  it('translates comments with PLaMo when the router lists it, classifying them in the batch', async () => {
+    const router = plamoRouter();
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, {
+      ...channel,
+      comments: [comment('1', 'how long is phase 2?'), comment('2', 'がんばれ')],
+    });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    // The English comment went to PLaMo on the batch's slot; the Japanese one needed nothing.
+    const plamoCalls = router.requests.filter((r) => r.model === 'plamo-3-translate-2b');
+    expect(plamoCalls).toEqual([
+      { path: '/v1/chat/completions', model: 'plamo-3-translate-2b', slot: 1 },
+    ]);
+    // The batch still classified both, but asked for no translation of the PLaMo one.
+    const batch = router.requests.find((r) => r.model === 'gemma4-e4b');
+    expect(batch?.path).toBe('/v1/chat/completions');
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'PLaMoの訳', category: 'chatter', state: 'done' },
+      { id: '2', category: 'chatter', state: 'done' },
+    ]);
+  });
+
+  it('keeps the batch translation when the router does not list PLaMo', async () => {
+    const router = plamoRouter({ listed: false });
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(router.requests.filter((r) => r.model === 'plamo-3-translate-2b')).toEqual([]);
+    expect(annotations()).toEqual([
+      { id: '1', translation: '訳:hello there', category: 'chatter', state: 'done' },
+    ]);
+  });
+
+  it('translates a line PLaMo refused with the batch model alone', async () => {
+    const router = plamoRouter({ plamoDown: true });
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    // PLaMo was asked and refused; the one-line subtitle prompt on Gemma answered instead.
+    expect(router.requests.map((r) => r.model)).toContain('plamo-3-translate-2b');
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'Gemmaの訳', category: 'chatter', state: 'done' },
+    ]);
   });
 
   it('asks the model for short batch-local ids instead of echoing long platform ids', async () => {
