@@ -22,9 +22,14 @@ const host = (n: number): string => `site${n}.fixture.test`;
 describe('page settings', () => {
   it('loads page settings with defaults and rejects an unknown translator', async () => {
     const store = pageSettingsStore(fakeBrowser.storage.local);
-    expect(await store.load()).toEqual(
-      Ok({ v: 1, mode: 'replace', translator: 'plamo', always: [], never: [] }),
-    );
+    expect(await store.load()).toEqual(Ok(defaultPageSettings));
+    expect(defaultPageSettings).toEqual({
+      v: 2,
+      mode: 'replace',
+      translator: 'plamo',
+      always: [],
+      never: [],
+    });
     const other = await store.save({ ...defaultPageSettings, translator: 'other' } as never);
     expect(other).toMatchObject({ ok: false, error: { internalCode: 'input_invalid' } });
     // Nothing was written.
@@ -37,7 +42,7 @@ describe('page settings', () => {
   it('round-trips saved settings under the page key, apart from the shared settings', async () => {
     const store = pageSettingsStore(fakeBrowser.storage.local);
     const next: PageSettings = {
-      v: 1,
+      v: 2,
       mode: 'pair',
       translator: 'plamo',
       always: ['https://wiki.fixture.test/*'],
@@ -50,13 +55,74 @@ describe('page settings', () => {
 
   it.each([
     { name: 'a PLaMo model name (P5)', extra: { plamoModel: 'plamo-3-translate-2b' } },
-    { name: 'another version', extra: { v: 2 } },
+    { name: 'another version', extra: { v: 3 } },
     { name: 'an unknown mode', extra: { mode: 'side' } },
   ])('refuses $name', async ({ extra }) => {
     const store = pageSettingsStore(fakeBrowser.storage.local);
     expect(await store.save({ ...defaultPageSettings, ...extra } as never)).toMatchObject({
       ok: false,
       error: { internalCode: 'input_invalid' },
+    });
+  });
+
+  it.each([
+    // Version 1 shipped while Gemma was the default: a stored `gemma` is that default, not a
+    // choice, so it reads PLaMo. A stored `plamo` stays PLaMo.
+    { name: 'Gemma', translator: 'gemma' },
+    { name: 'PLaMo', translator: 'plamo' },
+  ] as const)('reads a version 1 record’s $name translator as PLaMo', async ({ translator }) => {
+    const store = pageSettingsStore(fakeBrowser.storage.local);
+    await fakeBrowser.storage.local.set({
+      page: {
+        v: 1,
+        mode: 'pair',
+        translator,
+        always: [site(0)],
+        never: [host(0)],
+      },
+    });
+    expect(await store.load()).toEqual(
+      Ok({ v: 2, mode: 'pair', translator: 'plamo', always: [site(0)], never: [host(0)] }),
+    );
+  });
+
+  it('keeps the translator a version 2 record chose: Gemma picked after migrating stays', async () => {
+    const store = pageSettingsStore(fakeBrowser.storage.local);
+    await fakeBrowser.storage.local.set({
+      page: { v: 2, mode: 'replace', translator: 'gemma', always: [], never: [] },
+    });
+    const kept: PageSettings = {
+      v: 2,
+      mode: 'replace',
+      translator: 'gemma',
+      always: [],
+      never: [],
+    };
+    expect(await store.load()).toEqual(Ok(kept));
+    // Saved again, it is still version 2 with Gemma.
+    expect(await store.save(kept)).toEqual(Ok(kept));
+    expect(await fakeBrowser.storage.local.get('page')).toEqual({ page: kept });
+  });
+
+  it('writes version 2: a migrated record saved again keeps PLaMo and gains the version', async () => {
+    const store = pageSettingsStore(fakeBrowser.storage.local);
+    await fakeBrowser.storage.local.set({
+      page: { v: 1, mode: 'replace', translator: 'gemma', always: [], never: [] },
+    });
+    const loaded = await store.load();
+    expect(loaded).toEqual(
+      Ok({ v: 2, mode: 'replace', translator: 'plamo', always: [], never: [] }),
+    );
+    if (!loaded.ok) return;
+    const saved = { ...loaded.value, mode: 'pair' as const };
+    expect(await store.save(saved)).toEqual(Ok(saved));
+    expect(await fakeBrowser.storage.local.get('page')).toEqual({ page: saved });
+    // A version 1 record passed to save is written migrated too.
+    expect(
+      await store.save({ v: 1, mode: 'replace', translator: 'gemma', always: [], never: [] }),
+    ).toEqual(Ok({ v: 2, mode: 'replace', translator: 'plamo', always: [], never: [] }));
+    expect(await fakeBrowser.storage.local.get('page')).toEqual({
+      page: { v: 2, mode: 'replace', translator: 'plamo', always: [], never: [] },
     });
   });
 

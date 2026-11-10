@@ -20,6 +20,7 @@ import {
   type TranslateRequest,
 } from '../protocol.ts';
 import {
+  currentPageSettings,
   defaultPageSettings,
   isAlways,
   isNever,
@@ -78,10 +79,13 @@ export type SessionApi = {
 const isNode = (target: EventTarget | null | undefined): target is Node =>
   target !== null && target !== undefined && 'nodeType' in target;
 const squash = (text: string): string => text.replace(/\s+/gu, ' ').trim();
-/** The stored page settings; a record that is none counts as the defaults, as for the background. */
+/**
+ * The stored page settings, an older version read as the current one (`currentPageSettings`); a
+ * record that is none counts as the defaults, as for the background.
+ */
 function settingsOf(value: unknown): PageSettings {
   const parsed = pageSettingsSchema.safeParse(value);
-  return parsed.success ? parsed.data : defaultPageSettings;
+  return parsed.success ? currentPageSettings(parsed.data) : defaultPageSettings;
 }
 
 /**
