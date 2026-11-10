@@ -153,11 +153,39 @@ The page translator has a popup and an options page instead of a side panel, and
 
 ## Page translation (Task 3)
 
-Status: **PENDING.** The bench and its fixtures are committed; the measurement, the blind quality comparison and the decision are not done yet.
+Status: **DONE (2026-11-10).** Measured on the live router (`http://127.0.0.1:18083`, llama.cpp router mode, `--parallel 3`, preset models `gemma4-e4b` and `plamo-3-translate-2b`; host 5-minute load under 4 for the bench run). The blind quality comparison was done by the controller, not the user; no translation bodies are recorded here.
 
 `pnpm --filter @chrome-toolbox/bench bench:page -- --server <url> --gemma <model> [--plamo <model>] [--set <file>] [--rounds 3] [--out <file>]` reads `packages/bench/fixtures/page/units.jsonl` (40 self-written units, nothing from a real site: English 24 with 8 labels, 10 paragraphs and 6 rich paragraphs, and Korean, Spanish, Chinese and Indonesian with 4 each, one of them rich) and writes `bench-data/results/page-<time>.jsonl` (gitignored; it holds translations). Gemma gets the extension's batches (at most 6 units and 800 characters, one at a time, on slot `totalSlots - 1`); PLaMo gets one unit per request through `plamoTranslateRequest` on slots 1 and 2, two at a time. A unit that is not a valid page unit or does not read back (`readPagePieces`) fails alone and is counted per model; "rich kept" is the share of marked units that read back. The first screen is the first 12 units in document order, translated the way the extension sends them; the p50 of `--rounds` rounds is reported. Each model gets one untimed warm-up request first (its time is in the meta row), and the first-screen rounds are sent with `cache_prompt: false`, so that figure is the cold upper bound: in real use the fixed system turn stays cached across pages. A round with failed units is flagged in the table. The bench stops when `/props?model=` fails or the server has fewer than 2 slots (slot 0 is never used).
 
-Decision rules, fixed before measuring. PLaMo becomes the default translator when all hold: on the 40 units at most 25% are worse than Gemma, the first-screen p50 is at most half of Gemma's, and failures are at most 2%. Marked units go to PLaMo when at least 95% of them read back with their markers and at most 25% of them are worse than Gemma. Otherwise Gemma stays the default, PLaMo stays an optional model, and marked units go to Gemma. The quality comparison is blind (random order, recorded seed) and is not a check by the user.
+Result (`--rounds 3`, warm-up ms: gemma 4260, plamo 2142):
+
+| model                | units ok | p50 ms/unit | p95 ms/unit | rich kept | first screen p50 ms (cold) | failures                                    |
+| -------------------- | -------- | ----------- | ----------- | --------- | -------------------------- | ------------------------------------------- |
+| gemma (batch time)   | 39/40    | 2138        | 2745        | 10/10     | 6273                       | response_invalid ×1 (p-37, label)           |
+| plamo (request time) | 38/40    | 589         | 882         | 8/10      | 2724                       | response_invalid ×2 (p-17, p-20, both rich) |
+
+Gemma ms per unit is the time of the batch the unit was in; PLaMo ms is its own request. The first screen is sent without the prompt cache: a cold upper bound.
+
+Blind comparison (seed 20261110, controller-judged, A/B order randomized per unit): PLaMo better 21, Gemma better 8, tie 11, both-bad 0 — PLaMo worse than Gemma on 20% of units (≤ 25% required). By language: en 13 better / 3 worse / 8 tie; ko 2/1/1; es 2/1/1; zh 1/2/1; id 3/1/0. By kind: label 1/0/11; paragraph 14/4/0; rich 6/4/0.
+
+Decision (rules fixed before measuring): **PLaMo is the default translator for plain units; marked (rich) units stay on Gemma.** All three default rules hold on the units PLaMo serves: worse-than-Gemma 20% ≤ 25%, first-screen p50 2724 ms ≤ half of Gemma's 6273 ms, and failures 0/30 on non-rich units ≤ 2% (the two PLaMo `response_invalid` failures were both rich units, which route to Gemma; counted over all 40 attempted units PLaMo's failure share is 5%, noted for completeness). The rich rules fail on both counts — read-back 8/10 = 80% < 95% and worse-than-Gemma 4/10 = 40% > 25% — so `PLAMO_TAKES_RICH` is `false` and marked units are batched to Gemma directly. PLaMo remains selectable; when the router does not list it or a unit fails, Gemma translates it in the same request.
+
+### Page translator live checks (Task 12 Step 2, 2026-11-10)
+
+Same server and host conditions as above; headed Chromium (Playwright Chromium, `realVisibility`) with the production build, a self-written 300-paragraph page (`test/browser/fixtures/long.ts` shape, unique text per round so the translation cache cannot answer), 5 measured rounds plus 1 warm-up per translator.
+
+First screen (button press → first paragraph done / viewport fully translated):
+
+| translator | first paragraph p50 / max | first screen p50 / max |
+| ---------- | ------------------------- | ---------------------- |
+| gemma      | 2182 / 2255 ms            | 2187 / 2259 ms         |
+| plamo      | 1143 / 1202 ms            | 1147 / 1207 ms         |
+
+The whole viewport batch lands together, so first-paragraph and first-screen times differ by ~5 ms. Page heap (`usedHeap` of the viewer page): ~1.11 MB before translation → ~2.33 MB after the first screen; a full 300-paragraph scroll-through ended at ~2.65 MB. llama-server RSS during the concurrent run: ~7.6 GB across its child processes (gemma and PLaMo resident); per-process CPU was not instrumented (`ps %cpu` is a lifetime average — request latencies above are the load signal instead).
+
+Subtitle coexistence (`bench:slots --model gemma4-e4b --comment-streams 1`, 4 phases of ~60 s): without page translation the loaded-pinned subtitle ticks were p50 432 / p95 629 ms; with the 300-paragraph page translating and scrolling under PLaMo they were p50 662 / p95 1195 ms — degraded but inside the 2000 / 3000 ms targets, 0 failed ticks. Comment batches stayed successful (17 ok / 0 failed in the overlapped phase) with batch p95 rising 2626 → 6115 ms; the unpinned phases, which ran after the page finished, matched baseline (450/659, 489/643 ms). Idle phases were unchanged.
+
+Public pages (5 kinds: wiki, tech docs, news, blog, board — real English sites, production build, PLaMo default): all translated with 0 failed units (18–56 units each, replace mode), link and form-element counts preserved across translation, and every page reached the `restored` state. Fingerprints were identical after restore on the stable re-check (board); on live sites the before/after fingerprints differ because the pages mutate on their own during the ~60–90 s window (timestamps, counters), not because of restore — node-for-node restore is covered by `restore.spec.ts` on fixtures. Screenshots kept locally under `packages/page-translator/artifacts/public-pages/` (gitignored).
 
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 

@@ -78,7 +78,7 @@ YouTube / Twitch / 一般ページ
 extension-core の LLM クライアント ──HTTP──▶ llama-server（ルーターモード、1 つのポート。ローカル／LAN）
                                                ├ gemma4-e4b（翻訳・分類・要約。投影器を付けると音声認識も）
                                                ├ clef-flash（有害判定）
-                                               └ plamo-3-translate-2b（任意。①の字幕の翻訳だけ）
+                                               └ plamo-3-translate-2b（任意。①の字幕と③のページの翻訳）
 ```
 
 - **content script は軽く保つ**。推論や重い処理は、service worker か offscreen document で行う。
@@ -87,6 +87,7 @@ extension-core の LLM クライアント ──HTTP──▶ llama-server（ル
   - 枠を固定したときの効果は、`bench:slots` で測った（`docs/adoption.md`）。
   - ①は、音声認識（ASR）と字幕の翻訳の両方を枠 0 に流す。音声認識は Gemma の音声入力で行い、別のサーバーは使わない（判断 R10）。2 つは同じシステム文と、配信ごとの同じ前置き（配信の文脈と用語集）を使う（判断）。枠 0 に交互に流れても、プロンプトキャッシュの先頭を共有できるようにするため。
   - 字幕の翻訳に PLaMo 3 Translate 2B を選んだとき（§6）は、訳を PLaMo の枠 0 に送る。PLaMo はルーターの別の子プロセスで、Gemma の枠を使わない。
+  - ③のページ翻訳は、Gemma では最後の枠（`--parallel 3` → 枠 2。②の 2 つ目のバッチと分け合う）、PLaMo では枠 1 と 2 を使う（§8）。
   - Gemma の投機的デコード（MTP。`spec-type = draft-mtp`）は採用した（判断 R61）。サーバー全体の設定で、リクエストごとには切れない。コメントの生成は 1 本で約 40%、2 本で約 52% 速くなった一方、コメントの負荷の下で、字幕の翻訳だけの p95 は 1.25 秒から 1.8 秒に上がった。ASR を含めると（2026-11-06）、コメント 2 本の負荷の下では MTP の有無にかかわらず p95 が 3 秒を超え、1 本なら収まった。MTP は残し、コメントが字幕に譲る（§7）。
 
 ## 5. 共通基盤 `packages/extension-core`
@@ -99,13 +100,13 @@ extension-core の LLM クライアント ──HTTP──▶ llama-server（ル
   - タイムアウトは AbortSignal で扱う。
   - 出力の形は JSON Schema（`response_format`）か GBNF の文法（`grammar`）で縛る。PLaMo 3 Translate には縛りを付けない（付けると出力が壊れる）。代わりに止める文字列（`stop`）を送る。
   - 指定できる項目: `model`、`id_slot`、`cache_prompt`、`chat_template_kwargs`、`stop`。
-  - PLaMo 3 Translate へのリクエストは、extension-core の 1 か所（`plamo.ts`）で組み立てる。user の 1 通、`chat_template_kwargs`（訳先、原語、上限付きの文脈と用語集）、止める文字列、上限付きの `max_tokens`。枠（`id_slot`）は呼ぶ側が渡す（判断。PLaMo の枠を拡張どうしで分けるため）。①は PLaMo の枠 0 を使う。
+  - PLaMo 3 Translate へのリクエストは、extension-core の 1 か所（`plamo.ts`）で組み立てる。user の 1 通、`chat_template_kwargs`（訳先、原語、上限付きの文脈と用語集）、止める文字列、上限付きの `max_tokens`。枠（`id_slot`）は呼ぶ側が渡す（判断。PLaMo の枠を拡張どうしで分けるため）。①は PLaMo の枠 0、③は枠 1 と 2 を使う。
   - user の本文に、音声の部品（`input_audio`。WAV の base64）を入れられる。①の音声認識に使う。
   - `/props?model=<name>` から、枠の数（`total_slots`）と、音声入力が使えるか（`modalities.audio`）を読む。
   - `/slots?model=<name>` から、枠ごとに処理中か（`is_processing`）を読む。②が、字幕の使う枠 0 を見るために使う（§7）。
   - 想定する失敗は Result のエラーコードで返す。①のために足すもの:
     - `audio_unsupported`: 投影器（mmproj）のないモデルに音声を送った（HTTP 400）
-    - `model_refused`: HTTP 4xx/5xx。求めたリクエストだけこのコードにし、ほかは今までどおり `network_failed` にする（comment-assistant は `network_failed` で「接続できません」を出している）
+    - `model_refused`: HTTP 4xx/5xx。求めたリクエストだけこのコードにし、ほかは今までどおり `network_failed` にする（comment-assistant は `network_failed` で「接続できません」を出している。③は PLaMo が使えないときの Gemma への切り替えに使う）
 - **エラーコードの定義**：`tools/errors/catalog.json`。①は、上の 2 つのほかに、タブ音声の取得の `capture_failed`（取得に失敗した）と `capture_not_invoked`（拡張が呼び出されていない）を足す。
 - **キュー**：同時に処理する数（既定は 1）、待ち行列の上限、優先度を持つ。
   - 上限を超えた分は古いものから捨て、捨てた件数を数える。
@@ -439,9 +440,9 @@ LAN の IP に接続するときは `optional_host_permissions` を使い、Chro
 
 **推論**（判断）
 
-- 既定のモデルは gemma4-e4b。段落をまとめ、1 段落 1 行の形式で送る（コメントの行形式を、ページ用に変えたもの）。
+- Gemma に送る段落はまとめ、1 段落 1 行の形式で送る（コメントの行形式を、ページ用に変えたもの）。
 - llama-server の枠は、最後の 1 つだけを使い、同時に 1 件にする（`--parallel 3` なら枠 2）。字幕の枠 0 は使わない。枠 2 は、コメントの 2 つ目のバッチと分け合う。
-- PLaMo 3 Translate 2B は、設定で選べる任意の翻訳モデル。段落を 1 つずつ、枠 1 と 2 で訳す。失敗した段落と、モデルがサーバーにないときは、gemma4-e4b で訳す。既定にするかどうかは、ページの文で測ってから決める（`docs/adoption.md`）。
+- 既定のモデルは PLaMo 3 Translate 2B（2026-11-10 の計測で決めた。`docs/adoption.md`）。印のない段落を 1 つずつ、枠 1 と 2 で訳す。印のある段落（リンク、強調、`keep` のコード）は Gemma に送る（PLaMo は印を 95% 写せず、悪い訳も 25% を超えた）。失敗した段落と、モデルがサーバーにないときは、gemma4-e4b で訳す。
 
 **権限**（判断）
 

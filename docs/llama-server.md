@@ -213,6 +213,8 @@ The subtitle extension picks its translation model with `translator` in its own 
 
 The side panel edits the URL. The comment extension's "設定" tab also edits the model names sent to the router ("翻訳モデル" for `models.translate`, "Clef モデル" for `models.clef`), and so does the subtitle extension's side panel ("翻訳モデル（Gemma）" for `models.translate`, "音声認識モデル" for `models.asr`); the other extensions use the defaults, so keep the preset section names as above. "接続を確認" calls `GET /health` and `GET /v1/models` and shows the model names.
 
+The page translator has no side panel: its settings page edits the same URL and `models.translate`, and its popup starts a translation. Its translation model (`gemma` or `plamo`) lives in its own settings key `page`; `plamo` goes to the preset section name `plamo-3-translate-2b` (the name cannot change). Gemma uses the last slot (`--parallel 3` → slot 2); PLaMo uses slots 1 and 2.
+
 A failed Clef request never fails a comment batch: when Clef is unreachable, times out or answers an HTTP error for that request (such as a 503 while the router loads the model), those comments keep the translation model's category and "設定" shows the error. When Clef is not there (HTTP 501 for a model that is not a decision model, 404, or the router's 400 "model '<name>' not found"), the comment extension classifies abuse with the translation model from then on, until its settings change.
 
 A server on another machine: start it with `--host` set to an address in your LAN, enter `http://<address>:18083` in the side panel, and allow the host permission that Chrome then asks for. The extensions send no API key, so expose such a server only on a network you trust.
@@ -236,6 +238,8 @@ Measured on 2026-11-06 on this server (llama.cpp 620d222 runs it; the minimum is
 - The 0.8B produced nonsense lines. The 8B is no faster than Gemma.
 - On chat, every size translated slang literally (`she's cooking` → 料理してる). PLaMo cannot classify comments, so the comment extension stays on Gemma.
 - With Gemma, Clef and the 2B resident, the router's processes used 12.4 GB in total.
+
+The page translator can also use it: its settings page offers `plamo` beside `gemma`, and `plamo` is the default for plain paragraphs (the bench's decision is recorded in [adoption](adoption.md)). It sends one paragraph at a time on slots 1 and 2; paragraphs with links, emphasis or kept code, a paragraph PLaMo cannot read back, and every paragraph while the router does not list the model, are translated with Gemma instead.
 
 A client must:
 
