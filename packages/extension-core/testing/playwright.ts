@@ -372,44 +372,6 @@ export async function heapSnapshotParts(page: Page): Promise<HeapParts> {
   return heapParts(JSON.parse(chunks.join('')));
 }
 
-/**
- * Presses the extension's toolbar button on the tab that shows `page`, as the viewer would:
- * Chrome grants the extension `activeTab` for that tab and opens its popup. Uses CDP
- * `Extensions.triggerAction` on the page's tab target (a page target is refused); it works over
- * the default connection and the `realVisibility` one, without `--enable-unsafe-extension-
- * debugging`. Playwright does not attach to the popup this opens: it is not in `context.pages()`
- * and fires no `page` event (adoption: Page translator foundation). The page is brought to the
- * front first; its tab is the active one showing its URL.
- */
-export async function triggerAction(context: BrowserContext, page: Page): Promise<void> {
-  const browser = context.browser();
-  if (browser === null) throw new Error('the browser is not connected over CDP');
-  const own = (worker: Worker): boolean => worker.url().startsWith('chrome-extension://');
-  const worker =
-    context.serviceWorkers().find(own) ??
-    (await context.waitForEvent('serviceworker', { predicate: own }));
-  await page.bringToFront();
-  const session = await browser.newBrowserCDPSession();
-  try {
-    const { targetInfos } = await session.send('Target.getTargets', {
-      filter: [{ type: 'tab' }],
-    });
-    // `embedderData.tabActive` is a boolean, though the protocol types call it a string.
-    const tabs = targetInfos.filter(
-      ({ url, embedderData }) => url === page.url() && `${embedderData?.['tabActive']}` === 'true',
-    );
-    const [tab] = tabs;
-    if (tab === undefined || tabs.length > 1)
-      throw new Error(`expected one active tab showing ${page.url()}, found ${tabs.length}`);
-    await session.send('Extensions.triggerAction', {
-      id: new URL(worker.url()).host,
-      targetId: tab.targetId,
-    });
-  } finally {
-    await session.detach();
-  }
-}
-
 /** An extension document Playwright does not attach to, measured as `usedHeap` and the rest do. */
 export type DocumentTarget = {
   /** JS heap in use after a forced GC (see `usedHeap`). */
