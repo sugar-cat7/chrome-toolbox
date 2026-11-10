@@ -24,12 +24,12 @@ import { defaultPageSettings, type PageSettings, type PageSettingsStore } from '
 /** A router's cold model load took 13 s live; a batch of 6 units writes a few hundred tokens. */
 export const PAGE_TIMEOUT_MS = 30_000;
 /**
- * Whether PLaMo also gets units with markers (links, emphasis, kept code). It does: a reply whose
- * markers `readPagePieces` cannot read back fails the unit alone and Gemma translates it in the
- * same request, so the markers' guarantee holds either way. The page bench (Task 3) re-checks the
- * share of rich units PLaMo reads back (`richKept`); set this back to `false` if it falls short.
+ * Whether PLaMo also gets units with markers (links, emphasis, kept code). It does not: the
+ * page bench (Task 3, `docs/adoption.md`) read back only 8 of 10 rich units and judged PLaMo
+ * worse than Gemma on 4 of 10, short of the 95% / 25% rules fixed before measuring, so marked
+ * units stay on Gemma while plain units default to PLaMo.
  */
-export const PLAMO_TAKES_RICH = true;
+export const PLAMO_TAKES_RICH = false;
 /** PLaMo requests at once at most: its slots 1 and 2. */
 const PLAMO_PARALLEL = 2;
 /** Requests waiting for each model; more are refused (`queue_full`) instead of piling up. */

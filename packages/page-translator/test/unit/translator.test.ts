@@ -77,11 +77,6 @@ const RICH_PIECES = [
   `${STUB_PAGE_PREFIX}backward`,
   `${STUB_PAGE_PREFIX} to dodge.`,
 ];
-/**
- * The rich unit's pieces as PLaMo's stub writes them (`訳P:` + the whole line once, markers
- * kept): only the first text node carries the prefix, and each piece is trimmed.
- */
-const PLAMO_RICH_PIECES = [`${STUB_PLAMO_PREFIX}Roll`, 'backward', 'to dodge.'];
 function request(
   units: readonly (string | PageToken[])[],
   {
@@ -424,7 +419,7 @@ describe('PLaMo', () => {
       units: ['Final Boss Guide', rich],
       translator: 'plamo',
     },
-    { name: 'every unit was rich', units: [rich], translator: 'plamo' },
+    { name: 'every unit was rich', units: [rich], translator: 'gemma' },
     { name: 'PLaMo refused every unit', units: ['Refused line.'], translator: 'gemma' },
     { name: 'no unit was valid', units: [unclosed], translator: 'gemma' },
   ])('reports PLaMo only when it translated a unit: $name', async ({ units, translator: by }) => {
@@ -468,8 +463,8 @@ describe('PLaMo', () => {
     expect(context('Tips')).toBe('Items\nMaps');
   });
 
-  it('sends rich units to PLaMo too while PLAMO_TAKES_RICH is true', async () => {
-    expect(PLAMO_TAKES_RICH).toBe(true);
+  it('keeps rich units on Gemma while PLAMO_TAKES_RICH is false', async () => {
+    expect(PLAMO_TAKES_RICH).toBe(false);
     const server = llama();
     const translator = await translatorFor(server, { translator: 'plamo' });
     const reply = await translator.translate(1, request(['Final Boss Guide', rich]));
@@ -477,19 +472,17 @@ describe('PLaMo', () => {
       Ok({
         results: [
           { id: 1, pieces: plamoPieces('Final Boss Guide') },
-          { id: 2, pieces: PLAMO_RICH_PIECES },
+          { id: 2, pieces: RICH_PIECES },
         ],
         translator: 'plamo',
       }),
     );
-    // The rich unit's markers travel as `<1>`/`</1>` in its line.
-    expect(sorted(server.chats(PLAMO).map(lineOf))).toEqual(
-      sorted(['Final Boss Guide', 'Roll <1>backward</1> to dodge.']),
-    );
-    expect(server.chats(GEMMA)).toEqual([]);
+    // PLaMo sees only the plain unit; the rich unit's markers never leave for it.
+    expect(server.chats(PLAMO).map(lineOf)).toEqual(['Final Boss Guide']);
+    expect(server.chats(GEMMA).map(batchTexts)).toEqual([['Roll <1>backward</1> to dodge.']]);
   });
 
-  it('falls back to Gemma for a rich unit whose PLaMo reply loses its markers', async () => {
+  it('translates a rich unit with Gemma while PLaMo is selected', async () => {
     const server = llama({
       respond: (chat) =>
         chat.model === PLAMO && lineOf(chat).includes('<1>')
@@ -508,6 +501,9 @@ describe('PLaMo', () => {
         translator: 'plamo',
       }),
     );
+    // With PLAMO_TAKES_RICH false the rich unit never reaches PLaMo; Gemma translates it in
+    // the same batch shape the fallback would have used.
+    expect(server.chats(PLAMO).map(lineOf)).toEqual(['Final Boss Guide']);
     expect(server.chats(GEMMA).map(batchTexts)).toEqual([['Roll <1>backward</1> to dodge.']]);
   });
 
