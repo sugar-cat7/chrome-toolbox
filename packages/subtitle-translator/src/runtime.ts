@@ -22,6 +22,7 @@ import {
 } from './settings.ts';
 import {
   addressed,
+  isFor,
   offscreenProtocol,
   STATE_CHANGED_MESSAGE,
   subtitleProtocol,
@@ -466,7 +467,7 @@ export function startBackground(): () => void {
     launch(
       async () => {
         sendResponse(
-          names(message, ROUTES[senderKind(sender)])
+          isFor('background', message) && names(message, ROUTES[senderKind(sender)])
             ? await subtitleProtocol.route(handlersFor(sender))(message)
             : await forbidden(),
         );

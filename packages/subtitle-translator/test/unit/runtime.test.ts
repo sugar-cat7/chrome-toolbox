@@ -60,7 +60,10 @@ describe('extension runtime wiring', () => {
     const reply = await new Promise((resolve) => {
       expect(
         listener?.(
-          { type: 'llm/status', payload: { baseUrl: 'http://127.0.0.1:18083' } },
+          addressed('background', {
+            type: 'llm/status',
+            payload: { baseUrl: 'http://127.0.0.1:18083' },
+          }),
           {
             url: fakeBrowser.runtime.getURL('/sidepanel.html'),
             origin: fakeBrowser.runtime.getURL('/').replace(/\/$/u, ''),
@@ -177,13 +180,31 @@ describe('sender routing', () => {
       ];
       for (const message of messages) {
         const reply = await new Promise((resolve) => {
-          listener?.(message, { url, frameId, tab }, resolve);
+          listener?.(addressed('background', message), { url, frameId, tab }, resolve);
         });
         expect(reply).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
       }
       stop();
     },
   );
+
+  it('answers sender_forbidden to a message not addressed to the background', async () => {
+    const watch = await fakeBrowser.tabs.create({ url: youtube });
+    const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+    const stop = startBackground();
+    const listener = add.mock.calls[0]?.[0];
+    const sender = topFrame(watch);
+    for (const message of [
+      { type: 'subs/display', payload: { mode: 'ja' }, target: 'panel' },
+      { type: 'subs/display', payload: { mode: 'ja' } },
+    ]) {
+      const reply = await new Promise((resolve) => {
+        listener?.(message, sender, resolve);
+      });
+      expect(reply).toMatchObject({ ok: false, error: { internalCode: 'sender_forbidden' } });
+    }
+    stop();
+  });
 });
 
 /** llama-server's chat endpoint at the HTTP boundary: every line is translated as `訳:一行`. */
@@ -249,7 +270,7 @@ describe('caption translation routes', () => {
     const listener = add.mock.calls[0]?.[0];
     const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
       new Promise((resolve) => {
-        listener?.(message, sender, resolve);
+        listener?.(addressed('background', message), sender, resolve);
       });
     const watch = await fakeBrowser.tabs.create({ url: youtube });
     const other = await fakeBrowser.tabs.create({ url: youtube });
@@ -314,7 +335,7 @@ describe('caption translation routes', () => {
     const stop = startBackground();
     const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
       new Promise((resolve) => {
-        add.mock.calls[0]?.[0]?.(message, sender, resolve);
+        add.mock.calls[0]?.[0]?.(addressed('background', message), sender, resolve);
       });
     const watch = await fakeBrowser.tabs.create({ url: youtube });
 
@@ -334,7 +355,7 @@ describe('caption translation routes', () => {
     // The listener of the service worker started last.
     const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
       new Promise((resolve) => {
-        add.mock.calls.at(-1)?.[0]?.(message, sender, resolve);
+        add.mock.calls.at(-1)?.[0]?.(addressed('background', message), sender, resolve);
       });
     const watch = await fakeBrowser.tabs.create({ url: youtube });
     const closing = await fakeBrowser.tabs.create({ url: youtube });
@@ -380,7 +401,7 @@ function background() {
   const stop = startBackground();
   const ask = (message: unknown, sender: Browser.runtime.MessageSender): Promise<unknown> =>
     new Promise((resolve) => {
-      add.mock.calls.at(-1)?.[0]?.(message, sender, resolve);
+      add.mock.calls.at(-1)?.[0]?.(addressed('background', message), sender, resolve);
     });
   return { stop, ask };
 }
