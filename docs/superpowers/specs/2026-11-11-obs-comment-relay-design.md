@@ -423,9 +423,13 @@ macOS 用の `externalBin`／Metal resources は `tauri.macos.conf.json` に限�
 - 指定資料、Desktop template の manifest／lock／config／capabilities／scripts／native adapter とテスト、指定された core／comment-assistant／contracts の実装を照合した。API は §2.2 の公式情報に限定して確認した。
 - `pnpm env:setup` を実行したが、`registry.npmjs.org` の DNS 解決ができず `ERR_PNPM_TARBALL_FETCH_TARBALL` で失敗した。依存取得の完了、セットアップ成功は主張しない。
 - `pnpm env:doctor` は失敗。実行 Node `26.13.0` に対して必要なのは `24.21.0`、project-local Vite+ も未導入と報告された。pnpm `12.11.2`、既存型生成・hooks は doctor 上で確認できた。
-- `pnpm gate:pre-pr -- --base 0e8ba3239664228d7ec4c9a0edf67f2b3e1c36b6` を実行したが、static の開始時に `oxc-parser` 不在で失敗し、tools-unit は blocked。0/2 checks passed で、成功とは扱わない。docs-only のため application の選択は 0 件。実際の SHA／base／contentId／OS は `artifacts/gate-pre-pr-all-darwin.json` に記録される。report 内の既存 bundle サイズは今回の build 結果ではない。
+- `pnpm gate:pre-pr -- --base 0e8ba3239664228d7ec4c9a0edf67f2b3e1c36b6` の初回は `oxc-parser` 不在で static が失敗し、tools-unit は blocked。再実行では formatter／lint／type／文書を含む static は通過したが、tools-unit は 236 件中 221 件成功・15 件失敗（39 ファイル中 4 ファイル失敗）で、gate は **1/2 checks passed の失敗**。loopback listen の `EPERM` に加え、process cleanup と特殊 file mode の assertion 失敗もあり、全てを文書の不備や単一原因と断定しない。テストの除外・修正は本タスクでは行わない。
+- gate の入力 SHA／base は上記 `0e8ba323...`、再実行 contentId は `8257c02dcb0830b32357bbfd55c05d882201d00357dc8c1e5896ebed890bc200`、実行環境は darwin/arm64・Node `26.13.0`。docs-only のため application の選択は 0 件。記録は `artifacts/gate-pre-pr-all-darwin.json` と `artifacts/tests-default.json`。report 内の既存 bundle サイズは今回の build 結果ではない。この入力は検証記録を最終追記する前の内容である。
+- 検証記録の追記後にも `pnpm check` を試したが、その時点では再び `oxc-parser` を解決できず失敗した。上記 static の通過を最終作業ツリー全体の再検証成功とは扱わない。依存状態が安定していない環境であり、最終ファイルに対しては下記の補助確認と diff 確認の範囲を報告する。
 - 標準ライブラリだけの補助確認で、文書のローカルリンク、fence の閉鎖、行末空白、Cargo lock の 11 依存バージョン、モデル SHA256 を照合した。正式な formatter／lint／native gate の代わりとはしない。`git diff --check` も確認するが、新規未追跡ファイル自体の空白は補助確認で検査する。
 - 別エージェントによる実装者視点の設計レビューを行い、重要な未回答事項なしとの結果を得た。指摘候補だった IPC の事前 decode 上限、Mac sidecar と全 OS gate の分離、Clef 長文の扱いを本文に明記した。
+
+確認中に HEAD が設計書のコミット `a26b0a36b33312620ab34977ded5caf6b504b972` へ進んだことも確認した。そのコミットは書き換えず、本書の検証記録だけを追記している。開始時の入力 SHA と、途中で観測した HEAD と、gate が報告した入力を区別する。
 
 今回の docs-only の確認を、将来の native／実サイト互換性の証拠に使わない。
 

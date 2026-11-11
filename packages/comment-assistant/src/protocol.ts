@@ -1,5 +1,11 @@
 import { z } from 'zod/mini';
 import {
+  MAX_COMMENT_AUTHOR,
+  MAX_COMMENT_ID,
+  MAX_COMMENT_TEXT,
+  rawChatCommentSchema,
+} from '@chrome-toolbox/contracts';
+import {
   commentCategorySchema,
   commentRecordSchema,
   defineProtocol,
@@ -31,7 +37,7 @@ const partitionSchema = z.strictObject({ site: siteSchema, channel: channelSchem
  * Longest comment text the service worker takes (YouTube chat allows about 200 characters,
  * Twitch 500); the content script cuts longer text, such as video comments, to this length.
  */
-export const MAX_COMMENT_TEXT = 1000;
+export { MAX_COMMENT_TEXT } from '@chrome-toolbox/contracts';
 /** Most comments one 'comments/ingest' message carries; the content script sends more in parts. */
 export const MAX_INGEST_COMMENTS = 1000;
 /**
@@ -39,15 +45,15 @@ export const MAX_INGEST_COMMENTS = 1000;
  * verified account (YouTube only: Twitch's verified Partner badge is no role, R41). Their posts
  * are never hidden (R38); other authors have no role.
  */
-export const authorRoleSchema = z.enum(['owner', 'moderator', 'verified']);
-export type AuthorRole = z.infer<typeof authorRoleSchema>;
+export { authorRoleSchema, type AuthorRole } from '@chrome-toolbox/contracts';
 // Caps bound what one message and the stores can hold.
-export const rawCommentSchema = z.strictObject({
-  id: z.string().check(z.minLength(1), z.maxLength(256)),
-  author: z.string().check(z.maxLength(256)),
+// Keep the extension's original code-point limits, empty emoji-only text and numeric times.
+// New consumers use the stricter UTF-16 and timestamp constraints of rawChatCommentSchema.
+export const rawCommentSchema = z.extend(rawChatCommentSchema, {
+  id: z.string().check(z.minLength(1), z.maxLength(MAX_COMMENT_ID)),
+  author: z.string().check(z.maxLength(MAX_COMMENT_AUTHOR)),
   text: z.string().check(z.maxLength(MAX_COMMENT_TEXT)),
   at: z.number(),
-  role: z.optional(authorRoleSchema),
   /**
    * The frame keeps this comment's line out of sight until it is judged (R52). The service
    * worker takes held comments first while they can still be judged in time (R57); lines on
