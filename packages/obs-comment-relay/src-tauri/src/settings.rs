@@ -280,7 +280,9 @@ impl SettingsStore {
                     fs::set_permissions(&backup, fs::Permissions::from_mode(0o600))
                         .map_err(|_| storage_error())?;
                 }
-                fs::File::open(backup)
+                OpenOptions::new()
+                    .write(true)
+                    .open(&backup)
                     .and_then(|file| file.sync_all())
                     .map_err(|_| storage_error())?;
             }
