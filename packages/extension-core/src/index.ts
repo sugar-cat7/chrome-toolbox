@@ -21,6 +21,7 @@ export {
   type ChatTiming,
   type ConnectionStatus,
   type Fetch,
+  type ResultFetch,
   type LlamaClient,
   type ServerProps,
   type SlotState,

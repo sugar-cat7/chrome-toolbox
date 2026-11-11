@@ -1,6 +1,6 @@
 import { z } from 'zod/mini';
-import { capture, decode, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
-import type { Fetch } from './llm.ts';
+import { decode, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
+import { createFetchTransport, type FetchOptions } from './transport.ts';
 import { parseBaseUrl } from './llm.ts';
 import type { Queue } from './queue.ts';
 
@@ -67,21 +67,23 @@ function chunk(texts: readonly string[], limit: number, maxItems: number): strin
  */
 // Cloudflare Clef-Flash decision model, served by llama.cpp `POST /v1/systemone`:
 // one `noul` question per comment answers with a probability in `answers[id].noul`.
-export function createClefJudge({
-  baseUrl,
-  model,
-  fetch,
-  queue,
-  maxPromptChars = DEFAULT_MAX_PROMPT_CHARS,
-  maxItemsPerChunk = DEFAULT_MAX_ITEMS,
-}: {
-  baseUrl: string;
-  model: string;
-  fetch: Fetch;
-  queue: Queue;
-  maxPromptChars?: number;
-  maxItemsPerChunk?: number;
-}): ToxicityJudge {
+export function createClefJudge(
+  options: FetchOptions & {
+    baseUrl: string;
+    model: string;
+    queue: Queue;
+    maxPromptChars?: number;
+    maxItemsPerChunk?: number;
+  },
+): ToxicityJudge {
+  const {
+    baseUrl,
+    model,
+    queue,
+    maxPromptChars = DEFAULT_MAX_PROMPT_CHARS,
+    maxItemsPerChunk = DEFAULT_MAX_ITEMS,
+  } = options;
+  const transport = createFetchTransport(options);
   /**
    * An HTTP error answer (R53). Clef is not there: 501 (the model is not a decision model), 404
    * (no such model or no `/v1/systemone` route) and a router's 400 "model '<name>' not found"
@@ -91,7 +93,7 @@ export function createClefJudge({
   async function refused(response: Response, signal: AbortSignal): Promise<Result<never>> {
     if (response.status === 501 || response.status === 404) return Err(failure('clef_unavailable'));
     if (response.status !== 400) return Err(failure('response_invalid'));
-    const text = await capture(() => response.text(), 'response_invalid');
+    const text = await transport.text(response, signal);
     if (signal.aborted) return Err(failure('operation_cancelled'));
     return Err(
       failure(
@@ -107,21 +109,18 @@ export function createClefJudge({
     // JSON-encoded so a comment cannot start a line that looks like another message.
     const state = `${STATE_HEADER}\n${group.map((text, i) => messageLine(text, i + 1)).join('\n')}`;
     const questions = Object.fromEntries(group.map((_text, i) => [`c${i + 1}`, question(i + 1)]));
-    const response = await capture(
-      () =>
-        fetch(`${origin}/v1/systemone`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model, state, questions }),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
-        }),
-      'network_failed',
-    );
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]);
+    const response = await transport.request(`${origin}/v1/systemone`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, state, questions }),
+      signal: requestSignal,
+    });
     if (signal.aborted) return Err(failure('operation_cancelled'));
     // A rejected fetch or a timeout: the server is unreachable or silent.
     if (!response.ok) return response;
-    if (!response.value.ok) return refused(response.value, signal);
-    const body = await capture((): Promise<unknown> => response.value.json(), 'response_invalid');
+    if (!response.value.ok) return refused(response.value, requestSignal);
+    const body = await transport.json(response.value, requestSignal);
     if (signal.aborted) return Err(failure('operation_cancelled'));
     if (!body.ok) return body;
     const decoded = decode(responseSchema, body.value);

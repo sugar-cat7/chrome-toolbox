@@ -63,3 +63,62 @@ pnpm --filter @chrome-toolbox/extension-core build
 ```
 
 `test` runs the table-driven Vitest tests next to each module (`src/*.test.ts`) with fake `fetch`, storage and timers; no server or browser is needed. `build` packs the library with Vite+ (`vp pack`). The Playwright fixtures in `testing/` run as part of each extension's `test:e2e`; `testing/*.test.ts` drives the llama.cpp stub with the real client and Clef judge, so a format change fails here first.
+
+## Relay engine and Result transport
+
+`@chrome-toolbox/extension-core/relay` exports `createRelayPipeline`, `RELAY_THRESHOLDS` and the
+port types. It has no site, extension or native imports. Supply `sessionId`, a configured Clef
+`judge` and PLaMo `plamo` client, `threshold`, `translate`, `publish(comments)`, `now`, and optional
+`timers`/`onStatus`. The thresholds are mild 0.90, normal 0.80 and strict 0.70; the boundary is
+inclusive. Optional `sourceLang` uses PLaMo's supported language codes. Script guesses for Latin
+and Han-only text leave `source_lang` unspecified. `plamoSlot: 0` selects the managed server slot;
+omitting it leaves scheduling to an external server.
+
+`ingest({ sessionId, batchId, site, channel, comments })` returns
+`Promise<Result<{ batchId, accepted, dropped }>>` as soon as admission finishes. Input is already
+ordered by the native owner. Each batch starts immediately when capacity is available, with at
+most three executing and 64 waiting comments. Waiting entries expire after eight seconds; overflow
+drops the oldest waiting entry. Clef sees the entire text, one comment per request. Each model has
+its own serial queue, so translation can overlap the next judgment. Publication waits for the small
+batch to settle and preserves receive order. The complete batch has a 30-second deadline from its oldest admission, including the waiting
+queue and both model queues, so no comment can outlive its processing deadline.
+
+Clef failure never publishes unjudged text. A transient failure suppresses admission for 30 seconds;
+`clef_unavailable` requires `reset()` or a new configuration. PLaMo failures keep only Clef-approved
+originals with `translationState: 'failed'`; unsupported explicit languages use `'unsupported'`.
+Recovery is attempted only for a fresh arrival after suppression. There are no retries or idle
+polls. Successful probabilities and translations each use a 500-entry LRU with a ten-minute TTL;
+identical in-flight text shares one request within the executing batch. Dedupe retains 2,000 IDs.
+
+`status()` and `onStatus` expose counters only. `accepted` counts admissions (including entries
+subsequently lost); `dropped` counts invalid/duplicate/suppressed/expired/overflow/cancelled input;
+`filtered` counts probability verdicts; `failed` counts model/translation failures; `published`
+counts output. Translation failures can be both failed and published. An ingest ACK's accepted and
+dropped values partition that call's input; eviction of previously acknowledged work changes only
+the cumulative counters. `RelayComment` and its strict output schema belong to contracts; roles
+never exempt a comment or appear in output. The native publisher assigns final sequence/time.
+
+`reset(partialConfiguration?)` cancels the old generation and clears waiting entries, both memo
+caches, in-flight sharing, dedupe IDs, suppression, counters and sequence. Update `sessionId`,
+`judge`/`plamo`, and `clefRevision`/`plamoRevision` when the source or model identity changes. Managed
+identities should include the digest; external identities should include endpoint/model/connection
+session. `dispose()` performs cleanup and permanently stops admission. Adapters must honor their
+AbortSignal by cancelling underlying I/O; late answers cannot publish or repopulate new caches.
+The application owns sending the corresponding OBS reset; this library publishes comments only.
+
+Both `createLlamaClient` and `createClefJudge` accept the original `fetch` callback or a native
+`resultFetch: ResultFetch` callback (mutually exclusive options). `ResultFetch` is exported from the root and returns
+`Promise<Result<Response, AppError>>`. Native transport failures retain their diagnostic IDs;
+HTTP errors are successful Responses whose status reaches the existing parsers (including Clef
+501/404/model-not-found 400 versus transient 503). Browser fetch exceptions normalize through
+`capture`. ResultFetch parsers bound streamed UTF-8 bodies to 64 KiB and cancel on overflow/read failure/abort.
+Legacy Fetch keeps its existing Body methods and scheduling; native adapters must also enforce
+their own 64 KiB request/response boundary and header allowlist before constructing the Response.
+PLaMo's request builder and reply parser remain unchanged and use the client transport.
+
+Compatibility references checked on 2026-11-11: WHATWG [Fetch Body mixin](https://fetch.spec.whatwg.org/#body-mixin)
+(Fetch standard updated 2026-10-19) and [Streams default readers](https://streams.spec.whatwg.org/#default-reader-class)
+(updated 2026-10-25). The implementation uses installed TypeScript 7.0.2 DOM types; Node 24.21.0
+unit tests cover split UTF-8, byte overflow, stream cancellation, native Result failures and existing
+HTTP refusal parsing. Native IPC/reqwest wiring, real models and actual OBS delivery remain later
+phase validations.
