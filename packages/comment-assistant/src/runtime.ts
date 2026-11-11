@@ -38,6 +38,7 @@ import {
   type Summary,
 } from './protocol.ts';
 import type { Site } from './sites/types.ts';
+import { slotZeroBusy } from './subtitle-yield.ts';
 import {
   createStreamContexts,
   streamCategoriesOf,
@@ -96,6 +97,9 @@ function commentPipelines({
   // LanguageDetector is exposed to windows only (Translator and Language Detector APIs IDL,
   // `[Exposed=Window]`), so the service worker always uses the script guess.
   const detector = createLanguageDetector(undefined);
+  // PLaMo translates the comments it lists support for, one line each; its own queue keeps a
+  // burst of lines from taking the batches' slots (the requests name the PLaMo model).
+  const plamoQueue = createQueue({ concurrency: MAX_COMMENT_CONCURRENCY, maxPending: 32 });
   let loading: Promise<Result<Settings>> | undefined;
   /** The pipeline of the current settings and the abort of its slot-count request. */
   type Active = { key: string; pipeline: CommentPipeline; probe: AbortController };
@@ -154,6 +158,20 @@ function commentPipelines({
       emit: sendAnnotations,
       onHiddenChange,
       now: () => Date.now(),
+      // The same router, asking for `plamo-3-translate-2b`: the pipeline offers comments to it
+      // only while `/v1/models` lists the model, and every refusal falls back to Gemma.
+      plamo: createLlamaClient({
+        baseUrl,
+        fetch,
+        queue: plamoQueue,
+        timeoutMs: COMMENT_TIMEOUT_MS,
+      }),
+      // Slot 0 of the model the batches use: only the subtitles' requests to that same model
+      // contend for its decoding. The subtitle extension's settings are never read (S39).
+      subtitleSlotBusy: async (signal: AbortSignal): Promise<Result<boolean>> => {
+        const slots = await client.slots({ model: models.translate, signal });
+        return slots.ok ? slotZeroBusy(slots.value) : slots;
+      },
     });
     askSlots();
     return { key, pipeline, probe };
@@ -260,6 +278,19 @@ function announceStreamChange(): void {
   launch(
     async () => {
       await browser.runtime.sendMessage({ type: 'comments/stream-changed' });
+    },
+    () => undefined,
+  );
+}
+/** Tells open extension pages (the side panel) that a channel's hidden comments changed. */
+function announceHiddenChange(site: Site, channel: string, count: number): void {
+  // Rejects when no extension page listens: there is nothing to tell then.
+  launch(
+    async () => {
+      await browser.runtime.sendMessage({
+        type: 'comments/hidden-changed',
+        payload: { site, channel, count },
+      });
     },
     () => undefined,
   );
@@ -419,7 +450,10 @@ export function startBackground(): () => void {
     fetch: fetcher,
     queue,
     clefQueue,
-    onHiddenChange: badge.counted,
+    onHiddenChange: (site, channel, count) => {
+      badge.counted(site, channel, count);
+      announceHiddenChange(site, channel, count);
+    },
   });
   /**
    * The stream's one genre guess (R63 step 5), when nothing on its page decided the genre; asked

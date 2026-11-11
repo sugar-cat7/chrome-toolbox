@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod/mini';
 import type { Result } from '@chrome-toolbox/contracts';
 import { createLlamaClient, cutByMaxTokens, hostPattern, parseBaseUrl, type Fetch } from './llm.ts';
+import { createQueue } from './queue.ts';
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -298,5 +299,265 @@ describe('llama.cpp client', () => {
     const result = await client.props({ model: 'gemma4-e4b' });
     expect(calls).toEqual([{ path: '/props', search: '?model=gemma4-e4b' }]);
     expect(result.ok ? result.value : result.error.internalCode).toEqual({ totalSlots: 2 });
+  });
+
+  it.each([
+    { name: 'ルーター', model: 'gemma4-e4b', search: '?model=gemma4-e4b' },
+    { name: 'モデルなし', model: undefined, search: '' },
+  ])('slots reads id and is_processing from GET /slots: $name', async ({ model, search }) => {
+    const calls: { method: string | undefined; path: string; search: string }[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (input, init) => {
+        const url = new URL(input);
+        calls.push({ method: init?.method, path: url.pathname, search: url.search });
+        return json([
+          { id: 0, id_task: 12, n_ctx: 4096, is_processing: true, params: {} },
+          { id: 1, is_processing: false },
+        ]);
+      },
+    });
+    const result = await client.slots(model === undefined ? {} : { model });
+    expect(calls).toEqual([{ method: 'GET', path: '/slots', search }]);
+    expect(result).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: true },
+        { id: 1, processing: false },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      name: 'HTTP 501',
+      status: 501,
+      body: { error: { code: 501, message: 'not supported' } },
+      code: 'network_failed',
+    },
+    { name: '配列でない', status: 200, body: { slots: [] }, code: 'response_invalid' },
+    { name: 'is_processing がない', status: 200, body: [{ id: 0 }], code: 'response_invalid' },
+    {
+      name: '負の id',
+      status: 200,
+      body: [{ id: -1, is_processing: false }],
+      code: 'response_invalid',
+    },
+  ])('slots fails: $name', async ({ status, body, code: expected }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json(body, status),
+    });
+    expect(code(await client.slots())).toBe(expected);
+  });
+
+  it('slots does not wait behind the chat queue', async () => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      queue: createQueue({ concurrency: 1 }),
+      fetch: (input, init) =>
+        new URL(input).pathname === '/slots'
+          ? Promise.resolve(json([{ id: 0, is_processing: true }]))
+          : new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+            }),
+    });
+    const stop = new AbortController();
+    const chat = client.chat({
+      messages: [{ role: 'user', content: 'never answered' }],
+      signal: stop.signal,
+    });
+    expect(await client.slots()).toStrictEqual({
+      ok: true,
+      value: [{ id: 0, processing: true }],
+    });
+    stop.abort();
+    expect(code(await chat)).toBe('operation_cancelled');
+  });
+
+  it('sends stop strings only when the request has them', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (_u, init) => {
+        sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        return json({ choices: [{ message: { content: 'x' } }] });
+      },
+    });
+    await client.chat({ messages: [], stop: ['<|plamo:tag|>', '<|plamo:bos|>'] });
+    await client.chat({ messages: [] });
+    expect(sent[0]?.stop).toEqual(['<|plamo:tag|>', '<|plamo:bos|>']);
+    expect(sent[1]).not.toHaveProperty('stop');
+  });
+
+  it('sends audio parts as OpenAI input_audio content', async () => {
+    const sent: { messages: { content: unknown }[] }[] = [];
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async (_u, init) => {
+        sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+        return json({ choices: [{ message: { content: 'x' } }] });
+      },
+    });
+    await client.chat({
+      messages: [
+        { role: 'system', content: 'sys' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Transcribe.' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+          ],
+        },
+      ],
+    });
+    expect(sent[0]?.messages[0]?.content).toBe('sys');
+    expect(sent[0]?.messages[1]?.content).toEqual([
+      { type: 'text', text: 'Transcribe.' },
+      { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+    ]);
+  });
+
+  it.each([
+    {
+      name: '音声入力あり',
+      body: { total_slots: 3, modalities: { vision: false, video: false, audio: true } },
+      expected: { totalSlots: 3, audio: true },
+    },
+    {
+      name: '投影器なし',
+      body: { total_slots: 3, modalities: { vision: false, video: false, audio: false } },
+      expected: { totalSlots: 3, audio: false },
+    },
+    {
+      name: 'modalities を返さない',
+      body: { total_slots: 3 },
+      expected: { totalSlots: 3, audio: undefined },
+    },
+  ])('props: $name', async ({ body, expected }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json(body),
+    });
+    const result = await client.props();
+    expect(result).toStrictEqual({ ok: true, value: expected });
+  });
+
+  it.each([
+    { name: 'tellRefusal なし', tellRefusal: false },
+    { name: 'tellRefusal あり', tellRefusal: true },
+  ])("maps the server's no-projector 400 to audio_unsupported: $name", async ({ tellRefusal }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () =>
+        json(
+          {
+            error: {
+              code: 400,
+              message:
+                'audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj',
+              type: 'invalid_request_error',
+            },
+          },
+          400,
+        ),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal }))).toBe('audio_unsupported');
+  });
+
+  it.each([
+    { name: 'a non-JSON body', body: 'Bad Request' },
+    { name: 'JSON without error.message', body: JSON.stringify({ error: { code: 400 } }) },
+    {
+      name: 'a message without the audio phrase',
+      body: JSON.stringify({ error: { code: 400, message: 'image input is not supported' } }),
+    },
+  ])('a 400 with $name is not audio_unsupported', async ({ body }) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => new Response(body, { status: 400 }),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: false }))).toBe('network_failed');
+    expect(code(await client.chat({ messages: [], tellRefusal: true }))).toBe('model_refused');
+  });
+
+  it('reports operation_cancelled when the caller aborts while the 400 body is read', async () => {
+    const controller = new AbortController();
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => {
+        const response = json({ error: { code: 400, message: 'Invalid slot ID' } }, 400);
+        const read = response.text.bind(response);
+        response.text = async () => {
+          controller.abort();
+          return read();
+        };
+        return response;
+      },
+    });
+    const result = await client.chat({
+      messages: [],
+      tellRefusal: true,
+      signal: controller.signal,
+    });
+    expect(code(result)).toBe('operation_cancelled');
+  });
+
+  it.each([
+    { tellRefusal: false, expected: 'network_failed' },
+    { tellRefusal: true, expected: 'model_refused' },
+  ])(
+    'keeps other 400 replies as Task 0 maps them: $expected',
+    async ({ tellRefusal, expected }) => {
+      const client = createLlamaClient({
+        baseUrl: 'http://127.0.0.1:8080',
+        fetch: async () => json({ error: { code: 400, message: 'Invalid slot ID' } }, 400),
+      });
+      expect(code(await client.chat({ messages: [], tellRefusal }))).toBe(expected);
+    },
+  );
+
+  it.each([
+    {
+      status: 400,
+      message: "model 'plamo-3-translate-2b' not found",
+      tellRefusal: true,
+      expected: 'model_refused',
+    },
+    { status: 400, message: 'Invalid slot ID', tellRefusal: true, expected: 'model_refused' },
+    { status: 404, message: 'File Not Found', tellRefusal: true, expected: 'model_refused' },
+    { status: 503, message: 'Loading model', tellRefusal: true, expected: 'model_refused' },
+    { status: 503, message: 'Loading model', tellRefusal: false, expected: 'network_failed' },
+    { status: 404, message: 'File Not Found', tellRefusal: false, expected: 'network_failed' },
+  ])('HTTP $status "$message" with tellRefusal $tellRefusal is $expected', async (row) => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => json({ error: { code: row.status, message: row.message } }, row.status),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: row.tellRefusal }))).toBe(
+      row.expected,
+    );
+  });
+
+  it('keeps an unreachable server as network_failed even with tellRefusal', async () => {
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => Promise.reject(new TypeError('fetch failed')),
+    });
+    expect(code(await client.chat({ messages: [], tellRefusal: true }))).toBe('network_failed');
+  });
+
+  it('returns operation_cancelled before reading the status of a refused reply', async () => {
+    const controller = new AbortController();
+    const client = createLlamaClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetch: async () => {
+        controller.abort();
+        return json({ error: { code: 503 } }, 503);
+      },
+    });
+    expect(
+      code(await client.chat({ messages: [], tellRefusal: true, signal: controller.signal })),
+    ).toBe('operation_cancelled');
   });
 });

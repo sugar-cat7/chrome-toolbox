@@ -28,7 +28,7 @@ test('20 msg/s for SOAK_MINUTES keeps heap and long tasks within budget', async 
   test.setTimeout(soakTimeout(SOAK_MINUTES));
   await connect(sidePanel, llama.origin);
   // The side panel stays open on the summary, as a viewer would leave it.
-  await sidePanel.getByRole('tab', { name: '要約' }).click();
+  await sidePanel.getByRole('tab', { name: 'かんたん' }).click();
   const { watch, chat, documents } = await openChat(context, platform, {
     video: VIDEO,
     rate: RATE,

@@ -13,10 +13,10 @@ import {
   llmCategoryJudge,
   type Fetch,
   type LlamaClient,
-  type Timers,
   type ToxicityJudge,
 } from '@chrome-toolbox/extension-core';
 import { createFeedbackStore, type FeedbackStore } from '../../src/feedback.ts';
+import { fakeClock as createFakeClock, type FakeClock } from './fake-clock.ts';
 import {
   batchOrder,
   commentConcurrencyFor,
@@ -33,37 +33,7 @@ const MINUTE = 60_000;
 const target: Target = { tabId: 7, frameId: 3 };
 const channel = { site: 'youtube', channel: 'UC-test' } as const;
 
-/** Fake clock: Timers plus `now`, advanced by hand. */
-const fakeClock = (): {
-  timers: Timers;
-  now: () => number;
-  advance(ms: number): void;
-  active(): number;
-} => {
-  let time = START;
-  let nextId = 1;
-  const pending = new Map<number, { at: number; fn: () => void }>();
-  return {
-    timers: {
-      set: (fn, ms) => {
-        const id = nextId++;
-        pending.set(id, { at: time + ms, fn });
-        return id;
-      },
-      clear: (id) => void pending.delete(id),
-    },
-    now: () => time,
-    advance(ms) {
-      time += ms;
-      for (const [id, entry] of [...pending]) {
-        if (entry.at > time) continue;
-        pending.delete(id);
-        entry.fn();
-      }
-    },
-    active: () => pending.size,
-  };
-};
+const fakeClock = (): FakeClock => createFakeClock(START);
 
 type PromptComment = { id: number; lang: string; translate: boolean; text: string };
 type ChatBody = {
@@ -129,6 +99,11 @@ const hangingLlama = () => {
   return { state, fetch };
 };
 /** A door that holds requests until opened. */
+/** Lets everything already queued on microtasks run, to check that something did not happen. */
+const flushMicrotasks = async (): Promise<void> => {
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+};
+
 const gate = () => {
   let open: () => void = () => undefined;
   const opened = new Promise<void>((resolve) => {
@@ -173,6 +148,8 @@ const setup = ({
   context = titled,
   client = (llama) => llama,
   onHiddenChange,
+  subtitleSlotBusy,
+  plamo = false,
 }: {
   fetch: Fetch;
   judge?: ToxicityJudge;
@@ -182,20 +159,35 @@ const setup = ({
   context?: (site: StreamContext['site'], partition: string) => StreamContext;
   /** Wraps the llama.cpp client built on `fetch`. */
   client?: (llama: LlamaClient) => LlamaClient;
+  /** Whether the subtitles' slot 0 is processing; without it comments never give way. */
+  subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>;
+  /** Give the pipeline a PLaMo client on the same `fetch` (its requests name the PLaMo model). */
+  plamo?: boolean;
 }) => {
   const clock = fakeClock();
   const emitted: { target: Target; annotations: Annotation[] }[] = [];
+  const queue = () => createQueue({ concurrency: 4, maxPending: 16 });
   const pipeline = createCommentPipeline({
     client: client(
       createLlamaClient({
         baseUrl: 'http://127.0.0.1:18083',
         fetch,
-        queue: createQueue({ concurrency: 4, maxPending: 16 }),
+        queue: queue(),
       }),
     ),
+    ...(plamo
+      ? {
+          plamo: createLlamaClient({
+            baseUrl: 'http://127.0.0.1:18083',
+            fetch,
+            queue: queue(),
+          }),
+        }
+      : {}),
     ...(commentConcurrency === undefined ? {} : { commentConcurrency }),
     ...(feedback === undefined ? {} : { feedback }),
     ...(onHiddenChange === undefined ? {} : { onHiddenChange }),
+    ...(subtitleSlotBusy === undefined ? {} : { subtitleSlotBusy }),
     model: 'gemma4-e4b',
     judge,
     detector: createLanguageDetector(undefined),
@@ -278,6 +270,181 @@ describe('comment pipeline', () => {
     expect(promptComments(body).map((c) => c.translate)).toEqual([false, false]);
     expect(body.grammar).not.toMatch(/\bja\d/u);
     expect(annotations().map((a) => a.translation)).toEqual([undefined, undefined]);
+  });
+
+  /**
+   * A router that lists `plamo` (or not) and answers chat by model: PLaMo lines get `plamoJa`
+   * (or fail when `plamoDown`), Gemma batches classify with `echo` and one-line subtitle
+   * fallbacks get `gemmaJa`.
+   */
+  const plamoRouter = ({
+    listed = true,
+    plamoJa = 'PLaMoの訳',
+    plamoDown = false,
+    gemmaJa = 'Gemmaの訳',
+  }: {
+    listed?: boolean;
+    plamoJa?: string;
+    plamoDown?: boolean;
+    gemmaJa?: string;
+  } = {}) => {
+    const requests: { path: string; model: string; slot: number }[] = [];
+    const fetch: Fetch = async (input, init) => {
+      const url = new URL(input);
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        model?: string;
+        id_slot?: number;
+        grammar?: string;
+        messages?: { content: string }[];
+      };
+      requests.push({
+        path: url.pathname,
+        model: body.model ?? '',
+        slot: body.id_slot ?? -1,
+      });
+      if (url.pathname === '/v1/models')
+        return Response.json({
+          object: 'list',
+          data: [{ id: 'gemma4-e4b' }, ...(listed ? [{ id: 'plamo-3-translate-2b' }] : [])],
+        });
+      if (url.pathname !== '/v1/chat/completions') throw new Error(`unexpected ${url.pathname}`);
+      // `finish_reason` says the reply was not cut, as llama-server's does.
+      if (body.model === 'plamo-3-translate-2b') {
+        if (plamoDown) return new Response('busy', { status: 500 });
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: plamoJa } }],
+        });
+      }
+      // A one-line fallback has the subtitle grammar; a batch has the comment one.
+      if (body.grammar !== undefined && !body.grammar.includes('code ::='))
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: `${gemmaJa}\n` } }],
+        });
+      const comments = (body.messages?.[1]?.content ?? '')
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as PromptComment);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: replyLines(echo()(comments)) } }],
+      });
+    };
+    return { requests, fetch };
+  };
+
+  it('translates comments with PLaMo when the router lists it, classifying them in the batch', async () => {
+    const router = plamoRouter();
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, {
+      ...channel,
+      comments: [comment('1', 'how long is phase 2?'), comment('2', 'がんばれ')],
+    });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    // The English comment went to PLaMo on the batch's slot; the Japanese one needed nothing.
+    const plamoCalls = router.requests.filter((r) => r.model === 'plamo-3-translate-2b');
+    expect(plamoCalls).toEqual([
+      { path: '/v1/chat/completions', model: 'plamo-3-translate-2b', slot: 1 },
+    ]);
+    // The batch still classified both, but asked for no translation of the PLaMo one.
+    const batch = router.requests.find((r) => r.model === 'gemma4-e4b');
+    expect(batch?.path).toBe('/v1/chat/completions');
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'PLaMoの訳', category: 'chatter', state: 'done' },
+      { id: '2', category: 'chatter', state: 'done' },
+    ]);
+  });
+
+  it('keeps the batch translation when the router does not list PLaMo', async () => {
+    const router = plamoRouter({ listed: false });
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(router.requests.filter((r) => r.model === 'plamo-3-translate-2b')).toEqual([]);
+    expect(annotations()).toEqual([
+      { id: '1', translation: '訳:hello there', category: 'chatter', state: 'done' },
+    ]);
+  });
+
+  it('translates a line PLaMo refused with the batch model alone', async () => {
+    const router = plamoRouter({ plamoDown: true });
+    const { clock, annotations, pipeline } = setup({ fetch: router.fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    // PLaMo was asked and refused; the one-line subtitle prompt on Gemma answered instead.
+    expect(router.requests.map((r) => r.model)).toContain('plamo-3-translate-2b');
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'Gemmaの訳', category: 'chatter', state: 'done' },
+    ]);
+  });
+
+  it('does not hold the batch for a PLaMo line that never answers', async () => {
+    // PLaMo is listed but its chat hangs until the request is aborted, as a backed-up queue
+    // would leave it; Gemma batches classify and one-line fallbacks answer.
+    const requests: { path: string; model: string }[] = [];
+    let plamoAborted = 0;
+    const fetch: Fetch = async (input, init) => {
+      const url = new URL(input);
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        model?: string;
+        grammar?: string;
+        messages?: { content: string }[];
+      };
+      requests.push({ path: url.pathname, model: body.model ?? '' });
+      if (url.pathname === '/v1/models')
+        return Response.json({ object: 'list', data: [{ id: 'plamo-3-translate-2b' }] });
+      if (body.model === 'plamo-3-translate-2b')
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = (): void => {
+            plamoAborted += 1;
+            reject(new DOMException('aborted', 'AbortError'));
+          };
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      if (body.grammar !== undefined && !body.grammar.includes('code ::='))
+        return Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: 'Gemmaの訳\n' } }],
+        });
+      const comments = (body.messages?.[1]?.content ?? '')
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as PromptComment);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: replyLines(echo()(comments)) } }],
+      });
+    };
+    const { clock, annotations, pipeline } = setup({ fetch, plamo: true });
+    pipeline.ingest(target, { ...channel, comments: [comment('1', 'hello there')] });
+    clock.advance(500);
+    await vi.waitFor(() =>
+      expect(requests.some((r) => r.model === 'plamo-3-translate-2b')).toBe(true),
+    );
+    // The batch's own calls answered; only the PLaMo grace period keeps the comment waiting.
+    await flushMicrotasks();
+    expect(annotations()).toEqual([]);
+    clock.advance(5_000);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(1));
+    expect(plamoAborted).toBe(1);
+    expect(annotations()).toEqual([
+      { id: '1', translation: 'Gemmaの訳', category: 'chatter', state: 'done' },
+    ]);
+    // The flow went on: the next comment's batch ran and fell back the same way.
+    pipeline.ingest(target, { ...channel, comments: [comment('2', 'next one')] });
+    clock.advance(500);
+    await vi.waitFor(() =>
+      expect(requests.filter((r) => r.model === 'plamo-3-translate-2b')).toHaveLength(2),
+    );
+    clock.advance(5_000);
+    await vi.waitFor(() => expect(annotations()).toHaveLength(2));
+    expect(annotations()[1]).toEqual({
+      id: '2',
+      translation: 'Gemmaの訳',
+      category: 'chatter',
+      state: 'done',
+    });
+    expect(pipeline.stats(channel.site, channel.channel)).toMatchObject({ pending: 0 });
   });
 
   it('asks the model for short batch-local ids instead of echoing long platform ids', async () => {
@@ -1142,6 +1309,131 @@ describe('comment pipeline', () => {
       expect(recorder.slots).toEqual(slots);
     },
   );
+
+  describe('giving way to subtitles on slot 0', () => {
+    type SlotProbe = (signal: AbortSignal) => Promise<Result<boolean>>;
+    it.each([
+      { name: '枠 0 が処理中', answer: Ok(true), held: [1], slots: [1, 1] },
+      { name: '枠 0 が空き', answer: Ok(false), held: [1, 2], slots: [1, 2] },
+      {
+        name: '問い合わせの失敗',
+        answer: Err(failure('network_failed')),
+        held: [1, 2],
+        slots: [1, 2],
+      },
+    ])('gives way to subtitles on a 3-slot server: $name', async ({ answer, held, slots }) => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => answer);
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      for (const [id, text] of [
+        ['1', 'first'],
+        ['2', 'second'],
+        ['3', 'third'],
+      ] as const)
+        pipeline.ingest(target, { ...channel, comments: [comment(id, text)] });
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      // What runs before the first batch answers: only it while subtitles use slot 0.
+      await vi.waitFor(() => expect(recorder.slots).toEqual(held));
+      await flushMicrotasks();
+      expect(recorder.slots).toEqual(held);
+      door.open();
+      await vi.waitFor(() => expect(annotations()).toHaveLength(3));
+      expect(recorder.slots).toEqual(slots);
+      expect(subtitleSlotBusy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not ask about slot 0 while one batch at a time is enough', async () => {
+      const llama = fakeLlama(echo());
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: llama.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      for (const [n, text] of ['first', 'second', 'third'].entries()) {
+        pipeline.ingest(target, { ...channel, comments: [comment(String(n), text)] });
+        await vi.waitFor(() => expect(annotations()).toHaveLength(n + 1));
+      }
+      expect(llama.state.bodies).toHaveLength(3);
+      expect(subtitleSlotBusy).not.toHaveBeenCalled();
+    });
+
+    it('holds a summary back while a batch runs and subtitles use slot 0', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      const fn = vi.fn<(slot: number) => Promise<Result<number>>>(async (slot) => Ok(slot));
+      const summary = pipeline.exclusive(fn);
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      await flushMicrotasks();
+      expect(fn).not.toHaveBeenCalled();
+      door.open();
+      // The batch ends first; then the summary takes slot 1.
+      expect(await summary).toEqual(Ok(1));
+      expect(annotations()).toHaveLength(1);
+    });
+
+    it('holds the genre guess back while a batch runs and subtitles use slot 0', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(true));
+      const { annotations, pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      const fn = vi.fn<(slot: number) => Promise<Result<number>>>(async (slot) => Ok(slot));
+      const guess = pipeline.exclusive(fn, 'guess', { spare: true });
+      await vi.waitFor(() => expect(subtitleSlotBusy).toHaveBeenCalledTimes(1));
+      await flushMicrotasks();
+      expect(fn).not.toHaveBeenCalled();
+      door.open();
+      // The batch ends first; then the guess takes the highest free comment slot.
+      expect(await guess).toEqual(Ok(2));
+      expect(annotations()).toHaveLength(1);
+    });
+
+    it('lets a summary start beside a batch when slot 0 is idle', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const subtitleSlotBusy = vi.fn<SlotProbe>(async () => Ok(false));
+      const { pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      await vi.waitFor(() => expect(recorder.slots).toEqual([1]));
+      expect(await pipeline.exclusive(async (slot): Promise<Result<number>> => Ok(slot))).toEqual(
+        Ok(2),
+      );
+      door.open();
+    });
+
+    it('aborts the running probe on dispose', async () => {
+      const door = gate();
+      const llama = fakeLlama(echo());
+      const recorder = slotRecorder(door, llama);
+      const signals: AbortSignal[] = [];
+      const subtitleSlotBusy = vi.fn<SlotProbe>(
+        (signal) =>
+          new Promise<Result<boolean>>(() => {
+            signals.push(signal);
+          }),
+      );
+      const { pipeline } = setup({ fetch: recorder.fetch, subtitleSlotBusy });
+      pipeline.setServerSlots(3);
+      pipeline.ingest(target, { ...channel, comments: [comment('1', 'first')] });
+      pipeline.ingest(target, { ...channel, comments: [comment('2', 'second')] });
+      await vi.waitFor(() => expect(signals).toHaveLength(1));
+      pipeline.dispose();
+      expect(signals[0]?.aborted).toBe(true);
+      door.open();
+    });
+  });
 
   it('answers a copy whose text was in flight from the cache, even after 8 s', async () => {
     const door = gate();

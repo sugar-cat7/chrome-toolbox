@@ -1,3 +1,11 @@
+export {
+  ASR_SAMPLE_RATE,
+  ASR_TIMEOUT_MS,
+  createAsrClient,
+  encodeWav,
+  wavBase64,
+  type AsrClient,
+} from './asr.ts';
 export { createQueue, type Queue, type Task } from './queue.ts';
 export {
   createLlamaClient,
@@ -5,7 +13,9 @@ export {
   cutByMaxTokens,
   hostPattern,
   parseBaseUrl,
+  type ChatContentPart,
   type ChatMessage,
+  type ChatPartsMessage,
   type ChatReply,
   type ChatRequest,
   type ChatTiming,
@@ -13,6 +23,7 @@ export {
   type Fetch,
   type LlamaClient,
   type ServerProps,
+  type SlotState,
 } from './llm.ts';
 export {
   defineProtocol,
@@ -33,21 +44,31 @@ export {
 } from './settings.ts';
 export { connectionPort, type ConnectionPort, type HostPermissions } from './connection.ts';
 export {
+  asrMaxTokens,
+  asrPrompt,
+  asrTextLimit,
   COMMENT_CATEGORY_CODES,
   commentBatchMaxTokens,
   commentBatchPrompt,
   commentReplyBudget,
   GENRE_MAX_TOKENS,
   genrePrompt,
+  parseAsrLine,
   parseCommentBatch,
   parseGenre,
   parseSummary,
-  subtitleOutputSchema,
+  parseSubtitleLine,
+  subtitleLimit,
+  subtitleMaxTokens,
+  subtitleReplyBudget,
   subtitlePrompt,
+  subtitleStreamPart,
   summaryLimits,
   summaryLine,
   summaryLines,
   summaryPrompt,
+  type AsrLine,
+  type AsrPrompt,
   type CommentBatchItem,
   type CommentCorrection,
   type GlossaryEntry,
@@ -55,6 +76,19 @@ export {
   type SummaryReply,
   type SummaryText,
 } from './prompts.ts';
+export {
+  parsePlamoLine,
+  PLAMO_LANGUAGES,
+  PLAMO_LICENSE_URL,
+  PLAMO_LIMITS,
+  PLAMO_STOP,
+  PLAMO_TRANSLATE_MODEL,
+  plamoLanguage,
+  plamoMaxTokens,
+  plamoTranslateRequest,
+  type PlamoInput,
+  type PlamoLanguage,
+} from './plamo.ts';
 export {
   commentCategorySchema,
   genreEvalLineSchema,

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import type { Result } from '@chrome-toolbox/contracts';
 import {
   commentBatchPrompt,
   createClefJudge,
@@ -8,16 +9,28 @@ import {
   parseCommentBatch,
   parseGenre,
   parseSummary,
+  PLAMO_STOP,
+  PLAMO_TRANSLATE_MODEL,
+  plamoTranslateRequest,
+  subtitlePrompt,
   summaryPrompt,
   type LlamaClient,
   type SummaryInput,
 } from '../src/index.ts';
 import {
+  commentBatchReply,
+  defaultResponder,
   startLlamaStub,
   STUB_ABUSIVE,
   STUB_BENIGN,
   STUB_GENRE,
+  STUB_PLAMO_PREFIX,
+  STUB_TRANSCRIPT,
+  withoutAudio,
+  withPlamo,
+  withSlots,
   type LlamaStub,
+  type StubChat,
 } from './llama-stub.ts';
 
 // The stub speaks what the extensions send, through the real client: if a prompt or reply
@@ -139,5 +152,248 @@ describe('llama.cpp stub', () => {
     stub.respond = () => ({ status: 503, body: { error: { code: 503 } } });
     const loading = await client.health();
     expect(loading.ok ? undefined : loading.error.internalCode).toBe('network_failed');
+  });
+
+  const plamoLine = { line: 'Okay chat', sourceLang: 'en', previous: [], glossary: [], slot: 0 };
+  const plamoRequest = () => {
+    const request = plamoTranslateRequest(plamoLine);
+    if (!request.ok) throw new Error('the request must build');
+    return request.value;
+  };
+  const codeOf = (result: Result<unknown>): string =>
+    result.ok ? 'ok' : result.error.internalCode;
+
+  test('answers input_audio chats with numbered transcript lines', async () => {
+    const ask = () =>
+      client.chat({
+        messages: [
+          { role: 'system', content: 'Transcribe.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Context line.' },
+              { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+            ],
+          },
+        ],
+      });
+    const first = await ask();
+    const second = await ask();
+    expect(first.ok && first.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
+    expect(second.ok && second.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
+    expect(STUB_TRANSCRIPT).toBe('Stub speech');
+  });
+
+  test('answers a subtitle translation chat, and the same system turn with audio as speech', async () => {
+    const prompt = subtitlePrompt({
+      source: 'Okay chat',
+      sourceLang: 'en',
+      previous: [],
+      context: '',
+      glossary: [],
+    });
+    const translated = await client.chat(prompt);
+    expect(translated.ok && translated.value.text).toBe('訳:Okay chat\n');
+    const spoken = await client.chat({
+      messages: [
+        { role: 'system', content: prompt.messages[0]?.content ?? '' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Task: transcribe' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+          ],
+        },
+      ],
+    });
+    expect(spoken.ok && spoken.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
+  });
+
+  test('records audio parts: the count, and the text parts joined by a newline', async () => {
+    const seen: (StubChat | undefined)[] = [];
+    stub.respond = (request) => {
+      seen.push(request.chat);
+      return defaultResponder(request);
+    };
+    await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+            { type: 'text', text: 'b' },
+          ],
+        },
+      ],
+    });
+    await client.chat(genrePrompt({}));
+    expect(seen[0]?.audio).toBe(1);
+    expect(seen[0]?.messages).toEqual([{ role: 'user', content: 'a\nb' }]);
+    expect(seen[1]?.audio).toBe(0);
+  });
+
+  test('props reports a projector and 2 slots', async () => {
+    expect(await client.props()).toEqual({ ok: true, value: { totalSlots: 2, audio: true } });
+  });
+
+  test('answers GET /slots with two idle slots by default', async () => {
+    expect(await client.slots({ model: 'stub-model' })).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: false },
+        { id: 1, processing: false },
+      ],
+    });
+    expect(stub.requests).toEqual(['GET /slots?model=stub-model']);
+  });
+
+  test('withSlots sets the slot count and reports the processing slots', async () => {
+    stub.respond = withSlots(withoutAudio(defaultResponder), 3, () => [0]);
+    expect(await client.props({ model: 'stub-model' })).toEqual({
+      ok: true,
+      value: { totalSlots: 3, audio: false },
+    });
+    expect(await client.slots({ model: 'stub-model' })).toStrictEqual({
+      ok: true,
+      value: [
+        { id: 0, processing: true },
+        { id: 1, processing: false },
+        { id: 2, processing: false },
+      ],
+    });
+    const genre = await client.chat(genrePrompt({}));
+    expect(genre.ok && parseGenre(genre.value.text)).toBe(STUB_GENRE);
+  });
+
+  test('withSlots asks which slots are processing on every request', async () => {
+    let processing: readonly number[] = [];
+    stub.respond = withSlots(defaultResponder, 2, () => processing);
+    const idle = await client.slots();
+    processing = [1];
+    const busy = await client.slots();
+    expect(idle.ok && idle.value.map((slot) => slot.processing)).toEqual([false, false]);
+    expect(busy.ok && busy.value.map((slot) => slot.processing)).toEqual([false, true]);
+  });
+
+  test('withoutAudio reports no audio in props and rejects input_audio with 400', async () => {
+    stub.respond = withoutAudio(defaultResponder);
+    expect(await client.props()).toEqual({ ok: true, value: { totalSlots: 2, audio: false } });
+    const audio = await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } }],
+        },
+      ],
+      tellRefusal: true,
+    });
+    expect(codeOf(audio)).toBe('audio_unsupported');
+    // The rejected audio chat took serial number 1: the next one answered is 2.
+    stub.respond = defaultResponder;
+    const next = await client.chat({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } }],
+        },
+      ],
+    });
+    expect(next.ok && next.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
+    const text = await client.chat(genrePrompt({}));
+    expect(text.ok && parseGenre(text.value.text)).toBe(STUB_GENRE);
+  });
+
+  test('withPlamo lists the model and answers the request plamoTranslateRequest builds', async () => {
+    stub.respond = withPlamo(defaultResponder);
+    expect(await client.models()).toEqual({
+      ok: true,
+      value: ['stub-model', PLAMO_TRANSLATE_MODEL],
+    });
+    const reply = await client.chat(plamoRequest());
+    expect(reply.ok && reply.value.text).toBe(`${STUB_PLAMO_PREFIX}Okay chat`);
+    expect(STUB_PLAMO_PREFIX).toBe('訳P:');
+  });
+
+  // The responder is called directly: through the client, 400, 404 and 5xx all read as model_refused.
+  const REFUSED = { status: 400, body: { error: { code: 400, type: 'invalid_request_error' } } };
+  const plamoChat = (
+    change: Partial<StubChat> = {},
+    kwargs: Record<string, unknown> = {},
+  ): StubChat => ({
+    messages: [{ role: 'user', content: 'Okay chat' }],
+    audio: 0,
+    model: PLAMO_TRANSLATE_MODEL,
+    temperature: 0,
+    stop: [...PLAMO_STOP],
+    chat_template_kwargs: { target_lang: 'ja', source_lang: 'en', ...kwargs },
+    ...change,
+  });
+  const ask = (chat: StubChat, responder = withPlamo(defaultResponder)) =>
+    responder({ method: 'POST', path: '/v1/chat/completions', body: chat, chat });
+  const noStop = (): StubChat => {
+    const { stop: _stop, ...rest } = plamoChat();
+    return rest;
+  };
+
+  test.each([
+    {
+      name: 'system メッセージ',
+      chat: plamoChat({
+        messages: [
+          { role: 'system', content: 'x' },
+          { role: 'user', content: 'Okay chat' },
+        ],
+      }),
+    },
+    { name: 'grammar', chat: plamoChat({ grammar: 'root ::= "a"' }) },
+    { name: 'stop のキーがない', chat: noStop() },
+    { name: '空の stop', chat: plamoChat({ stop: [] }) },
+    { name: 'response_format', chat: plamoChat({ response_format: { type: 'json_object' } }) },
+    { name: '大文字と地域の言語コード', chat: plamoChat({}, { source_lang: 'zh-CN' }) },
+    { name: '対応していない言語コード', chat: plamoChat({}, { source_lang: 'pt' }) },
+    { name: '文脈の予約トークン', chat: plamoChat({}, { context: 'a <|plamo:tag|> b' }) },
+    {
+      name: '用語集の source の予約トークン',
+      chat: plamoChat({}, { glossary: [{ source: '<|plamo:x', target: 'y' }] }),
+    },
+    {
+      name: '用語集の target の予約トークン',
+      chat: plamoChat({}, { glossary: [{ source: 'x', target: '<|plamo:y' }] }),
+    },
+    {
+      name: 'ASCII の空白だけの原文',
+      chat: plamoChat({ messages: [{ role: 'user', content: ' \t\r\n' }] }),
+    },
+  ])('withPlamo refuses a PLaMo chat with $name with exactly HTTP 400', async ({ chat }) => {
+    expect(await ask(chat)).toEqual(REFUSED);
+  });
+
+  test('withPlamo accepts a line of only U+3000, as the real server does', async () => {
+    const reply = await ask(plamoChat({ messages: [{ role: 'user', content: '\u3000' }] }));
+    expect(reply.status).toBeUndefined();
+  });
+
+  test('withPlamo leaves Gemma chats to the wrapped responder', async () => {
+    const comments = [{ text: 'which level is this?', lang: 'und-Latn', translate: true }];
+    const prompt = commentBatchPrompt({ comments, context: 'Title: a made-up stream' });
+    const plain = await client.chat({ ...prompt, model: 'gemma', slot: 1 });
+    stub.respond = withPlamo(defaultResponder);
+    const wrapped = await client.chat({ ...prompt, model: 'gemma', slot: 1 });
+    expect(wrapped).toEqual(plain);
+    expect(wrapped.ok && wrapped.value.text).toBe(
+      commentBatchReply(
+        '{"id":1,"lang":"und-Latn","translate":true,"text":"which level is this?"}',
+      ),
+    );
+  });
+
+  test('the default stub lists no PLaMo and answers a PLaMo chat with 404', async () => {
+    expect(await client.models()).toEqual({ ok: true, value: ['stub-model'] });
+    expect(codeOf(await client.chat(plamoRequest()))).toBe('model_refused');
+    expect(await ask(plamoChat(), defaultResponder)).toEqual({
+      status: 404,
+      body: { error: { code: 404 } },
+    });
   });
 });

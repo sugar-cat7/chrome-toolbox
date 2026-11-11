@@ -5,7 +5,8 @@ import {
   createLlamaClient,
   cutByMaxTokens,
   parseCommentBatch,
-  subtitleOutputSchema,
+  parseSubtitleLine,
+  subtitleMaxTokens,
   subtitlePrompt,
   type ChatTiming,
   type LlamaClient,
@@ -81,16 +82,16 @@ async function translateSpeech(
     source: sample.text,
     sourceLang: sample.lang,
     previous,
+    context: '',
     glossary: [],
-    withEnglish: false,
   });
-  const result = await client.chatJson(
-    { ...prompt, ...common, ...pinned, maxTokens: GENERATION.maxTokens.subtitle },
-    subtitleOutputSchema,
-  );
-  return result.ok
-    ? { ok: true, output: result.value.value.ja, timing: result.value.timing }
-    : { ok: false, code: result.error.internalCode };
+  const maxTokens = subtitleMaxTokens(sample.text);
+  const result = await client.chat({ ...prompt, ...common, ...pinned, maxTokens });
+  if (!result.ok) return { ok: false, code: result.error.internalCode };
+  const line = parseSubtitleLine(result.value, maxTokens, sample.text);
+  return line.ok
+    ? { ok: true, output: line.value, timing: result.value.timing }
+    : { ok: false, code: line.error.internalCode };
 }
 
 /** One request for the whole batch; every sample is non-Japanese, so every one is translated. */

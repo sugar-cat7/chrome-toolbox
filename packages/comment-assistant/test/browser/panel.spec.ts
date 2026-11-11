@@ -28,7 +28,8 @@ test('side panel names the stream of the active tab and saves filters the chat f
   });
   // Comments go to the local stub, which answers them as chatter (`defaultResponder`).
   await expect(sidePanel.getByText('このタブには配信がありません')).toBeVisible();
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(llama.origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
   await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
@@ -80,7 +81,8 @@ test("side panel shows the genre the model guessed once for the stream and keeps
     if (request.chat?.grammar === grammar) guesses.push(request.chat);
     return defaultResponder(request);
   };
-  await sidePanel.getByRole('tab', { name: '設定' }).click();
+  await sidePanel.getByRole('tab', { name: '詳細設定' }).click();
+  await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(llama.origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
   await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();

@@ -1,6 +1,6 @@
 import { captureSync } from '@chrome-toolbox/contracts';
 import type { CommentCategory, StreamGenre } from '@chrome-toolbox/extension-core';
-import type { FilterMode } from '../../filters.ts';
+import type { FilterMode, FilterStrength } from '../../filters.ts';
 import { CATEGORY_NAMES } from '../../labels.ts';
 import type { SummaryWindow } from '../../protocol.ts';
 import type { DetectedReason } from '../../stream-context.ts';
@@ -34,6 +34,12 @@ export const MODE_LABELS: Readonly<Record<FilterMode, string>> = {
   blur: '伏せる',
   // Removed from the chat; the 非表示 tab lists it and puts it back (R54).
   hide: '消す',
+};
+/** The filter strength as its select names it (see `FilterStrength` for what each does). */
+export const STRENGTH_LABELS: Readonly<Record<FilterStrength, string>> = {
+  mild: '弱め',
+  normal: 'ふつう',
+  strict: '強め',
 };
 /** Each genre as the filter tab names it (R63). */
 export const GENRE_LABELS: Readonly<Record<StreamGenre, string>> = {

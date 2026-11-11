@@ -8,11 +8,138 @@ Probe, before adoption: an isolated workspace with this repository's pnpm 12.11.
 
 In-repository finding: `imports: false` still registers unimport's Vite plugin with `autoImport` enabled, which injected `wxt/utils/storage` into `packages/ui` for a destructured `storage` prop and broke the build. Each `wxt.config.ts` sets `autoImport: false` from the `config:resolved` hook; imports stay explicit and no WXT source is patched. Recheck on WXT upgrades.
 
-Chrome APIs used now: `sidePanel` ([reference](https://developer.chrome.com/docs/extensions/reference/api/sidePanel), updated 2026-09-11; `setPanelBehavior` opens it from the action), `storage`, `permissions` with `optional_host_permissions` for LAN llama.cpp hosts (match patterns ignore ports; `localhost`/`127.0.0.1` are granted at install). The comment service worker also uses `tabs.sendMessage` with `{ frameId }` to return annotations to the sending frame ([reference](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage), updated 2026-09-24; the promise rejects when the frame has no receiver, which the pipeline treats as nothing to annotate) and `storage.local.onChanged` to rebuild its pipeline when the model settings change. The built-in `LanguageDetector` is `[Exposed=Window, SecureContext]` in the [Translator and Language Detector APIs](https://webmachinelearning.github.io/translation-api/) (checked 2026-10-28), so the service worker always uses the script-based guess. Planned for subtitles, not yet adopted: `offscreen` (`USER_MEDIA` has no idle limit; [reference](https://developer.chrome.com/docs/extensions/reference/api/offscreen), updated 2026-09-21) with `tabCapture.getMediaStreamId`, which needs a user invocation.
+Chrome APIs used now: `sidePanel` ([reference](https://developer.chrome.com/docs/extensions/reference/api/sidePanel), updated 2026-09-11; `setPanelBehavior` opens it from the action), `storage`, `permissions` with `optional_host_permissions` for LAN llama.cpp hosts (match patterns ignore ports; `localhost`/`127.0.0.1` are granted at install). The comment service worker also uses `tabs.sendMessage` with `{ frameId }` to return annotations to the sending frame ([reference](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage), updated 2026-09-24; the promise rejects when the frame has no receiver, which the pipeline treats as nothing to annotate) and `storage.local.onChanged` to rebuild its pipeline when the model settings change. The built-in `LanguageDetector` is `[Exposed=Window, SecureContext]` in the [Translator and Language Detector APIs](https://webmachinelearning.github.io/translation-api/) (checked 2026-10-28), so the service worker always uses the script-based guess. The subtitle service worker captures tab audio with `tabCapture.getMediaStreamId`, which needs a user invocation, into an `offscreen` document (`USER_MEDIA` has no idle limit; [reference](https://developer.chrome.com/docs/extensions/reference/api/offscreen), updated 2026-09-21), and declares `activeTab` to see the captured tab's URL (see the Task 13 section). The subtitle service worker uses `commands` ([reference](https://developer.chrome.com/docs/extensions/reference/api/commands), read 2026-11-09: a shortcut needs Ctrl or Alt, Ctrl+Alt is refused, at most four suggested keys, Alt is Option on macOS, inactive while Chrome is not focused unless `global`) for `cycle-display` (`Alt+Shift+J`), and its watch page follows the display mode with `storage.local.onChanged`. The display button on the player shows with YouTube's controls through `:host-context(#movie_player:not(.ytp-autohide))`: Chrome has supported it since 54, Firefox and Safari never did, and the CSS WG removed it from the specification (MDN marks it deprecated, checked 2026-11-09). If Chrome drops it, the overlay's page style can pass a custom property into the shadow root instead. Full screen, YouTube's own keys and the button following the controls are checked on a real page in subtitle Task 16.
 
 Agent loop: [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) 1.12.0 (npm 2026-10-22) exposes `install_extension`, `reload_extension`, `list_extensions` and related tools only with `--categoryExtensions` ([configuration](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/chrome-devtools-mcp-v1.12.0/docs/configuration.md), [extension debugging](https://developer.chrome.com/docs/devtools/agents/extensions)). `.mcp.json` pins it with `--isolated` (temporary profile) and `--filesystemRoot=.`; it is optional and outside setup/checks/CI.
 
-Not verified: installing the dev build through chrome-devtools-mcp end to end, how `--filesystemRoot=.` resolves for each MCP client, an official statement that extensions with host permissions are exempt from Chrome's Local Network Access prompt, and whether an agent-triggered action satisfies `tabCapture`'s user-invocation requirement.
+Not verified: installing the dev build through chrome-devtools-mcp end to end, how `--filesystemRoot=.` resolves for each MCP client, an official statement that extensions with host permissions are exempt from Chrome's Local Network Access prompt, and whether a real toolbar click behaves like the CDP-triggered action of the Task 13 spike (an action that fires `action.onClicked` invoked the tab; one that opens the side panel through `openPanelOnActionClick` did not).
+
+## YouTube caption tracks (subtitle-translator Task 6), 2026-11-06
+
+Spike on www.youtube.com, 2026-11-06: Playwright 1.64 drove a headed Chromium (build 1248, Chrome for Testing 156) with a fresh profile per run, a Japanese UI and no login. Three public videos: an English archive with manual captions in several languages and English auto-generated ones, a Spanish archive with only auto-generated captions, and a live stream; five more live streams were checked for tracks only. Only structure, field names, request kinds and timings were recorded.
+
+Player response (`ytInitialPlayerResponse` and `#movie_player.getPlayerResponse()`, the same shape):
+
+- `captions.playerCaptionsTracklistRenderer` has `captionTracks`, `audioTracks`, `translationLanguages` and `defaultAudioTrackIndex`. A track has `baseUrl`, `languageCode`, `name.simpleText` (in the UI language), `vssId`, `isTranslatable` and `trackName`. `kind: 'asr'` is present only on the auto-generated track. `vssId` is `.<lang>` for a manual track and `a.<lang>` for an auto-generated one.
+- `baseUrl` is `https://www.youtube.com/api/timedtext?…` with `v`, `lang`, `kind` (auto-generated only) and signature, expiry and IP parameters. It has no `fmt` and no `pot`.
+- `videoDetails` has `videoId` (11 characters), `channelId` (`UC` and 22 characters), `author`, `title`, `lengthSeconds` (a string) and `isLiveContent`. `isLive: true` appears only on a live stream; archives have no `isLive` key.
+- After an in-app (SPA) navigation, `window.ytInitialPlayerResponse` still holds the first video. `#movie_player.getPlayerResponse()` and `yt-navigate-finish`'s `detail.response.playerResponse` hold the new one. `yt-navigate-finish` also fires on a full load, 1.1–2.8 s after navigation start, and `getPlayerResponse()` is already the current video when it fires.
+- Live streams: none of the six had `captions` in the player response, and the player had not loaded its captions module (`getOptions()` lacked `captions`).
+
+The player's own timedtext request:
+
+- One `XMLHttpRequest` per track, with `responseType` `''`, so `responseText` is readable after `load`. No `fetch` and no worker.
+- The URL is `/api/timedtext` with the `baseUrl` parameters plus `fmt=json3`, `pot` (a PO token of 120–128 characters), `potc=1`, `c=WEB` and client parameters (`cver`, `cplayer`, `cbr`, `cbrver`, `cbrand`, `cos`, `cosver`, `cplatform`, `xorb`, `xobt`, `xovt`). `lang` names the track, `kind=asr` the auto-generated one, and `tlang=<code>` an auto-translation.
+- With CC off (`yt-player-caption-persistence` false in localStorage) the player requested nothing, on full loads and on SPA navigations. With CC on, it requested the track on a full load before `yt-navigate-finish` (1.3–2.2 s after navigation start), and on an SPA navigation about 120 ms after `yt-navigate-start`, sometimes a second time with the same URL after `yt-navigate-finish`.
+- The track it chooses is not always the spoken one. The fresh Japanese-UI profile turned CC on by itself for both archives (writing persistence true) and took the first listed track, which was in neither the spoken language nor Japanese. Once the remembered language (`yt-player-caption-sticky-language`) was English, the Spanish-only video was requested as an auto-translation into English (`tlang`).
+- Bodies: in this automated browser every timedtext response was HTTP 200 with an empty body, the player's own requests with `pot` included, and YouTube showed no captions. The json3 body was therefore not observed. The parser and the fixtures follow the published json3 shape (`events[]` with `tStartMs`, `dDurationMs`, `segs[].utf8`, `aAppend`, and window events without `segs`). Subtitle Task 16 checks it in a normal Chrome profile.
+
+Player API (`#movie_player`):
+
+- It has `getPlayerResponse`, `getOption`, `setOption`, `getOptions`, `loadModule`, `unloadModule`, `isSubtitlesOn` and `toggleSubtitles`.
+- `setOption('captions', 'track', { languageCode })` turns CC on, and the player requests that track within a few milliseconds. This also works when CC has been off since the page loaded, without `loadModule`. With a manual and an auto-generated track in one language, it takes the manual one; `{ languageCode, kind: 'asr' }` takes the auto-generated one. Setting the track that is already on requests nothing.
+- It changes the viewer's setting: persistence becomes true and the sticky language becomes that language, in localStorage and for the next videos.
+- `setOption('captions', 'track', {})` turns CC off and writes persistence false, but keeps the new sticky language. `unloadModule('captions')` hides the captions but leaves persistence true, so the next video turns CC on again; it does not undo the change.
+- Switching back to the viewer's earlier track (the object from `getOption('captions', 'track')`) makes the player request it again; nothing is cached.
+
+Direct fetch: `baseUrl + '&fmt=json3'` fetched from the page without `pot` returned HTTP 200, `text/html` and an empty body, for both the manual and the auto-generated track.
+
+Decision (the plan's default policy holds):
+
+- The MAIN-world bridge reads only the player's own responses: `/api/timedtext` on the page's origin with `fmt=json3`, never a `tlang` translation. XHR is read from `responseText` after `load`. `fetch` is wrapped too: it reads `response.clone()` as a stream and stops after 8,000,000 characters. It posts one `cues` message per track, with `kind`, in each visit. A visit runs from one `yt-navigate-start` to the next, so returning to a video posts its track again.
+- With CC off, which is the usual case, the isolated content script asks for its source track with `load-track`. The bridge then:
+  - saves the current track and the two localStorage keys;
+  - hides YouTube's caption window (`#movie_player[data-st-loading]`) and calls `setOption`;
+  - after that track's response, or after 10 s or `yt-navigate-start`, sets the saved track again (or `{}` if CC was off) and writes both keys back as they were;
+  - drives the player at most once per track in a visit, whatever the outcome. A repeated `load-track` gets the cues it holds or nothing;
+  - waits up to 10 s before driving the player when the saved persistence is true but no track is on yet. On a full load the player may not have turned the viewer's CC on yet, and a restore would turn it off. The player's own request is posted as usual meanwhile.
+- A source-language track that is already on is reused with no extra request (ruling S41).
+- No direct fetch. Live streams use only the audio path.
+- Additions to the brief: a `ready` message from the content script, because it starts at `document_idle` and can miss the first posts; `kind` in `cues`; and the bridge keeps the last cues it posted and sends them again on `ready` or `load-track`.
+- Cost, accepted in S41: when the viewer had CC on with another track, restoring it makes the player request that track a second time (one extra player request for that video).
+- Known difference after a `{}` restore: the player keeps persistence false in memory. If the key was absent before (YouTube's own default), CC does not turn on by itself for the rest of that page session; a reload reads the restored key again.
+- A smoke run of the built extension in the same kind of browser posted `video` on load, after an SPA navigation and on `ready`. `load-track` made the player request the asked track. CC was off again afterwards, both localStorage keys equalled their earlier values exactly, and playback went on.
+- E2E (subtitle Task 15): the fake player script requests timedtext with an `XMLHttpRequest` of `responseType` `''`, like the real player.
+
+## Tab audio capture (subtitle-translator Task 13), 2026-11-09
+
+Spike, 2026-11-09: a headed Chrome for Testing 156.0.8078.4 (Playwright 1.64, build 1248) with a fresh temporary profile per run, `--load-extension` of a throwaway extension (`tabCapture`, `offscreen`, `sidePanel`, `storage`, `contentSettings`; a second run added `activeTab`), and a local page playing a generated tone in an `<audio>` element at `http://spike.localhost:<port>`. `--disable-audio-output` let the audio pipeline run without reaching the speakers. The toolbar action was run with CDP `Extensions.triggerAction` (it needs `--enable-unsafe-extension-debugging` and a target of type `tab`), side panel buttons with trusted CDP mouse events, and the shortcut with Playwright key presses. Only structure, error strings and timings were recorded. The user's everyday Chrome was not used: loading the unpacked build there, a real toolbar click and pressing the shortcut by hand are left to subtitle Task 16, with the user.
+
+(a) What lets `tabCapture.getMediaStreamId({ targetTabId })` pass:
+
+- With no invocation it fails with `Extension has not been invoked for the current page (see activeTab permission). Chrome pages cannot be captured.` The service worker maps this message to `capture_not_invoked`.
+- The toolbar action with `setPanelBehavior({ openPanelOnActionClick: true })` (the extension's setting since Task 5) opened the side panel but did not invoke the tab. The id was refused to the service worker and to a button in that side panel.
+- A side panel button on its own was also refused. The test pressed the panel page's button in a tab, with no action run, to stand in for a panel opened from Chrome's side panel menu.
+- The toolbar action with `openPanelOnActionClick: false` fired `action.onClicked` and invoked the tab. The service worker got an id then, and again later without any gesture. When the `onClicked` handler opened the panel itself (`sidePanel.open({ tabId })`), the panel's button got an id too.
+- The shortcut was not verified. Playwright's key events (CDP) for Alt+Shift+S, registered as ⌥⇧S, never reached Chrome's command handling on macOS, so `commands.onCommand` did not fire. The [activeTab guide](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab) lists "Executing a keyboard shortcut from the commands API" as an invocation (read 2026-11-09). The [tabCapture reference](https://developer.chrome.com/docs/extensions/reference/api/tabCapture) names only the action ("after the user invokes an extension, such as by clicking the extension's action button") and says an id "expires after a few seconds if it is not used".
+- For Task 14: as long as the action opens the panel through `openPanelOnActionClick`, no panel button can start a capture. Two ways remain: handle `action.onClicked` and open the panel with `sidePanel.open` in that handler, which invokes the tab, or point the viewer to Alt+Shift+S. The user chose the first, with the icon itself as the start (S46, below).
+
+(b) Getting an id again: after a capture stopped, the service worker took a new id for the same tab with no new action and captured again. The invocation outlived `history.pushState` and a same-origin reload; a navigation to another site revoked it. As decided (S8), the capture still stays open while away or paused; this is recorded only.
+
+(c) The offscreen document had only `chrome.csi`, `chrome.loadTimes` and `chrome.runtime`. `runtime` offered messaging (`sendMessage`, `onMessage`, `connect`, `onConnect`), `getURL`, `id` and enums. `fetch` reached `http://127.0.0.1:18083/health` (200, only `/health` was asked) and a local port (200) through the host permissions.
+
+(d) Mute and background tabs:
+
+- Muting the tab (`tabs.update({ muted: true })`, as the tab's speaker icon does) left the captured audio unchanged. So did muting the site (the `sound` content setting `block`, what the tab menu's "Mute site" sets). The RMS stayed 0.043 before, during and after, and the track stayed live and unmuted.
+- A tab in the background was captured unchanged. Its page also stayed `document.visibilityState === 'visible'` while another tab of its window was active; before the capture, the same switch made it `hidden`. A watch page therefore cannot report that its captured tab went to the background.
+- The capture went on across a navigation to another site, so leaving the site has to stop it explicitly.
+- Chromium's `--mute-audio`, which Playwright adds by default, made the captured stream silent (RMS 0). Task 15's E2E must launch without it to see audio.
+- Minimized and covered windows were not checked (Task 16).
+
+(e) Latency: `new AudioContext({ latencyHint: 'interactive' })` ran at 48,000 Hz, the device rate; the track reported 48,000 Hz, 2 channels and a latency of 9.2 ms. `baseLatency` was 5.3 ms (256 frames). `outputLatency` was 16 ms on the fake sink and 24 ms on the device in a muted run. A tone started in the page was detected in the offscreen document 50–52 ms after the page rendered it (5 runs). That figure includes an analyser window of at most 5 ms and 2 ms polling. Played back to `destination`, the viewer hears the tab about that much plus the offscreen document's own base and output latency later than without the capture.
+
+(f) Stream id lifetime: ids used 1, 5 and 8 s after they were taken captured the tab; ids used after 10, 12, 15 and 30 s failed with `AbortError: Error starting tab capture`. An id lives between 8 and 10 s. On the shortcut path the service worker asks `/props` first and takes the id after it (S7). After an invocation the service worker can take the id itself, as (b) shows, so a panel start can also leave the id to the service worker once the projector check is done.
+
+Tab URLs:
+
+- A tab on a host matched only by `content_scripts` had no `url` in `tabs.get` or `tabs.onUpdated`: content script matches do not grant URL access.
+- `history.pushState` fires `tabs.onUpdated` with `status: 'loading'` and then `'complete'`. Without the URL, the rule "a load whose URL is hidden or not on www.youtube.com leaves the site" would stop the capture on every YouTube navigation.
+- With `activeTab`, the invoked tab's URL showed in `tabs.get` and `tabs.onUpdated`. It stayed through `pushState` and a same-origin reload and disappeared after a navigation to another site.
+
+Smoke of the built extension (2026-11-09, same kind of browser, against the repository's llama stub, `--disable-audio-output`):
+
+- Setup: a page played 0.6 s tone bursts every 1.2 s. The service worker, invoked through the action, took a stream id, created `offscreen.html` and sent `audio/start` and then `audio/front` active.
+- In 6 s the offscreen document sent 4 segments, each recognized on slot 0 (`input_audio`, `gemma4-e4b`) and translated on slot 0. The service worker received `audio/status` and 8 `audio/lines`.
+- After `pause`, the flushed segment's two requests ran and then none. A message without `target: 'offscreen'` got no answer. After `audio/stop` and `closeDocument` no offscreen context was left.
+- The real server could not be used: its `gemma4-e4b` has no projector (R61). The plan's Step 5 (an English video, the server's log) moves to Task 16.
+
+Decisions:
+
+- Permissions `tabCapture`, `offscreen` and `activeTab`. `activeTab` adds no install warning and shows only the invoked tab's URL. The brief's left-site rule needs that URL, and no www.youtube.com host permission is added (S43). Command `toggle-audio` (Alt+Shift+S).
+- The service worker calls `getMediaStreamId` in its callback form and reads `runtime.lastError.message`: the repository's Result rules allow no rejection handling, and `capture` drops the message that tells `capture_not_invoked` from `capture_failed`.
+- A captured tab that is not the active tab of its window is sent to the offscreen document as `away` (`hidden`), from `tabs.onActivated` and `tabs.get(tabId).active`, because its page stays visible.
+- `tabs.onUpdated` and `tabs.onActivated` are listened to only while a tab is captured. They are also added when the service worker starts, so the event that woke it is not lost, and removed once `storage.session` shows no capture.
+- Starting from the toolbar icon (user decision 2026-11-09, S46):
+  - The service worker sets `openPanelOnActionClick: false` and handles `action.onClicked`. The handler calls `sidePanel.open({ tabId })` first, in the click's own turn before anything is awaited, so Chrome still counts the click as the viewer's gesture.
+  - The click starts the capture only on a YouTube watch page whose caption path would show nothing. That means the page the tab last reported (`subs/page`) is the video of the tab's URL, and the source would not be its caption track: a live stream, no tracks, or audio chosen as the source.
+  - A second click on the captured tab stops it. Anywhere else, including a tab whose page or URL is unknown, the click only opens the panel.
+  - Alt+Shift+S starts and stops as before. The side panel only stops a capture and says how to start one.
+
+## Browser tests of the subtitles (subtitle-translator Task 15), 2026-11-09
+
+Step 0, 2026-11-09: Playwright 1.64.0 with its Chromium (build 1248, Chrome for Testing 156) in the new headless mode, the production build loaded with `--load-extension`, the made-up watch page served at `https://www.youtube.com/watch` by the test, and the repository's llama.cpp stub. No real site or model server was reached.
+
+(a) A real `tabCapture` works in the headless E2E:
+
+- The panel has no start button since S46, so only the action was tried. CDP `Extensions.triggerAction` on the watch page's `tab` target fired `action.onClicked`; the service worker took a stream id, opened `offscreen.html`, and the tones of the page's `<video>` were recognized and translated on slot 0 within 2–3 s. This is the toolbar icon's own path (S46), so the e2e build of (b) is not needed.
+- `triggerAction` needed no `--enable-unsafe-extension-debugging`, as page-translator Task 1 found; Task 13's headed spike had added it. It works over Playwright's own connection (`launchPersistentContext`, whose `context.browser()` is set) and over the `realVisibility` one. The helper is extension-core `testing/playwright.ts` `triggerAction(context, page)`, copied unchanged from the page branch (S32).
+- The browser must start without Playwright's `--mute-audio` (Task 13 (d)): the fixture option `captureAudio` drops it (`ignoreDefaultArgs`, or leaves it out of the `realVisibility` arguments) and adds `--disable-audio-output`, so nothing plays on the host and the capture still hears the tab.
+- The page may call `video.play()` with sound and no gesture in Playwright's Chromium.
+- The Alt+Shift+S shortcut still cannot be pressed from a test (Task 13 (a)); the shortcut path is left to Task 16.
+
+(b) Not needed: no `starter.e2eBuild`, no `wxt build --mode e2e` and no fixture audio path in the extension.
+
+(c) The offscreen document's heap and long tasks: Chromium lists it as a target of type `background_page`, and Playwright attaches to none (`context.pages()` and `context.backgroundPages()` stay empty), so candidate 1 fails. Candidate 2 works with one change: `Target.attachToTarget` on a browser CDP session with `flatten: false`, then `Target.sendMessageToTarget` and `Target.receivedMessageFromTarget`. With `flatten: true` the child session needs a `sessionId` on each command, which Playwright's `CDPSession.send` cannot add. Through that session `HeapProfiler.collectGarbage`, `Performance.getMetrics` (`JSHeapUsedSize`), `HeapProfiler.takeHeapSnapshot` (its chunks come as events) and `Runtime.evaluate` (the `longtask` observer) all answered. The helper is `offscreenTarget(context, '/offscreen.html')`; finding the target by its URL is `extensionTarget` (`testing/targets.ts`, unit tested).
+
+Other choices for the tests:
+
+- The caption path's overlay follows `requestVideoFrameCallback`, which needs video frames. Playwright's Chromium has no H.264, so the test encodes one 16×16 VP8 key frame with WebCodecs (in a tab of a test-only `https://video-encoder.test/`, because `about:blank` has no `VideoEncoder`) and writes a WebM that repeats it every 100 ms, with a cue per 10 s cluster. A 30-minute video is about 0.8 MB, made in the test; seeking and `playbackRate` 16 work. The audio path plays a WAV of 220 Hz sawtooth tones made in the test (600 ms tone, 500 ms silence, 48 kHz 16-bit), looped.
+- The platform stub answers a `Range` request with 206 and the range, as a media server does.
+- The overlay's shadow root stays closed: the tests find it with `DOM.getDocument` (`pierce: true`) and read it with `Runtime.callFunctionOn`, and record each change of its rows with the video's `currentTime` from a `MutationObserver` added the same way.
+- Every browser test of the package starts pointed at `http://127.0.0.1:9`, and the service worker refuses and reports any request to the default address (`127.0.0.1:18083`); a test that wants the stub sets its address first. The offscreen document takes the address from the service worker at the start of a capture.
+- The bound on the caption timeline is checked from the page's heap: the strings of translated lines (`訳:Fixture line <n>.`) in a heap snapshot, against the lines within 10 minutes of the position. The timeline itself is a closure of the content script, out of a test's reach.
+
+Two-hour soak, 2026-11-11 (`SOAK_MINUTES=120 pnpm --filter @chrome-toolbox/subtitle-translator test:e2e -- soak`, stub server, headless Chromium): PASS. 13,094 chats / 6,547 recognitions over 120 minutes; watch-page heap stayed ~3.2 MB and offscreen ~2.7–2.9 MB across all 120 samples; zero long tasks in either context; zero dropped, expired, skipped or failed segments; translation p50 ~305 ms and p95 ~309 ms flat for the whole run.
 
 ## 2026-10 モデル検証 (Phase 0.5), 2026-10-28
 
@@ -338,6 +465,92 @@ A third agent wrote 335 made-up lines across all 10 genres after D was chosen, w
 - **Ghosting is the weakest category.** It had only 7 positives, so its numbers are coarse; 4 of 7 flags were right. It is only enabled for fps, board and deduction.
 - **The viewer can reverse mistakes.** Removed lines stay in the side panel's hidden list. Marking one as fine adds a correction to the stream's next prompts and allowlists that text (R30). Each category's display can be changed per streamer.
 
+### Speech recognition and slot 0 (2026-11-06)
+
+Subtitle plan Task 4: which Gemma projector to recommend for speech recognition, and whether slot 0 meets the subtitle targets with speech recognition, comment load and MTP.
+
+Setup:
+
+- A separate router on `127.0.0.1:18090`; the service on 18083 was not touched. llama.cpp `620d222`, the options of [llama-server.md](llama-server.md) §4 with `--models-max 1`, and the preset's `[gemma4-e4b]` section (Q4_0 QAT model, MTP drafter with `spec-draft-n-max = 3`) with a projector line added.
+- Input: the 18 synthetic clips of `bench:make-audio` (3 self-written sentences each in en, id, ko, es, zh and ja, spoken by macOS `say`). No real stream data was used, and the JSONL results stayed local.
+- Rounds in the order A-B-B-A, with the server restarted for each round and warmed up with one pass over the clips.
+- The host was not quiet: other applications kept the 5-minute load average at 3.5-4.8 (the plan asked for less than 4). Compare rows within this section, not with other sections.
+
+#### Projector: BF16 or Q8_0
+
+A is Google's BF16 projector (`gemma-4-E4B-it-mmproj.gguf`, 0.99 GB); B is ggml-org's Q8_0 projector (`mmproj-gemma-4-E4B-it-Q8_0.gguf`, 0.56 GB, converted from the non-QAT model). Each round ran `bench:asr --repeat 3`, once on whole clips and once with `--chunk-ms 1500`. Latency is the median (p50) per language, rounds A1, A2 against B1, B2; the ratio compares the means of the two rounds.
+
+| lang | whole: BF16 p50 ms | whole: Q8_0 p50 ms | whole: Q8_0 / BF16 | 1,500 ms: BF16 p50 ms | 1,500 ms: Q8_0 p50 ms | 1,500 ms: Q8_0 / BF16 |
+| ---- | ------------------ | ------------------ | ------------------ | --------------------- | --------------------- | --------------------- |
+| en   | 377, 446           | 428, 490           | 1.12               | 328, 349              | 387, 370              | 1.12                  |
+| id   | 438, 452           | 482, 559           | 1.17               | 297, 332              | 370, 358              | 1.16                  |
+| ko   | 413, 473           | 455, 524           | 1.10               | 393, 356              | 406, 373              | 1.04                  |
+| es   | 395, 451           | 442, 495           | 1.11               | 310, 340              | 385, 357              | 1.14                  |
+| zh   | 393, 447           | 435, 493           | 1.10               | 296, 327              | 375, 346              | 1.16                  |
+| ja   | 384, 451           | 436, 488           | 1.11               | 334, 369              | 403, 386              | 1.12                  |
+
+Memory of Gemma's process (the router's child) after the warm-up and after the measured runs: footprint from macOS `footprint`, resident memory from `ps -o rss=`. The server log at its default verbosity did not print the projector's buffer sizes.
+
+| Round     | Footprint, warm / after | Resident, warm / after |
+| --------- | ----------------------- | ---------------------- |
+| A1 (BF16) | 1.78 / 1.78 GB          | 5.01 / 5.57 GB         |
+| B1 (Q8_0) | 1.25 / 1.39 GB          | 5.15 / 5.44 GB         |
+| B2 (Q8_0) | 1.24 / 1.24 GB          | 5.16 / 5.75 GB         |
+| A2 (BF16) | 1.65 / 1.78 GB          | 5.47 / 6.21 GB         |
+
+Reading:
+
+- Every language had the same language accuracy, error rate and failures with both projectors, for whole clips and for 1,500 ms pieces.
+- Q8_0 was slower in every language: 1.10-1.17 times BF16's p50 on whole clips and 1.04-1.16 times on pieces.
+- Q8_0 saved about 0.4-0.5 GB of footprint. Resident memory overlapped (`lazy-mode` reads embedding rows on demand, so it varies).
+- Decision: **BF16**. The plan recommended Q8_0 only if accuracy was the same, the error rate within +0.02 and the p50 within 1.05 times BF16's in every language. Q8_0 failed the p50 rule.
+- Against 0.43 GB without a projector (2026-11-02, [llama-server.md](llama-server.md)), the BF16 projector with speech recognition in use adds about 1.2-1.4 GB of footprint.
+
+#### Recognition per language (BF16)
+
+The two BF16 rounds, A1 and A2 (p50 and p95 per round). Each language has 3 clips × 3 repeats = 9 samples per run. The error rate is WER for en, id, ko and es and CER for zh and ja, averaged over the samples that did not fail. Language accuracy counts a failed sample as a miss. With pieces, a clip is sent as consecutive requests of at most 1,500 ms, the transcripts are joined, and p50 and p95 count every request.
+
+| lang | whole: error rate | whole: lang accuracy | whole: p50 ms | whole: p95 ms | 1,500 ms: failed | 1,500 ms: error rate | 1,500 ms: lang accuracy | 1,500 ms: p50 ms | 1,500 ms: p95 ms |
+| ---- | ----------------- | -------------------- | ------------- | ------------- | ---------------- | -------------------- | ----------------------- | ---------------- | ---------------- |
+| en   | 0.000             | 1.00                 | 377, 446      | 490, 554      | 0/9              | 0.265                | 1.00                    | 328, 349         | 535, 559         |
+| id   | 0.000             | 1.00                 | 438, 452      | 466, 559      | 0/9              | 0.330                | 1.00                    | 297, 332         | 406, 449         |
+| ko   | 0.056             | 1.00                 | 413, 473      | 425, 500      | 3/9              | 0.429                | 0.67                    | 393, 356         | 461, 467         |
+| es   | 0.000             | 1.00                 | 395, 451      | 409, 467      | 0/9              | 0.000                | 1.00                    | 310, 340         | 337, 374         |
+| zh   | 0.000             | 1.00                 | 393, 447      | 428, 501      | 6/9              | 0.267                | 0.33                    | 296, 327         | 344, 372         |
+| ja   | 0.062             | 1.00                 | 384, 451      | 418, 503      | 0/9              | 0.168                | 1.00                    | 334, 369         | 426, 463         |
+
+Reading:
+
+- Whole clips: language accuracy 1.00 and an error rate of at most 0.062 in every language, p50 377-452 ms. No sample failed.
+- Pieces cut at fixed 1,500 ms boundaries failed every time for ko-3, zh-1 and zh-3, with both projectors. The error was `response_invalid`: the transcript reached `asrTextLimit` (76 characters for 1,500 ms) because the model repeated itself on audio cut inside a syllable. The samples that did not fail had error rates of 0.17-0.43, except es (0).
+- So live segments must end in silence. When long speech has to be cut, the cut belongs at the quietest frame, not at a fixed length: the subtitle plan's VAD (Task 11) cuts at the lowest-energy 20 ms frame of the last 500 ms before 1,500 ms.
+
+#### Slot 0 under comment load, with and without MTP (BF16)
+
+`bench:slots --audio --seconds 60`: every 1.5 s, slot 0 gets the next clip for speech recognition (`asrPrompt`), then its translation (`subtitlePrompt`) unless the clip is Japanese. Both latencies run from the scheduled tick: `source` to the transcript, `ja` to the translation (translated ticks only). The target is source p50 ≤ 1,000 ms, ja p50 ≤ 2,000 ms and ja p95 ≤ 3,000 ms, with every tick sent and none failed. The comment streams send 20-comment batches back to back on slots 1 and 2. The prompt columns are the p50 of llama-server's `timings.prompt_ms`. MTP n3 is the preset; "off" drops `spec-type`, `model-draft` and `spec-draft-n-max`. Every run sent 40 of 40 ticks, translated 34 and failed none.
+
+| Comment streams | MTP | Round | Late ticks | source p50 / p95 ms | ja p50 / p95 ms | Target | ASR prompt p50 ms | Translation prompt p50 ms | Comment batches ok | Batch p50 / p95 ms |
+| --------------- | --- | ----- | ---------- | ------------------- | --------------- | ------ | ----------------- | ------------------------- | ------------------ | ------------------ |
+| 2               | n3  | A1    | 8          | 607 / 2,856         | 1,178 / 3,783   | FAIL   | 300               | 165                       | 28                 | 4,127 / 7,624      |
+| 2               | off | B1    | 9          | 743 / 2,472         | 1,304 / 3,384   | FAIL   | 345               | 181                       | 14                 | 8,712 / 10,404     |
+| 2               | off | B2    | 13         | 758 / 2,655         | 1,385 / 3,459   | FAIL   | 341               | 180                       | 14                 | 8,530 / 11,964     |
+| 2               | n3  | A2    | 16         | 759 / 3,843         | 1,482 / 4,700   | FAIL   | 337               | 184                       | 24                 | 4,873 / 8,831      |
+| 1               | n3  | A1    | 2          | 519 / 847           | 946 / 1,857     | PASS   | 289               | 157                       | 19                 | 3,078 / 5,178      |
+| 1               | off | B1    | 4          | 639 / 1,724         | 1,101 / 2,612   | PASS   | 287               | 152                       | 10                 | 6,212 / 9,381      |
+| 1               | off | B2    | 4          | 635 / 1,721         | 1,100 / 2,593   | PASS   | 283               | 149                       | 10                 | 6,186 / 9,402      |
+| 1               | n3  | A2    | 3          | 560 / 1,309         | 1,006 / 2,297   | PASS   | 315               | 166                       | 18                 | 3,258 / 5,766      |
+
+Without comment load (the idle phase of the same 8 runs), every round passed: source p50 411-468 ms and p95 466-556 ms, ja p50 724-798 ms and p95 889-973 ms, ASR prompt p50 205-225 ms and translation prompt p50 98-100 ms.
+
+Reading:
+
+- Two comment streams: slot 0 missed the target in every round, with MTP (ja p95 3.78 and 4.70 s, source p95 2.86 and 3.84 s) and without it (ja p95 3.38 and 3.46 s, source p95 2.47 and 2.66 s). The source p50 stayed within 1 s.
+- Turning MTP off did not reach the target and halved the comment work: 14 batches in 60 s instead of 24-28, batch p50 8.5-8.7 s instead of 4.1-4.9 s.
+- One comment stream: within the target in every round. With MTP: ja p50 0.95 and 1.01 s, ja p95 1.86 and 2.30 s, source p95 0.85 and 1.31 s, and 18-19 batches at a p50 of 3.1-3.3 s, more than two streams finished without MTP. Without MTP: ja p95 2.59-2.61 s, 10 batches at 6.2 s.
+- The shared prefix works. In every run, each slot-0 request after the first took 193-205 prompt tokens from the slot's cache (server log): translations after a recognition and recognitions after a translation alike. Idle, a translation's prompt took 98-100 ms (p50) and a recognition's, which carries the audio, 205-225 ms.
+
+Decision (the user, 2026-11-06, "字幕中はコメントが譲る"): keep MTP. While subtitles use slot 0, the comment extension sends one batch at a time instead of two. The one-stream rows above are the expected result. The comment extension checks slot 0 through llama-server's `GET /slots` (subtitle plan Task 17); the extensions never message each other.
+
 ### Server prerequisites
 
 - [llama-server.md](llama-server.md) reproduces the measured server: build, models, router preset, launch options and launchd.
@@ -364,23 +577,23 @@ Fixtures are the default input. For a real measurement, point `--set` (and `--ma
 
 1. `pnpm --filter @chrome-toolbox/bench bench:make-audio [-- --manifest <jsonl> --out bench-data/audio]` synthesizes test audio with macOS `say` from `packages/bench/fixtures/audio.jsonl` into `bench-data/audio/<id>.wav`. It writes WAV files only, no results file.
 2. `pnpm --filter @chrome-toolbox/bench bench:translate -- --server http://127.0.0.1:8080 --model <name> --set bench-data/text [--chat-batch 20] [--judge-server <url>] [--slot <n>] [--out <jsonl>]` runs once per translation candidate over 100 utterances and 100 chat lines per language. `--chat-batch N` (default 1) sends up to N consecutive chat lines in one comment-batch request, as the comment extension does (spec §7: up to 20); a speech line or the end of the set closes a batch early. `--judge-server` adds the LLM-judge score; the CLI stops before measuring if either server fails `/health`.
-3. `pnpm --filter @chrome-toolbox/bench bench:asr -- --engine whisper --server http://127.0.0.1:8081 --model <name> --set bench-data/audio/real --manifest bench-data/audio/real/manifest.jsonl` and the same with `--engine llama --server <url>` compare ASR engines per language. Without `--set`/`--manifest` it reads the synthesized `bench-data/audio` and `packages/bench/fixtures/audio.jsonl`.
+3. `pnpm --filter @chrome-toolbox/bench bench:asr -- --server http://127.0.0.1:18083 --model gemma4-e4b [--repeat <n>] [--chunk-ms <ms>] [--set bench-data/audio/real --manifest bench-data/audio/real/manifest.jsonl] [--out <jsonl>]` sends each clip the way the extension does (`createAsrClient`: slot 0, `model`, the one-line `<lang>\t<text>` grammar, `input_audio`) and reports error rate, language accuracy, silent rows and latency per language. `--repeat` runs the sample list n times in order; `--chunk-ms` sends each clip in pieces of at most that length and scores the joined transcripts (the extension's forced cut is 1,500 ms). The server needs the audio projector (`mmproj`, [llama-server.md](llama-server.md)). Without `--set`/`--manifest` it reads the synthesized `bench-data/audio` and `packages/bench/fixtures/audio.jsonl`.
 4. `pnpm --filter @chrome-toolbox/bench bench:clef -- --server <clef-server-url> [--model <name>] [--set bench-data/clef.jsonl]` probes `/v1/systemone`, falls back to logprobs, and prints `CLEF_MODE=<systemone|logprobs|unavailable>` as the last line.
-5. `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <translation-server-url> [--seconds 60] [--comment-streams 2]` measures subtitle latency under comment load, with and without slot pinning. Each comment stream sends its next batch as soon as the last one answered, pinned to slot 1, 2 and so on (default 1 stream). It prints its settings and a table to stdout and writes no results file.
+5. `pnpm --filter @chrome-toolbox/bench bench:slots -- --server <translation-server-url> [--seconds 60] [--comment-streams 2] [--model <name> --audio [--set <dir> --manifest <jsonl>]]` measures subtitle latency under comment load, with and without slot pinning. Each comment stream sends its next batch as soon as the last one answered, pinned to slot 1, 2 and so on (default 1 stream). `--audio` (needs `--model` and the projector) sends each tick's clip for speech recognition on slot 0 before its translation, runs the pinned cases only, and adds the source latency and the prompt times (see "Speech recognition and slot 0"). It prints its settings and a table to stdout and writes no results file.
 
-`bench:translate`, `bench:asr` and `bench:clef` write JSONL to `bench-data/results/` (or `--out`). The first line is a meta record, `{"type": "meta", …}`, with the timestamp, git SHA, server URL, model, the server's `GET /props` `build_info`/`model_path`/`total_slots` (null for whisper.cpp, which has no `/props`) and the generation settings. Each following line is one row.
+`bench:translate`, `bench:asr` and `bench:clef` write JSONL to `bench-data/results/` (or `--out`). The first line is a meta record, `{"type": "meta", …}`, with the timestamp, git SHA, server URL, model, the server's `GET /props` `build_info`/`model_path`/`total_slots` (null when the server has no `/props`) and the generation settings. Each following line is one row.
 
 ### Real data formats (`bench-data/`, gitignored)
 
-- Text (`--set <dir>`): every `*.jsonl` file in the directory, read in file-name order. One line is `{"id": string, "lang": "en"|"id"|"ko"|"es"|"zh"|"mixed", "kind": "speech"|"chat", "text": string}`; ids must be unique across the set. Keep one stream per file in spoken order: the subtitle prompt gets the previous three `speech` lines of the same file and language as context, and that history restarts when the file or the language changes.
-- Audio (`--manifest <jsonl>` plus `--set <dir>`): one line is `{"id": string, "lang": …same values…, "voice": string, "transcript": string}`. `voice` is used only by `bench:make-audio`; use `""` for recordings. The audio for a line is `<set>/<id>.wav`, for example `bench-data/audio/real/en-1.wav`; 16 kHz mono 16-bit PCM matches the synthesized clips. A missing WAV is reported in the `missing wav` column and excluded from failures, error rate and language accuracy.
+- Text (`--set <dir>`): every `*.jsonl` file in the directory, read in file-name order. One line is `{"id": string, "lang": "en"|"id"|"ko"|"es"|"zh"|"ja"|"mixed", "kind": "speech"|"chat", "text": string}`; ids must be unique across the set. Keep one stream per file in spoken order: the subtitle prompt gets the previous three `speech` lines of the same file and language as context, and that history restarts when the file or the language changes.
+- Audio (`--manifest <jsonl>` plus `--set <dir>`): one line is `{"id": string, "lang": …same values…, "voice": string, "transcript": string}`. `voice` is used only by `bench:make-audio`; use `""` for recordings. The audio for a line is `<set>/<id>.wav`, for example `bench-data/audio/real/en-1.wav`; Real WAVs must be 16 kHz mono 16-bit PCM, as the extension sends: `bench:asr` fails a row whose `fmt ` chunk says anything else (`wav_invalid`) instead of sending it. A missing WAV is reported in the `missing wav` column and excluded from failures, error rate and language accuracy. A silent row (empty transcript) is counted in the `silent` column and left out of language accuracy, both the hits and the total, because it says nothing about the language; it still counts in the error rate.
 - Clef (`--set <jsonl>`): one line is `{"text": string, "toxic": boolean}`.
 
 ### What the reports mean
 
 - `bench:translate` prints one row per `lang/kind` and an `all` row: attempts, successes, p50/p95 of successful requests, p95 and max over every attempt (a failed request counts at its elapsed time), and the mean judge score with `scored/total`. A chat row's latency is its whole batch, which is how long that comment waits. Judge failures are listed separately and never mark a translation as failed.
 - `bench:slots` schedules a subtitle every 1.5 s and measures each from its scheduled tick, so a slow reply also delays the ticks behind it. `late` counts ticks sent after their schedule, `sent/expected` shows ticks that never went out before the window closed, and the comment columns time each 20-comment batch of every stream together. `PASS` needs p50 ≤ 2000 ms and p95 ≤ 3000 ms with every expected tick sent and none failed.
-- Generation settings are fixed in `packages/bench/generation.ts`: temperature 0, `max_tokens` 256 per subtitle, `commentBatchMaxTokens` for a comment batch (8 per line, plus for a translated comment 3 per character its grammar allows the translation, 2 × source characters + 16, since R46; 16 plus one per source character before, and 32 + 160 per comment before R20) and 16 for the judge, and `chat_template_kwargs: {"enable_thinking": false}`. A template that does not read `enable_thinking` still thinks, so use non-thinking model variants or start llama-server with `--reasoning-budget 0`. Otherwise thinking tokens count toward the latency and the token budget.
+- Generation settings are fixed in `packages/bench/generation.ts`: temperature 0, `max_tokens` per subtitle `subtitleMaxTokens` (8 + 3 × the characters its grammar allows the translation, 2 × source characters + 16, at most 2,000; 256 before), `commentBatchMaxTokens` for a comment batch (8 per line, plus for a translated comment 3 per character its grammar allows the translation, 2 × source characters + 16, since R46; 16 plus one per source character before, and 32 + 160 per comment before R20) and 16 for the judge, and `chat_template_kwargs: {"enable_thinking": false}`. A template that does not read `enable_thinking` still thinks, so use non-thinking model variants or start llama-server with `--reasoning-budget 0`. Otherwise thinking tokens count toward the latency and the token budget.
 - ASR caveat: zh is scored by CER after NFKC normalisation only. A Traditional Chinese transcript of Simplified reference text counts as wrong characters. Converting it needs a conversion table that the repository does not have, and no dependency was added. Check zh hypotheses by eye before reading the zh error rate.
 
 ### Server interfaces the benches rely on (checked 2026-10-28)
@@ -401,21 +614,21 @@ Compact comment batch reply (R20, checked 2026-10-28 against the server's own bu
 
 whisper.cpp at [`21ba6d2`](https://github.com/ggml-org/whisper.cpp/commit/21ba6d269a02c14309355cb96822db6058d4cf48) (master, 2026-10-27T14:17Z):
 
-- [`examples/server/server.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/examples/server/server.cpp): `POST /inference` takes the multipart fields `file`, `response_format` and `language`. `verbose_json` sets `language` to `whisper_lang_str_full(...)`, which [`src/whisper.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/src/whisper.cpp) maps to the full name (`english`, `chinese`, `korean`, `spanish`, `indonesian`). `bench:asr` maps those names back to ISO codes. The source does not validate a per-request `language=auto`. That it triggers detection the same way as the CLI's `auto` is unverified.
+- [`examples/server/server.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/examples/server/server.cpp): `POST /inference` takes the multipart fields `file`, `response_format` and `language`. `verbose_json` sets `language` to `whisper_lang_str_full(...)`, which [`src/whisper.cpp`](https://github.com/ggml-org/whisper.cpp/blob/21ba6d269a02c14309355cb96822db6058d4cf48/src/whisper.cpp) maps to the full name (`english`, `chinese`, `korean`, `spanish`, `indonesian`). The source does not validate a per-request `language=auto`. That it triggers detection the same way as the CLI's `auto` is unverified.
 
 ### Results (PENDING)
 
-| Item                                               | Value                                                                                                                  |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Translation model, subtitles                       | PENDING                                                                                                                |
-| Translation model, comments                        | PENDING                                                                                                                |
-| ASR engine and model                               | PENDING                                                                                                                |
-| Clef mode                                          | PENDING                                                                                                                |
-| `--parallel`                                       | 3 (R39, 2026-10-29): subtitles on slot 0, two comment batches on slots 1 and 2; see "Fast English chat on three slots" |
-| p50 / p95 per language                             | PENDING                                                                                                                |
-| Total memory                                       | PENDING                                                                                                                |
-| Judge vs human spot check (20 sentences, spec §10) | PENDING, needs the user                                                                                                |
-| Source URLs, file hashes, measurement date         | PENDING                                                                                                                |
+| Item                                               | Value                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Translation model, subtitles                       | PENDING                                                                                                                                                                                                                                                                                     |
+| Translation model, comments                        | PENDING                                                                                                                                                                                                                                                                                     |
+| ASR engine and model                               | gemma4-e4b through llama.cpp `input_audio` with Google's BF16 projector (2026-11-06, 18 synthetic clips: language accuracy 1.00 and error rate ≤ 0.062 in en/id/ko/es/zh/ja, whole-clip p50 377-452 ms; see "Speech recognition and slot 0"). Real streams: PENDING (subtitle plan Task 16) |
+| Clef mode                                          | PENDING                                                                                                                                                                                                                                                                                     |
+| `--parallel`                                       | 3 (R39, 2026-10-29): subtitles on slot 0, two comment batches on slots 1 and 2; see "Fast English chat on three slots"                                                                                                                                                                      |
+| p50 / p95 per language                             | PENDING                                                                                                                                                                                                                                                                                     |
+| Total memory                                       | PENDING                                                                                                                                                                                                                                                                                     |
+| Judge vs human spot check (20 sentences, spec §10) | PENDING, needs the user                                                                                                                                                                                                                                                                     |
+| Source URLs, file hashes, measurement date         | PENDING                                                                                                                                                                                                                                                                                     |
 
 If a language misses the 2 second target, follow the order in spec §6 ("遅延が 2 秒を超えるとき").
 

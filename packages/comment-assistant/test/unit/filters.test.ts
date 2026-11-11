@@ -8,6 +8,7 @@ import {
   filterStore,
   MAX_SPOILER_NOTE,
   MAX_SPOILER_NOTES,
+  modeOf,
   spoilerNoteStore,
   spoilerNotesOf,
   type FilterSettings,
@@ -43,6 +44,41 @@ describe('defaultModeOf', () => {
     expect(defaultModeOf(category)).toBe(mode);
   });
 
+  it.each([
+    // 弱め: nothing is removed outright and nothing is marked.
+    { strength: 'mild', category: 'abusive', mode: 'blur' },
+    { strength: 'mild', category: 'spam', mode: 'blur' },
+    { strength: 'mild', category: 'instruction', mode: 'blur' },
+    { strength: 'mild', category: 'spoiler', mode: 'blur' },
+    { strength: 'mild', category: 'question', mode: 'show' },
+    { strength: 'mild', category: 'important', mode: 'show' },
+    { strength: 'mild', category: 'chatter', mode: 'show' },
+    // 強め: everything borderline is concealed or removed.
+    { strength: 'strict', category: 'abusive', mode: 'hide' },
+    { strength: 'strict', category: 'spoiler', mode: 'hide' },
+    { strength: 'strict', category: 'question', mode: 'blur' },
+    { strength: 'strict', category: 'important', mode: 'blur' },
+    { strength: 'strict', category: 'chatter', mode: 'show' },
+    // ふつう keeps the normal defaults.
+    { strength: 'normal', category: 'spoiler', mode: 'blur' },
+    { strength: 'normal', category: 'question', mode: 'highlight' },
+  ] as const)(
+    'shows $category as $mode by default at $strength',
+    ({ strength, category, mode }) => {
+      expect(defaultModeOf(category, strength)).toBe(mode);
+    },
+  );
+
+  it('lets a chosen mode override the strength', () => {
+    const strict: FilterSettings = { ...defaultFilterSettings, strength: 'strict' };
+    // abusive would default to 消す under strict; the viewer's own 伏せる stands.
+    expect(modeOf({ ...strict, modes: { abusive: 'blur' } }, 'abusive')).toBe('blur');
+    expect(modeOf(strict, 'abusive')).toBe('hide');
+    const mild: FilterSettings = { ...defaultFilterSettings, strength: 'mild' };
+    expect(modeOf({ ...mild, modes: { question: 'highlight' } }, 'question')).toBe('highlight');
+    expect(modeOf(mild, 'question')).toBe('show');
+  });
+
   it('reads a version-2 record that lists only the old six categories as it is (R56, R62)', async () => {
     const store = filterStore(fakeBrowser.storage.local);
     const modes = {
@@ -64,6 +100,36 @@ describe('defaultModeOf', () => {
     });
     const loaded = await store.load('youtube', '@FixtureStreamer');
     expect(loaded).toEqual(Ok({ ...defaultFilterSettings, modes }));
+  });
+
+  it('reads the strength of a version-3 record and normal for one saved before it', async () => {
+    const store = filterStore(fakeBrowser.storage.local);
+    const strict = { ...defaultFilterSettings, strength: 'strict' } as const;
+    await fakeBrowser.storage.local.set({
+      'filters:youtube:@StrictStreamer': {
+        v: 3,
+        translate: true,
+        showOriginal: false,
+        modes: {},
+        holdUntilJudged: true,
+        strength: 'strict',
+      },
+      'filters:youtube:@OldStreamer': {
+        v: 2,
+        translate: true,
+        showOriginal: false,
+        modes: {},
+        holdUntilJudged: true,
+      },
+    });
+    expect(await store.load('youtube', '@StrictStreamer')).toEqual(Ok(strict));
+    // A version-2 record has no strength: it reads as the normal defaults it was saved with.
+    expect(await store.load('youtube', '@OldStreamer')).toEqual(Ok(defaultFilterSettings));
+    // Saved, the strict settings keep their strength under the current version.
+    expect(await store.save('youtube', '@StrictStreamer', strict)).toEqual(Ok(undefined));
+    expect(await fakeBrowser.storage.local.get('filters:youtube:@StrictStreamer')).toEqual({
+      'filters:youtube:@StrictStreamer': { v: 3, ...strict },
+    });
   });
 });
 
@@ -105,7 +171,12 @@ describe('filterStore', () => {
       });
       const store = filterStore(fakeBrowser.storage.local);
       expect(await store.load('youtube', '@FixtureStreamer')).toEqual(
-        Ok({ translate: false, showOriginal: true, modes: expected, holdUntilJudged: true }),
+        Ok({
+          ...defaultFilterSettings,
+          translate: false,
+          showOriginal: true,
+          modes: expected,
+        }),
       );
     },
   );
@@ -126,12 +197,12 @@ describe('filterStore', () => {
     expect(await store.load('youtube', '@FixtureStreamer')).toEqual(
       Ok({ ...defaultFilterSettings, modes: chosen }),
     );
-    // Saved again, the record keeps its version.
+    // Saved again, the record takes the current version and the normal strength it lacked.
     expect(
       await store.save('youtube', '@FixtureStreamer', { ...defaultFilterSettings, modes: chosen }),
     ).toEqual(Ok(undefined));
     expect(await fakeBrowser.storage.local.get('filters:youtube:@FixtureStreamer')).toEqual({
-      'filters:youtube:@FixtureStreamer': { v: 2, ...defaultFilterSettings, modes: chosen },
+      'filters:youtube:@FixtureStreamer': { v: 3, ...defaultFilterSettings, modes: chosen },
     });
     expect((await store.load('youtube', '@FixtureStreamer')).ok).toBe(true);
     // The same six without a version still read as saved before Task 5d.
@@ -154,7 +225,7 @@ describe('filterStore', () => {
     const off: FilterSettings = { ...defaultFilterSettings, holdUntilJudged: false };
     expect(await store.save('youtube', '@FixtureStreamer', off)).toEqual(Ok(undefined));
     expect(await fakeBrowser.storage.local.get('filters:youtube:@FixtureStreamer')).toEqual({
-      'filters:youtube:@FixtureStreamer': { v: 2, ...off },
+      'filters:youtube:@FixtureStreamer': { v: 3, ...off },
     });
     expect(await store.load('youtube', '@FixtureStreamer')).toEqual(Ok(off));
   });
@@ -164,7 +235,7 @@ describe('filterStore', () => {
     expect(await store.save('youtube', '@FixtureStreamer', hideSpoilers)).toEqual(Ok(undefined));
     expect(filterKey('youtube', '@FixtureStreamer')).toBe('filters:youtube:@FixtureStreamer');
     expect(await fakeBrowser.storage.local.get('filters:youtube:@FixtureStreamer')).toEqual({
-      'filters:youtube:@FixtureStreamer': { v: 2, ...hideSpoilers },
+      'filters:youtube:@FixtureStreamer': { v: 3, ...hideSpoilers },
     });
     expect(await store.load('youtube', '@FixtureStreamer')).toEqual(Ok(hideSpoilers));
     // Other streamers, and the same name on another site, keep their own (default) filters.

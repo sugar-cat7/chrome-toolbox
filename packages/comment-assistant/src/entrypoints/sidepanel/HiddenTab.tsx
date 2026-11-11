@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { launch } from '@chrome-toolbox/contracts';
 import type { PanelPort } from '../../panel.ts';
 import type { FeedbackVerdict, HiddenEntry } from '../../protocol.ts';
-import type { StreamContext } from '../../stream-context.ts';
+import { partitionsOf, type StreamContext } from '../../stream-context.ts';
 import { CATEGORY_NAMES } from '../../labels.ts';
 import { clockTime, explain } from './text.ts';
 
@@ -77,6 +77,19 @@ export function HiddenTab({
   useEffect(() => {
     reload();
   }, [reload]);
+  // The service worker reports a channel's hidden comments changing (a new one, a verdict, a
+  // restore): the list of this stream's channels is read again, so filtered comments show up
+  // without pressing 更新. Stream switches are App's concern: this watch only hears the hidden
+  // changes of the stream on screen.
+  useEffect(() => {
+    if (stream === undefined) return;
+    return port.watch(
+      () => undefined,
+      (site, channel) => {
+        if (site === stream.site && partitionsOf(stream).includes(channel)) reload();
+      },
+    );
+  }, [port, stream, reload]);
 
   if (stream === undefined)
     return (

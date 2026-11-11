@@ -33,13 +33,26 @@ const batches = (sent: readonly Sent[]): Sent[] =>
 /**
  * Fake llama.cpp router: chat translates every translatable comment as `訳:<text>` and calls a
  * "menace" abusive, everything else chatter, and answers a genre guess with `genre`; Clef scores
- * 0.01 (0.95 for a "menace"). Requests other than `/props` wait for `door` (or the door it
- * returns when asked); the first `propsFailures` `/props` requests find the server down.
+ * 0.01 (0.95 for a "menace"). `/v1/models` answers at once with `models` (no PLaMo unless named);
+ * other requests wait for `door` (or the door it returns when asked); the first `propsFailures`
+ * `/props` requests find the server down.
  */
 const stubLlama = (
   door: Promise<void> | (() => Promise<void>) = Promise.resolve(),
   totalSlots = 2,
-  { propsFailures = 0, genre = 'other' }: { propsFailures?: number; genre?: string } = {},
+  {
+    propsFailures = 0,
+    genre = 'other',
+    processing = [],
+    models = ['gemma4-e4b', 'clef-flash'],
+  }: {
+    propsFailures?: number;
+    genre?: string;
+    /** The slots `/slots` reports processing (none by default). */
+    processing?: readonly number[];
+    /** The model ids `/v1/models` lists (PLaMo absent unless named). */
+    models?: readonly string[];
+  } = {},
 ): Sent[] => {
   const sent: Sent[] = [];
   let failures = propsFailures;
@@ -52,11 +65,24 @@ const stubLlama = (
         string,
         unknown
       >;
+      if (path === '/v1/models') {
+        sent.push({ path, body });
+        return Response.json({ object: 'list', data: models.map((id) => ({ id })) });
+      }
       if (path === '/props') {
         sent.push({ path: `${path}${url.search}`, body });
         failures -= 1;
         if (failures >= 0) throw new TypeError('Failed to fetch');
         return Response.json({ total_slots: totalSlots });
+      }
+      if (path === '/slots') {
+        sent.push({ path: `${path}${url.search}`, body });
+        return Response.json(
+          Array.from({ length: totalSlots }, (_, id) => ({
+            id,
+            is_processing: processing.includes(id),
+          })),
+        );
       }
       sent.push({ path, body });
       await (typeof door === 'function' ? door() : door);
@@ -1314,6 +1340,7 @@ describe('extension runtime wiring', () => {
       expect(sent.map((s) => s.path).sort()).toEqual([
         '/props?model=gemma4-e4b',
         '/v1/chat/completions',
+        '/v1/models',
         '/v1/systemone',
       ]),
     );
@@ -1395,6 +1422,56 @@ describe('extension runtime wiring', () => {
       await vi.waitFor(() => expect(chats()).toHaveLength(2));
       // Without one it waited for the first batch and then took slot 1 again.
       expect(chats()).toEqual(inFlight === 2 ? [1, 2] : [1, 1]);
+      stop();
+    },
+  );
+  it.each([
+    { name: 'slot 0 busy', processing: [0], held: [1], slots: [1, 1] },
+    { name: 'slot 0 idle', processing: [], held: [1, 2], slots: [1, 2] },
+  ])(
+    "asks /slots for its translation model's slot 0 before a second batch: $name",
+    async ({ processing, held, slots }) => {
+      let open: () => void = () => undefined;
+      const sent = stubLlama(
+        new Promise((resolve) => {
+          open = resolve;
+        }),
+        3,
+        { processing },
+      );
+      vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+      const add = vi.spyOn(fakeBrowser.runtime.onMessage, 'addListener');
+      const stop = startBackground();
+      const listener = add.mock.calls[0]?.[0];
+      const tab = await fakeBrowser.tabs.create({ url: 'https://www.twitch.tv/test' });
+      const ingest = (comments: ReturnType<typeof raw>[]): Promise<unknown> =>
+        new Promise((resolve) =>
+          listener?.(
+            { type: 'comments/ingest', payload: { site: 'twitch', channel: 'test', comments } },
+            { tab, frameId: 0 },
+            resolve,
+          ),
+        );
+      const chats = (): number[] =>
+        sent.filter((s) => s.path === '/v1/chat/completions').map((s) => Number(s.body['id_slot']));
+      await ingest([raw('1', 'hello')]);
+      await vi.waitFor(() => expect(chats()).toEqual([1]));
+      await vi.waitFor(() => expect(sent.some((s) => s.path.startsWith('/props'))).toBe(true));
+      // The first batch never asked; the first comment waiting beside it does.
+      expect(sent.filter((s) => s.path.startsWith('/slots'))).toEqual([]);
+      await ingest([raw('2', 'second')]);
+      await vi.waitFor(() =>
+        expect(sent.filter((s) => s.path.startsWith('/slots')).map((s) => s.path)).toEqual([
+          '/slots?model=gemma4-e4b',
+        ]),
+      );
+      // What runs before the first batch answers: only it while subtitles use slot 0.
+      await vi.waitFor(() => expect(chats()).toEqual(held));
+      for (let i = 0; i < 50; i += 1) await Promise.resolve();
+      expect(chats()).toEqual(held);
+      open();
+      await vi.waitFor(() => expect(chats()).toHaveLength(2));
+      expect(chats()).toEqual(slots);
       stop();
     },
   );

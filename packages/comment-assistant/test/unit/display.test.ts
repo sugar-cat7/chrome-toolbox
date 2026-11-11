@@ -659,6 +659,7 @@ describe('filter settings', () => {
       showOriginal: false,
       modes: {},
       holdUntilJudged: true,
+      strength: 'normal',
     });
     expect(filterSettingsSchema.safeParse(defaultFilterSettings).success).toBe(true);
     // A partial mode list is valid; a mode that is no mode is not.

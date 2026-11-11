@@ -25,10 +25,24 @@ export default defineConfig({
   manifest: {
     name: '配信字幕翻訳',
     description: '配信や動画の音声をローカルLLMで日本語字幕にします。',
-    permissions: ['storage', 'sidePanel'],
+    // tabCapture and offscreen capture the tab's audio for speech subtitles; activeTab shows the
+    // captured tab's URL after the shortcut, so leaving www.youtube.com stops the capture (Task 13).
+    permissions: ['storage', 'sidePanel', 'tabCapture', 'offscreen', 'activeTab'],
     // Local llama.cpp is reachable without a prompt; LAN hosts are requested at runtime.
     host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     action: { default_title: '配信字幕翻訳' },
+    // The service worker steps the saved display (runtime.ts); every tab follows it. The audio
+    // shortcut starts or stops the capture of the tab in front (sessions.ts).
+    commands: {
+      'cycle-display': {
+        suggested_key: { default: 'Alt+Shift+J' },
+        description: '字幕の表示を切り替え（日本語／併記／原語／オフ）',
+      },
+      'toggle-audio': {
+        suggested_key: { default: 'Alt+Shift+S' },
+        description: '音声で字幕を開始／停止',
+      },
+    },
   },
 });

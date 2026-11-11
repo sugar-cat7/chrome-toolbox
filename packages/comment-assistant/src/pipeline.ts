@@ -25,8 +25,17 @@ import {
   needsTranslation,
   parseCommentBatch,
   parseGenre,
+  parsePlamoLine,
+  parseSubtitleLine,
+  PLAMO_TRANSLATE_MODEL,
+  plamoLanguage,
+  plamoTranslateRequest,
   scriptLanguageGuess,
+  subtitleMaxTokens,
+  subtitlePrompt,
   systemTimers,
+  type ChatReply,
+  type ChatRequest,
   type CommentBatchItem,
   type CommentCategory,
   type CommentCorrection,
@@ -80,6 +89,7 @@ import {
   streamCategoriesOf,
   type StreamContext,
 } from './stream-context.ts';
+import { createSubtitleYield } from './subtitle-yield.ts';
 import { summarize } from './summary.ts';
 
 /** A tab frame whose content script sent the comments; annotations go back to it. */
@@ -211,6 +221,12 @@ const MINUTE = 60_000;
 export const MAX_COMMENT_CONCURRENCY = 4;
 /** A comment that waited this long without reaching the model is shown in the original (R19). */
 const STALE_AFTER_MS = 8_000;
+/**
+ * How long a batch waits past its own calls for PLaMo's lines before a line still unanswered
+ * falls back to Gemma alone: PLaMo is best-effort, and a backed-up queue must never hold the
+ * batch's comment slot — the flow keeps its pace and the translation catches up or is skipped.
+ */
+const PLAMO_WAIT_MS = 5_000;
 /** Channels kept at once; the least recently processed one goes for a new one (R53). */
 const MAX_CHANNELS = 4;
 /**
@@ -468,6 +484,17 @@ type ClefPart = Readonly<{
   asked: readonly boolean[];
   scores: readonly (number | undefined)[];
 }>;
+/**
+ * One comment PLaMo translates: the line it reads (the unstretched comment text), the language
+ * guess the fallback prompt repeats, the `source_lang` sent to PLaMo (`auto` when the guess
+ * names only a script), and the request `plamoTranslateRequest` built for it.
+ */
+type PlamoPlan = Readonly<{
+  line: string;
+  lang: string;
+  sourceLang: string;
+  request: ChatRequest & Readonly<{ model: string; maxTokens: number }>;
+}>;
 
 /**
  * Background comment processing: drop empty text, answer stock reactions, emotes and laughter
@@ -518,8 +545,21 @@ export function createCommentPipeline(deps: {
    * `setServerSlots`, which also caps a value given here at the server's spare slots.
    */
   commentConcurrency?: number;
+  /**
+   * The PLaMo translation model's client, on its own queue (its requests name
+   * `plamo-3-translate-2b` themselves). Comments it can translate go to it one line each,
+   * in parallel with the batch that classifies them; without it every translation stays in
+   * the batch call, as before.
+   */
+  plamo?: LlamaClient;
   /** A comment waiting longer than this without reaching the model is skipped; 8000 ms. */
   staleAfterMs?: number;
+  /**
+   * Whether llama-server's slot 0 (the subtitles') is processing. When given, a second request
+   * on the comment slots waits for a fresh answer, and while subtitles use slot 0 the comment
+   * slots run one request at a time (`subtitle-yield.ts`). Without it comments never give way.
+   */
+  subtitleSlotBusy?: (signal: AbortSignal) => Promise<Result<boolean>>;
 }): CommentPipeline {
   const { maxItems, maxBuffered } = commentLimits.batcher;
   const staleAfterMs = deps.staleAfterMs ?? STALE_AFTER_MS;
@@ -562,6 +602,13 @@ export function createCommentPipeline(deps: {
   let batchesFirst = false;
   /** Comment slots in use, by batches and by `exclusive`. */
   const busy = (): number => running.size + held.size;
+  /**
+   * Comment requests that may run at once now: the first always starts at once; a second or
+   * later one only while subtitles do not use slot 0 (batches, summaries and the genre guess
+   * alike: they all decode on the same model, ruling S38).
+   */
+  const allowed = (): number =>
+    busy() === 0 || subtitles === undefined ? concurrency : subtitles.limit(concurrency);
   /** The latest summary per channel and window, and the ones being made. */
   const summaries = createLruCache<string, MadeSummary>({ max: SUMMARY_CACHE_MAX });
   const summarizing = new Map<string, Promise<Result<Summary>>>();
@@ -1109,9 +1156,24 @@ export function createCommentPipeline(deps: {
     return true;
   }
 
+  const timers = deps.timers ?? systemTimers;
+  const subtitles =
+    deps.subtitleSlotBusy === undefined
+      ? undefined
+      : createSubtitleYield({
+          probe: deps.subtitleSlotBusy,
+          now: deps.now,
+          timers,
+          // As `setServerSlots`: a slot may be open now.
+          changed: () => {
+            if (busy() < allowed()) batcher.flush();
+            pump();
+            deliver();
+          },
+        });
   const batcher = createBatcher<Entry>({
     ...commentLimits.batcher,
-    timers: deps.timers ?? systemTimers,
+    timers,
     flush: (entries) => {
       backlog.push(...entries);
       // Inside `ingest` the whole message is taken first and pumped at its end, so its newest
@@ -1214,7 +1276,7 @@ export function createCommentPipeline(deps: {
    * `spares` (the batches took their slots already).
    */
   function grant(spares: boolean): void {
-    for (let i = 0; i < waiting.length && busy() < concurrency;) {
+    for (let i = 0; i < waiting.length && busy() < allowed();) {
       const next = waiting[i];
       if (next === undefined || (next.spare && !spares)) {
         i += 1;
@@ -1240,12 +1302,47 @@ export function createCommentPipeline(deps: {
     if (summariesFirst) grant(false);
     answerCached();
     expire();
-    while (busy() < concurrency) {
+    // Only waiting comments ask whether another batch may start.
+    while (backlog.length > 0 && busy() < allowed()) {
       const batch = takeBatch();
       if (batch.length === 0) break;
       start(batch);
     }
     grant(true);
+  }
+
+  /**
+   * Whether the router lists PLaMo, once a `/v1/models` answer said so: undefined until then,
+   * and again after a failed ask. A list that cannot be read offers nothing this batch.
+   */
+  let plamoOffered: boolean | undefined;
+  /** The `source_lang` a comment's guess maps to for PLaMo. */
+  const plamoSourceLang = (lang: string): string =>
+    // A script-only guess (`und-Latn`, `und-Other`) names no language: PLaMo detects it.
+    lang === 'und-Latn' || lang === 'und-Other' ? 'auto' : lang;
+  /**
+   * The PLaMo plan of one comment, or undefined when PLaMo cannot take it: a language it does
+   * not know, or a line `plamoTranslateRequest` refuses. The caller checked that the router
+   * lists the model and that the comment needs a translation. The line takes the batch's own
+   * slot: every model has the same slots, so PLaMo's slot 0 stays free for subtitle
+   * translations while comment batches spread over 1 and up.
+   */
+  function plamoPlanOf(
+    comment: { text: string; lang: string },
+    slot: number,
+  ): PlamoPlan | undefined {
+    const sourceLang = plamoSourceLang(comment.lang);
+    if (plamoLanguage(sourceLang).kind === 'unsupported') return undefined;
+    const request = plamoTranslateRequest({
+      line: comment.text,
+      sourceLang,
+      previous: [],
+      glossary: [],
+      slot,
+    });
+    return request.ok
+      ? { line: comment.text, lang: comment.lang, sourceLang, request: request.value }
+      : undefined;
   }
 
   function start(batch: readonly Entry[]): void {
@@ -1291,8 +1388,39 @@ export function createCommentPipeline(deps: {
           lang: guess.lang,
           translate: needsTranslation(guess, 'ja'),
         }));
-        const maxTokens = commentBatchMaxTokens(comments);
-        // Clef and the translation model are separate llama.cpp processes, so they overlap.
+        // PLaMo translates the comments it can, one line each in parallel with the batch; the
+        // batch call then only classifies them (`translate` off), as it does for Japanese ones.
+        // The router's model list is asked once, and again only while it cannot be read.
+        const wantsPlamo =
+          deps.plamo !== undefined && comments.some((comment) => comment.translate);
+        if (wantsPlamo && plamoOffered === undefined) {
+          const models = await deps.client.models(signal);
+          if (models.ok) plamoOffered = models.value.includes(PLAMO_TRANSLATE_MODEL);
+        }
+        const plans = comments.map((comment) =>
+          wantsPlamo && plamoOffered === true && comment.translate
+            ? plamoPlanOf(comment, slot)
+            : undefined,
+        );
+        const promptComments = comments.map((comment, i) =>
+          plans[i] === undefined ? comment : { ...comment, translate: false },
+        );
+        const maxTokens = commentBatchMaxTokens(promptComments);
+        const plamo = deps.plamo;
+        // PLaMo's lines run in parallel with the batch on their own queue, but the batch waits
+        // for them only `PLAMO_WAIT_MS` past its own calls: a line still unanswered then is
+        // aborted where it waits and falls back to Gemma alone, so a backed-up PLaMo queue
+        // never holds the batch's comment slot.
+        const plamoDeadline = new AbortController();
+        const plamoPending = plans.map((plan) =>
+          plan === undefined || plamo === undefined
+            ? Promise.resolve(undefined)
+            : plamo.chat({
+                ...plan.request,
+                signal: AbortSignal.any([signal, plamoDeadline.signal]),
+              }),
+        );
+        // Clef, PLaMo and the translation model are separate llama.cpp processes, so they overlap.
         const [judged, replied] = await Promise.all([
           abusiveScores(
             texts.filter((_text, i) => cued[i]),
@@ -1300,7 +1428,7 @@ export function createCommentPipeline(deps: {
           ),
           deps.client.chat({
             ...commentBatchPrompt({
-              comments,
+              comments: promptComments,
               context: scope.text,
               genre: scope.genre,
               categories: scope.categories,
@@ -1314,13 +1442,64 @@ export function createCommentPipeline(deps: {
             signal,
           }),
         ]);
-        const reply: BatchReply = replied.ok
+        const plamoTimer = timers.set(() => plamoDeadline.abort(), PLAMO_WAIT_MS);
+        let plamoReplies: (Result<ChatReply> | undefined)[];
+        try {
+          plamoReplies = await Promise.all(plamoPending);
+        } finally {
+          timers.clear(plamoTimer);
+        }
+        const parsed: BatchReply = replied.ok
           ? Ok(
-              parseCommentBatch(replied.value.text, comments, {
+              parseCommentBatch(replied.value.text, promptComments, {
                 cut: cutByMaxTokens(replied.value, maxTokens),
               }),
             )
           : replied;
+        // Each PLaMo line that answered becomes its comment's translation; one that failed is
+        // translated by the batch model alone (the subtitle prompt's one-line task, on the
+        // batch's slot, with the stream's context).
+        const gemmaAlone = async (plan: PlamoPlan): Promise<string | undefined> => {
+          const maxTokens = subtitleMaxTokens(plan.line);
+          const reply = await deps.client.chat({
+            ...subtitlePrompt({
+              source: plan.line,
+              sourceLang: plan.lang,
+              previous: [],
+              context: scope.text,
+              glossary: [],
+            }),
+            model: deps.model,
+            slot,
+            temperature: 0,
+            cachePrompt: true,
+            maxTokens,
+            templateKwargs: { enable_thinking: false },
+            signal,
+          });
+          if (!reply.ok) return undefined;
+          const ja = parseSubtitleLine(reply.value, maxTokens, plan.line);
+          return ja.ok ? ja.value : undefined;
+        };
+        const translations = await Promise.all(
+          plans.map(async (plan, i) => {
+            if (plan === undefined) return undefined;
+            const reply = plamoReplies[i];
+            if (reply?.ok === true) {
+              const ja = parsePlamoLine(reply.value, plan.request.maxTokens, plan.line);
+              if (ja.ok) return ja.value;
+            }
+            return gemmaAlone(plan);
+          }),
+        );
+        const reply: BatchReply = parsed.ok
+          ? Ok(
+              parsed.value.map((item, i) => {
+                const ja = translations[i];
+                return item !== undefined && ja !== undefined ? { ...item, ja } : item;
+              }),
+            )
+          : parsed;
         // Then Clef judges the comments without a cue that the model called abusive: none of the
         // batch is shown before it answers, so an abusive verdict never shows ahead of Clef's.
         // Not when the first call found Clef unreachable or silent: the batch would hold its slot
@@ -1567,7 +1746,7 @@ export function createCommentPipeline(deps: {
         else keep(entry);
       }
       // A slot is free: start now rather than waiting for the batch window.
-      if (busy() < concurrency) batcher.flush();
+      if (busy() < allowed()) batcher.flush();
       // Every comment of the message waits now, so `batchOrder` sees all of them.
       pump();
       ingesting = false;
@@ -1642,13 +1821,14 @@ export function createCommentPipeline(deps: {
       if (disposed) return;
       const spare = commentConcurrencyFor(totalSlots);
       concurrency = Math.min(requested ?? spare, spare);
-      if (busy() < concurrency) batcher.flush();
+      if (busy() < allowed()) batcher.flush();
       pump();
       deliver();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      subtitles?.dispose();
       for (const controller of running.keys()) controller.abort();
       running.clear();
       started.clear();

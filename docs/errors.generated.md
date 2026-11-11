@@ -33,3 +33,7 @@ Internal to public projection:
 - `queue_full` → `unavailable`
 - `host_permission_denied` → `permission_denied`
 - `sender_forbidden` → `sender_forbidden`
+- `model_refused` → `unavailable`
+- `audio_unsupported` → `unavailable`
+- `capture_failed` → `unavailable`
+- `capture_not_invoked` → `permission_denied`
