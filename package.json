@@ -40,7 +40,8 @@
     "o11y:mcp": "node tools/o11y/mcp.ts",
     "o11y:verify": "node tools/o11y/verify.ts",
     "o11y:investigate": "node tools/o11y/investigate.ts",
-    "dev:web": "node tools/dev-environment/dev.ts web"
+    "dev:web": "node tools/dev-environment/dev.ts web",
+    "dev:obs-comment-relay": "node tools/dev-environment/dev.ts obs-comment-relay"
   },
   "devDependencies": {
     "@types/node": "catalog:",

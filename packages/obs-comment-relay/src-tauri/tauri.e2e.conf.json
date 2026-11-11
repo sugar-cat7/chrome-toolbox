@@ -1,0 +1,21 @@
+{
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "capabilities": [
+        "default",
+        {
+          "identifier": "native-e2e",
+          "windows": ["main"],
+          "permissions": [
+            "wdio:allow-execute",
+            "wdio:allow-log-frontend",
+            "wdio:allow-get-window-states",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  }
+}

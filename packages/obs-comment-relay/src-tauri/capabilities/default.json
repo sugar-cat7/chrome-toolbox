@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Only the local notes commands; no arbitrary frontend file access",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-list-notes",
+    "allow-add-note",
+    "allow-delete-note",
+    "allow-export-notes"
+  ]
+}

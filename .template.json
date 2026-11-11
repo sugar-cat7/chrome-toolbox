@@ -13,7 +13,8 @@
     "contracts",
     "observability",
     "ui",
-    "web"
+    "web",
+    "obs-comment-relay"
   ],
   "managed": {
     ".agents/skills/application/SKILL.md": "9c0c8ee037ab0e2e89dfb5d037f1c77e755f40129a21e88fffac8738a3a10d67",
@@ -238,7 +239,7 @@
     "pnpm-workspace.yaml": "95156607b2384b3729156cc7a93315849f4101f5df3d7007de098b60e1852fb1",
     "tsconfig.json": "c9928afc714f647544e5d02b88c3222b370ea7badf6cca6e2a72ce69fb96f634",
     "vite.config.ts": "bb8a44de3c66b90d7554748e4b225ac3c97a6b6ffda6646fd181147585b194b8",
-    "package.json": "e6ccc78224049e198c2c5a7adc5c4e323679e918d8a3cc2d260231ef304fe95e",
+    "package.json": "556b7b9363c7edd3eceb3b83a685b05cfa4b81734b69c5fa03341373bf52ecc6",
     "packages/contracts/src/errors.generated.ts": "3c7556c441f9ec81de0688d175945a566c9b1eaac3b5bbb4b84574d4fd5c8d13",
     "packages/contracts/package.json": "7b3ad10ca273c6f295454768379d0c86928142bd754137c138ad1935eceb97f1",
     "packages/contracts/src/index.test.ts": "ea1d633b7959a250aab8711823c17f982bda08d9f3c74521207e0c275351de04",
@@ -282,13 +283,35 @@
     "packages/web/vite.config.ts": "b3a201ee6cdd9853ff0ed59685da94cdaf968c957f9ec46dd5b9f876b61f2d14",
     "packages/web/vitest.config.ts": "e3e9913f6a5b4b59f8e42c915d3d60650a0606fd241e8d1b69788f3b69f2771f",
     "packages/web/vitest.runtime.config.ts": "45b1cd6f72913b47e3baa5c08e1c5cf55e7c221963f07386964e843a9fe2217b",
-    "packages/web/src/notes.ts": "4901ca32ec3f2ff2fd95e7e7146f4bef7fa308ef91918a6ddcc62c6450ac5a93"
+    "packages/web/src/notes.ts": "4901ca32ec3f2ff2fd95e7e7146f4bef7fa308ef91918a6ddcc62c6450ac5a93",
+    "packages/obs-comment-relay/src-tauri/src/errors_generated.rs": "f222e9274c4e796be08740eaa75a7dee23137d1af80363f4e69ad5fca89978c2",
+    "packages/obs-comment-relay/icon.svg": "e9c1521620133cf91e158c1cb48b15d99eb936826d529f153a3683a258b88087",
+    "packages/obs-comment-relay/index.html": "1f9ba339f1a3955f93adbaf52d4e5963aa9582ccd75e73eca1341fc36d2fa008",
+    "packages/obs-comment-relay/package.json": "886e3874a81bac65f4a2b70c4457ed2a76b4f59777ce27d5c4de077afb788ddc",
+    "packages/obs-comment-relay/src-tauri/Cargo.lock": "7f3b9da0dab40e4a091c6f2031aff28180b32ceaa910b465ac97c1c6c764b08a",
+    "packages/obs-comment-relay/src-tauri/Cargo.toml": "0e522966cb0fe6786966ebe435f66609c8ddee93d60c56bff7399c1a376693a4",
+    "packages/obs-comment-relay/src-tauri/build.rs": "a02ce362bd009e1cf235db6e38f91e5880350c2d69b5e19034d23bbb757ef752",
+    "packages/obs-comment-relay/src-tauri/capabilities/default.json": "81cfb374757d44648844b919daf6e078894879a8312c6c1819b68c019c28a2f4",
+    "packages/obs-comment-relay/src-tauri/rust-toolchain.toml": "2ad6f15416572b4836585087f1d4abc53b8fa2dbd616f8dacfaa587ed6714228",
+    "packages/obs-comment-relay/src-tauri/src/main.rs": "0cce53b29a620e75afb97de828737a8d7ad83a541e9e1f95c6d0dc3985f00bd4",
+    "packages/obs-comment-relay/src-tauri/src/telemetry.rs": "f25c3176c2534a5621527923b94c4a5e005e7a47dfc834c4d00db05f9c73b8e2",
+    "packages/obs-comment-relay/src-tauri/tauri.conf.json": "099a5410ef6008354e0d0247770e8251a5a51213de0dea205865e7d469872b3c",
+    "packages/obs-comment-relay/src-tauri/tauri.e2e.conf.json": "515be65d1abf29fc6ef3cdedfed7cf9ba1292e68dce3a35681c4bff9edc71c90",
+    "packages/obs-comment-relay/src/main.tsx": "89590985a3ac9060c6ba2faa0ccd8ad623d7b72bd9eb38cdcc28dc071143dbcd",
+    "packages/obs-comment-relay/src/native.ts": "790444906117e9bd45d983635c2266350392f43eccc78fd6cf776ea6bf94a08e",
+    "packages/obs-comment-relay/src/styles.css": "3fb64491431647ee2813f5660f4a2646be507eff47ae3c355618f586e7cc9bb1",
+    "packages/obs-comment-relay/test/native.e2e.ts": "63e9d9297c69019f5edb58aa74129e89f93fca7d9ee88b3e93acf8182ef301b6",
+    "packages/obs-comment-relay/test/unit.test.ts": "421c0494c26ff7004f4425ef7de6464c319f76f8cb2b3291c5172ee117d60c91",
+    "packages/obs-comment-relay/tsconfig.json": "d44de4b68436aa0d92f2f9a307933e8d6ddf86592ff8407392c155bf510d9824",
+    "packages/obs-comment-relay/vite.config.ts": "f8280830e1a7f63e5496bc42a328652f35992ec696c3d2f7f35db67a6853f726",
+    "packages/obs-comment-relay/vitest.config.ts": "e3e9913f6a5b4b59f8e42c915d3d60650a0606fd241e8d1b69788f3b69f2771f",
+    "packages/obs-comment-relay/wdio.conf.ts": "ef43b6024700d8658e31ef6ecd726d304fdeae70a6b5fa6bcfaf9bd399a9e61e"
   },
   "origin": {
     "sha": "fe335b38a73dffcaacb79c081260f92e0526916a",
     "dirty": true,
     "contentId": "a8f1f2c95dd29344d9547e817c24bce04e96c2b7bf0d3c7f4f1cceb89bbf4529"
   },
-  "lockId": "c77c029bd241e80ffc6c6b25dd42c8b184211b86f8ab83a24457894a355afb71",
+  "lockId": "bd817cb1a161eca7113ad036d2b82ff3c692e540d60d61875564c10498e6306e",
   "formatKey": "aaa7cd5cea88722ed4b52cf8924bb22599334118f5a0e9a0081cbfe06a17f63e"
 }
