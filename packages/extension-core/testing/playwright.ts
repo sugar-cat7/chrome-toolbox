@@ -26,12 +26,14 @@ export { extensionTarget, type TargetEntry } from './targets.ts';
 export {
   chatCompletion,
   defaultResponder,
+  pageBatchReply,
   summaryReply,
   withPlamo,
   withoutAudio,
   withSlots,
   STUB_ABUSIVE,
   STUB_GENRE,
+  STUB_PAGE_PREFIX,
   STUB_PLAMO_PREFIX,
   STUB_QUESTION,
   STUB_TOPIC,
@@ -315,24 +317,6 @@ export async function usedHeap(page: Page): Promise<number> {
 }
 
 /**
- * The page's heap after a forced GC (a heap snapshot takes one first), in parts: `data`, the
- * objects a leak grows, apart from the compiled `code` V8 adds while functions grow hot (see
- * `HeapParts`). A bounded-growth assertion over a long run compares `data`: `usedHeap` counts
- * that code too.
- */
-export async function heapSnapshotParts(page: Page): Promise<HeapParts> {
-  const session = await page.context().newCDPSession(page);
-  const chunks: string[] = [];
-  session.on('HeapProfiler.addHeapSnapshotChunk', ({ chunk }) => {
-    chunks.push(chunk);
-  });
-  await session.send('HeapProfiler.enable');
-  await session.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
-  await session.detach();
-  return heapParts(JSON.parse(chunks.join('')));
-}
-
-/**
  * Presses the extension's toolbar button on the tab that shows `page`, as the viewer would:
  * Chrome grants the extension `activeTab` for that tab and opens its popup. Uses CDP
  * `Extensions.triggerAction` on the page's tab target (a page target is refused); it works over
@@ -368,6 +352,24 @@ export async function triggerAction(context: BrowserContext, page: Page): Promis
   } finally {
     await session.detach();
   }
+}
+
+/**
+ * The page's heap after a forced GC (a heap snapshot takes one first), in parts: `data`, the
+ * objects a leak grows, apart from the compiled `code` V8 adds while functions grow hot (see
+ * `HeapParts`). A bounded-growth assertion over a long run compares `data`: `usedHeap` counts
+ * that code too.
+ */
+export async function heapSnapshotParts(page: Page): Promise<HeapParts> {
+  const session = await page.context().newCDPSession(page);
+  const chunks: string[] = [];
+  session.on('HeapProfiler.addHeapSnapshotChunk', ({ chunk }) => {
+    chunks.push(chunk);
+  });
+  await session.send('HeapProfiler.enable');
+  await session.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+  await session.detach();
+  return heapParts(JSON.parse(chunks.join('')));
 }
 
 /** An extension document Playwright does not attach to, measured as `usedHeap` and the rest do. */

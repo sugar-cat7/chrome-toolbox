@@ -14,6 +14,7 @@ Run a bench from anywhere in the repository with `pnpm --filter @chrome-toolbox/
 | `bench:clef`       | Measures Clef's abuse judgment accuracy; its last line is `CLEF_MODE=<mode>`                                   |
 | `bench:slots`      | Measures subtitle latency under comment load, with and without slot pinning; `--audio` adds speech recognition |
 | `bench:genre`      | Measures the comment assistant's genre categories against the self-written sets (R62)                          |
+| `bench:page`       | Compares Gemma batches with PLaMo per unit on page text: latency, failures, markers kept, first screen         |
 
 The options, data formats and report columns are in [adoption](../../docs/adoption.md), and the server setup in [llama-server](../../docs/llama-server.md).
 
@@ -21,6 +22,6 @@ Relative paths (`--set`, `--manifest`, `--out` and their defaults) start at the 
 
 ## Layout and checks
 
-The package runs on Node, not in a browser: its modules live at the package root, outside `src/`, so the portable-library boundary check does not apply to them. The benches are `translate.ts`, `asr.ts`, `make-audio.ts`, `clef.ts`, `slots.ts` and `genre.ts`; `datasets.ts`, `metrics.ts`, `results.ts`, `http.ts`, `generation.ts` and `paths.ts` are shared. Tests sit next to the modules (`*.test.ts`).
+The package runs on Node, not in a browser: its modules live at the package root, outside `src/`, so the portable-library boundary check does not apply to them. The benches are `translate.ts`, `asr.ts`, `make-audio.ts`, `clef.ts`, `slots.ts`, `genre.ts` and `page.ts`; `datasets.ts`, `metrics.ts`, `results.ts`, `http.ts`, `generation.ts` and `paths.ts` are shared. Tests sit next to the modules (`*.test.ts`).
 
 `test` runs the table-driven Vitest tests against fake servers; no model is needed. Node runs the TypeScript directly, so there is nothing to bundle: `build` type-checks the package (`tsc -p .`).

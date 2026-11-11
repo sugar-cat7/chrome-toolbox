@@ -6,8 +6,10 @@ import {
   createLlamaClient,
   createQueue,
   genrePrompt,
+  pageBatchPrompt,
   parseCommentBatch,
   parseGenre,
+  parsePageBatch,
   parseSummary,
   PLAMO_STOP,
   PLAMO_TRANSLATE_MODEL,
@@ -15,6 +17,7 @@ import {
   subtitlePrompt,
   summaryPrompt,
   type LlamaClient,
+  type PageToken,
   type SummaryInput,
 } from '../src/index.ts';
 import {
@@ -24,6 +27,7 @@ import {
   STUB_ABUSIVE,
   STUB_BENIGN,
   STUB_GENRE,
+  STUB_PAGE_PREFIX,
   STUB_PLAMO_PREFIX,
   STUB_TRANSCRIPT,
   withoutAudio,
@@ -182,6 +186,56 @@ describe('llama.cpp stub', () => {
     expect(first.ok && first.value.text).toBe(`en\t${STUB_TRANSCRIPT} 1.\n`);
     expect(second.ok && second.value.text).toBe(`en\t${STUB_TRANSCRIPT} 2.\n`);
     expect(STUB_TRANSCRIPT).toBe('Stub speech');
+  });
+
+  test('answers a page batch keeping every marker', async () => {
+    const units: PageToken[][] = [
+      [
+        { t: 'text', text: 'Click' },
+        { t: 'open', n: 1 },
+        { t: 'text', text: 'here' },
+        { t: 'close', n: 1 },
+        { t: 'space' },
+        { t: 'text', text: 'to' },
+        { t: 'keep', n: 1, text: 'run()' },
+        { t: 'text', text: '.' },
+      ],
+      [{ t: 'text', text: 'Okay' }],
+    ];
+    const prompt = pageBatchPrompt({
+      page: { title: 'A made-up guide', site: 'example.test' },
+      units,
+    });
+    const reply = await client.chat(prompt);
+    expect(reply.ok && reply.value.text).toBe(
+      '1\t訳:Click<1>訳:here</1>訳: to<k1/>訳:.\n2\t訳:Okay\n',
+    );
+    expect(reply.ok && parsePageBatch(reply.value.text, units, { cut: false })).toEqual([
+      [
+        `${STUB_PAGE_PREFIX}Click`,
+        `${STUB_PAGE_PREFIX}here`,
+        `${STUB_PAGE_PREFIX} to`,
+        `${STUB_PAGE_PREFIX}.`,
+      ],
+      [`${STUB_PAGE_PREFIX}Okay`],
+    ]);
+  });
+
+  test('drops a whitespace-only part between markers from a page batch reply', async () => {
+    const units: PageToken[][] = [
+      [
+        { t: 'text', text: 'A' },
+        { t: 'open', n: 1 },
+        { t: 'text', text: 'B' },
+        { t: 'close', n: 1 },
+        { t: 'space' },
+        { t: 'keep', n: 1, text: 'x' },
+      ],
+    ];
+    const reply = await client.chat(
+      pageBatchPrompt({ page: { title: 'T', site: 's.test' }, units }),
+    );
+    expect(reply.ok && reply.value.text).toBe('1\t訳:A<1>訳:B</1><k1/>\n');
   });
 
   test('answers a subtitle translation chat, and the same system turn with audio as speech', async () => {

@@ -28,7 +28,9 @@ jobs:
       CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       CI_FULL: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The affected-checks gate runs every touched package's unit and browser suites
+    # serially; three extension browser suites alone take ~15 min on a shared runner.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

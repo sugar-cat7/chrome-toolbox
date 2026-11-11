@@ -10,6 +10,7 @@ it('lists the packages that mark a browser soak in their manifest', () => {
     .map((pkg) => pkg.name);
   expect(marked).toEqual([
     '@chrome-toolbox/comment-assistant',
+    '@chrome-toolbox/page-translator',
     '@chrome-toolbox/subtitle-translator',
   ]);
 });

@@ -14,7 +14,8 @@
     "bench:make-audio": "node make-audio.ts",
     "bench:clef": "node clef.ts",
     "bench:slots": "node slots.ts",
-    "bench:genre": "node genre.ts"
+    "bench:genre": "node genre.ts",
+    "bench:page": "node page.ts"
   },
   "dependencies": {
     "@chrome-toolbox/extension-core": "workspace:*"

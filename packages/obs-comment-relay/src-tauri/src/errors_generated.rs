@@ -33,6 +33,8 @@ pub enum ErrorCode {
     AudioUnsupported,
     CaptureFailed,
     CaptureNotInvoked,
+    PageRestricted,
+    PageExcluded,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -247,6 +249,20 @@ impl AppError {
                 "never",
                 "Grant the host permission when prompted, or choose a permitted host.",
             ),
+            ErrorCode::PageRestricted => (
+                "permission_denied",
+                "Access to the requested host was not granted.",
+                "forbidden",
+                "never",
+                "Grant the host permission when prompted, or choose a permitted host.",
+            ),
+            ErrorCode::PageExcluded => (
+                "permission_denied",
+                "Access to the requested host was not granted.",
+                "forbidden",
+                "never",
+                "Grant the host permission when prompted, or choose a permitted host.",
+            ),
         };
         PublicError {
             code,
@@ -286,6 +302,8 @@ impl AppError {
             ErrorCode::AudioUnsupported => "audio_unsupported",
             ErrorCode::CaptureFailed => "capture_failed",
             ErrorCode::CaptureNotInvoked => "capture_not_invoked",
+            ErrorCode::PageRestricted => "page_restricted",
+            ErrorCode::PageExcluded => "page_excluded",
         }
     }
 }
