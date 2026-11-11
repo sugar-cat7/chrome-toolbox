@@ -1,19 +1,37 @@
 @import 'tailwindcss';
-@source '../../ui/src';
-
-:root {
-  font-family: Arial, sans-serif;
-  color: #0f172a;
-  background: #f8fafc;
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f6f7f9;
+  color: #18212b;
+}
+main {
+  max-width: 48rem;
+  padding: 2rem;
+}
+h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+p {
+  margin: 1rem 0;
 }
 button {
-  cursor: pointer;
+  border: 1px solid #64748b;
+  border-radius: 0.4rem;
+  padding: 0.6rem 1rem;
+  margin-right: 0.6rem;
+  background: white;
 }
-button:disabled {
-  cursor: wait;
-}
-button:focus-visible,
-textarea:focus-visible {
+button:focus-visible {
   outline: 3px solid #2563eb;
   outline-offset: 3px;
+}
+button:disabled {
+  opacity: 0.5;
+}
+[role='alert'] {
+  padding: 1rem;
+  border: 1px solid #b91c1c;
 }

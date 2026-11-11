@@ -6,6 +6,12 @@ use serde::Serialize;
     reason = "The generated catalog contains codes for every runtime, including optional adapters"
 )]
 pub enum ErrorCode {
+    RelayInputInvalid,
+    RelaySenderForbidden,
+    RelaySettingsCorrupt,
+    RelaySettingsSaveFailed,
+    RelayBindFailed,
+    RelayFeatureUnavailable,
     InputInvalid,
     RequestJsonInvalid,
     WriteForbidden,
@@ -52,6 +58,48 @@ impl AppError {
     }
     pub fn public(&self) -> PublicError {
         let (code, message, failure_class, retry, remediation) = match self.code {
+            ErrorCode::RelayInputInvalid => (
+                "relay_invalid_input",
+                "The relay request or settings are invalid.",
+                "validation",
+                "never",
+                "Check the relay URL, settings and request limits.",
+            ),
+            ErrorCode::RelaySenderForbidden => (
+                "relay_sender_forbidden",
+                "This page or session cannot send this relay request.",
+                "forbidden",
+                "never",
+                "Use the local control window or restart the selected chat source.",
+            ),
+            ErrorCode::RelaySettingsCorrupt => (
+                "relay_settings_corrupt",
+                "Saved relay settings could not be validated.",
+                "validation",
+                "never",
+                "Explicitly restore initial settings from the control window. The original file is preserved.",
+            ),
+            ErrorCode::RelaySettingsSaveFailed => (
+                "relay_settings_save_failed",
+                "Relay settings could not be saved.",
+                "transient",
+                "owner_only",
+                "Check local storage permissions and capacity before saving again.",
+            ),
+            ErrorCode::RelayBindFailed => (
+                "relay_port_unavailable",
+                "The configured overlay port could not be opened.",
+                "transient",
+                "owner_only",
+                "Choose another overlay port or release the configured port, then save settings.",
+            ),
+            ErrorCode::RelayFeatureUnavailable => (
+                "relay_feature_unavailable",
+                "This relay feature is not available in this phase.",
+                "transient",
+                "never",
+                "Use an existing loopback llama server. Model installation and managed startup require a later phase.",
+            ),
             ErrorCode::InputInvalid => (
                 "invalid_input",
                 "Text must contain 1–1000 characters and no extra fields.",
@@ -211,6 +259,12 @@ impl AppError {
     }
     pub fn internal_code(&self) -> &'static str {
         match self.code {
+            ErrorCode::RelayInputInvalid => "relay_input_invalid",
+            ErrorCode::RelaySenderForbidden => "relay_sender_forbidden",
+            ErrorCode::RelaySettingsCorrupt => "relay_settings_corrupt",
+            ErrorCode::RelaySettingsSaveFailed => "relay_settings_save_failed",
+            ErrorCode::RelayBindFailed => "relay_bind_failed",
+            ErrorCode::RelayFeatureUnavailable => "relay_feature_unavailable",
             ErrorCode::InputInvalid => "input_invalid",
             ErrorCode::RequestJsonInvalid => "request_json_invalid",
             ErrorCode::WriteForbidden => "write_forbidden",

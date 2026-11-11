@@ -1,5 +1,49 @@
 // Generated from tools/errors/catalog.json by errors:generate. Do not edit.
 export const PUBLIC_ERRORS = {
+  relay_invalid_input: {
+    status: 400,
+    class: 'validation',
+    retry: 'never',
+    message: 'The relay request or settings are invalid.',
+    remediation: 'Check the relay URL, settings and request limits.',
+  },
+  relay_sender_forbidden: {
+    status: 403,
+    class: 'forbidden',
+    retry: 'never',
+    message: 'This page or session cannot send this relay request.',
+    remediation: 'Use the local control window or restart the selected chat source.',
+  },
+  relay_settings_corrupt: {
+    status: 400,
+    class: 'validation',
+    retry: 'never',
+    message: 'Saved relay settings could not be validated.',
+    remediation:
+      'Explicitly restore initial settings from the control window. The original file is preserved.',
+  },
+  relay_settings_save_failed: {
+    status: 503,
+    class: 'transient',
+    retry: 'owner_only',
+    message: 'Relay settings could not be saved.',
+    remediation: 'Check local storage permissions and capacity before saving again.',
+  },
+  relay_port_unavailable: {
+    status: 503,
+    class: 'transient',
+    retry: 'owner_only',
+    message: 'The configured overlay port could not be opened.',
+    remediation: 'Choose another overlay port or release the configured port, then save settings.',
+  },
+  relay_feature_unavailable: {
+    status: 503,
+    class: 'transient',
+    retry: 'never',
+    message: 'This relay feature is not available in this phase.',
+    remediation:
+      'Use an existing loopback llama server. Model installation and managed startup require a later phase.',
+  },
   invalid_input: {
     status: 400,
     class: 'validation',
@@ -65,6 +109,12 @@ export const PUBLIC_ERRORS = {
   },
 } as const;
 export const INTERNAL_ERRORS = {
+  relay_input_invalid: 'relay_invalid_input',
+  relay_sender_forbidden: 'relay_sender_forbidden',
+  relay_settings_corrupt: 'relay_settings_corrupt',
+  relay_settings_save_failed: 'relay_settings_save_failed',
+  relay_bind_failed: 'relay_port_unavailable',
+  relay_feature_unavailable: 'relay_feature_unavailable',
   input_invalid: 'invalid_input',
   request_json_invalid: 'invalid_json',
   write_forbidden: 'writes_disabled',

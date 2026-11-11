@@ -1,61 +1,69 @@
-import { createTelemetry, observeAdapter, type TraceCarrier } from '@chrome-toolbox/observability';
 import { invoke } from '@tauri-apps/api/core';
+import { z } from 'zod/mini';
 import {
-  noteSchema,
-  notesSchema,
   capturePublic,
   decode,
   Err,
-  Ok,
   publicFailure,
-  type Result,
+  publicErrorSchema,
+  relayCountersSchema,
   type PublicError,
+  type Result,
 } from '@chrome-toolbox/contracts';
-import type { NotesAdapter } from '@chrome-toolbox/ui';
 
-async function command(
-  name: string,
-  carrier: TraceCarrier,
-  args?: Record<string, unknown>,
-): Promise<Result<unknown, PublicError>> {
-  return capturePublic(() => invoke<unknown>(name, { ...args, telemetry: carrier }), 'ipc_failed');
-}
-
-const telemetry = createTelemetry({
-  service: 'chrome-toolbox-desktop-renderer',
-  instance: 'chrome-toolbox',
-  runId: import.meta.env.VITE_OTEL_RUN_ID ?? 'local',
-  version: import.meta.env.VITE_OTEL_VERSION ?? 'development',
-  ...(import.meta.env.VITE_OTEL_ENDPOINT ? { endpoint: import.meta.env.VITE_OTEL_ENDPOINT } : {}),
+export const relayStatusSchema = z.strictObject({
+  v: z.literal(1),
+  sessionId: z.uuid(),
+  source: z.enum(['stopped', 'connecting', 'reading', 'attention', 'failed']),
+  inference: z.enum(['idle', 'starting', 'ready', 'degraded']),
+  counters: relayCountersSchema,
+  error: z.optional(publicErrorSchema),
 });
-
-export const nativeNotes: NotesAdapter = {
-  async list() {
-    return observeAdapter(telemetry, 'notes.list', async (carrier) => {
-      const received = await command('list_notes', carrier);
-      if (!received.ok) return received;
-      const parsed = decode(notesSchema, received.value);
-      return parsed.ok ? parsed : Err(publicFailure(parsed.error));
-    });
-  },
-  async add(input) {
-    return observeAdapter(telemetry, 'notes.add', async (carrier) => {
-      const received = await command('add_note', carrier, { text: input.text });
-      if (!received.ok) return received;
-      const parsed = decode(noteSchema, received.value);
-      return parsed.ok ? parsed : Err(publicFailure(parsed.error));
-    });
-  },
-  async remove(id) {
-    return observeAdapter(telemetry, 'notes.remove', async (carrier) => {
-      const received = await command('delete_note', carrier, { id });
-      return received.ok ? Ok(undefined) : received;
-    });
-  },
-  async export() {
-    return observeAdapter(telemetry, 'notes.export', async (carrier) => {
-      const received = await command('export_notes', carrier);
-      return received.ok ? Ok(undefined) : received;
-    });
-  },
+const httpReplySchema = z.strictObject({
+  status: z.int().check(z.gte(100), z.lte(599)),
+  headers: z.record(z.string(), z.string()),
+  body: z.string(),
+});
+const connectionSchema = z.strictObject({ health: httpReplySchema, models: httpReplySchema });
+const fileSchema = z.strictObject({
+  path: z.string(),
+  sha256: z.string(),
+  size: z.int(),
+  modifiedAt: z.int(),
+});
+const settingsSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  mode: z.enum(['managed', 'external']),
+  baseUrl: z.string(),
+  models: z.strictObject({ clef: z.nullable(fileSchema), plamo: z.nullable(fileSchema) }),
+  filterStrength: z.enum(['mild', 'normal', 'strict']),
+  translate: z.boolean(),
+  sourceLanguage: z.string(),
+  targetLanguage: z.literal('ja'),
+  display: z.enum(['translated', 'original', 'both']),
+  maxItems: z.int().check(z.gte(1), z.lte(100)),
+  overlayPort: z.int().check(z.gte(1), z.lte(65535)),
+  overlayToken: z.uuid(),
+});
+export type RelayStatus = z.infer<typeof relayStatusSchema>;
+async function command<T>(
+  name: string,
+  schema: z.ZodMiniType<T>,
+  args?: Record<string, unknown>,
+): Promise<Result<T, PublicError>> {
+  const result = await capturePublic(
+    () => (args ? invoke<unknown>(name, args) : invoke<unknown>(name)),
+    'ipc_failed',
+  );
+  if (!result.ok) return result;
+  const parsed = decode(schema, result.value);
+  return parsed.ok ? parsed : Err(publicFailure(parsed.error));
+}
+/** No automatic health polling or telemetry; every inference call is explicitly requested. */
+export const nativeRelay = {
+  status: (): Promise<Result<RelayStatus, PublicError>> => command('get_status', relayStatusSchema),
+  check: (): Promise<Result<z.infer<typeof connectionSchema>, PublicError>> =>
+    command('check_connection', connectionSchema),
+  restore: (): Promise<Result<z.infer<typeof settingsSchema>, PublicError>> =>
+    command('save_settings', settingsSchema, { input: { resetCorrupt: true } }),
 };

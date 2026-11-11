@@ -19,11 +19,10 @@
   },
   "dependencies": {
     "@chrome-toolbox/contracts": "workspace:*",
-    "@chrome-toolbox/observability": "workspace:*",
-    "@chrome-toolbox/ui": "workspace:*",
     "@tauri-apps/api": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",

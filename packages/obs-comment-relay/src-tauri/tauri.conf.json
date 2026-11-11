@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "chrome-toolbox",
+  "productName": "OBS コメント中継",
   "version": "0.1.0",
   "identifier": "com.example.chrometoolbox.obscommentrelay",
   "build": {
@@ -11,12 +11,23 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "windows": [{ "label": "main", "title": "chrome-toolbox", "width": 900, "height": 720 }],
+    "windows": [
+      {
+        "label": "main",
+        "title": "OBS コメント中継",
+        "width": 900,
+        "height": 720,
+        "backgroundThrottling": "disabled"
+      }
+    ],
     "security": {
-      "capabilities": ["default"],
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "capabilities": ["local-control", "remote-chat"],
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'; base-uri 'self'",
       "devCsp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*"
     }
   },
-  "bundle": { "active": false, "targets": "all" }
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
 }

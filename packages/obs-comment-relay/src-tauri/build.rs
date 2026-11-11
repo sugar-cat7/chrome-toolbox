@@ -1,14 +1,23 @@
 fn main() {
     let manifest = tauri_build::AppManifest::new().commands(&[
-        "list_notes",
-        "add_note",
-        "delete_note",
-        "export_notes",
+        "chat_ingest",
+        "attach_engine",
+        "ack_chat_batch",
+        "llama_request",
+        "cancel_llama",
+        "publish_comments",
+        "get_settings",
+        "save_settings",
+        "start_source",
+        "stop_source",
+        "get_status",
+        "check_connection",
+        "select_model_file",
     ]);
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).unwrap_or_else(
-        |error| {
-            eprintln!("Tauri build configuration failed: {error}");
-            std::process::exit(1);
-        },
-    );
+    if let Err(error) =
+        tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
+    {
+        eprintln!("Tauri build configuration failed: {error}");
+        std::process::exit(1);
+    }
 }
