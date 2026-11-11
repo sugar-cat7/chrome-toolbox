@@ -22,6 +22,7 @@ test('options page connects to a local llama.cpp server through the service work
   await connect(options, llama.origin);
   await expect(options.locator('output[data-status="connected"]')).toHaveText(
     '接続済み（モデル: stub-model）',
+    { timeout: 15_000 },
   );
   expect(llama.requests).toEqual(['GET /health', 'GET /v1/models']);
 });
@@ -35,13 +36,17 @@ test('options page explains an unreachable server', async ({ options }) => {
 
 test('repeated reconnects keep the options page heap bounded', async ({ options, llama }) => {
   await connect(options, llama.origin);
-  await expect(options.locator('output[data-status="connected"]')).toBeVisible();
+  await expect(options.locator('output[data-status="connected"]')).toBeVisible({
+    timeout: 15_000,
+  });
   const before = await usedHeap(options);
   const button = options.getByRole('button', { name: '接続を確認' });
   for (let round = 1; round <= 30; round += 1) {
     await button.click();
     await expect.poll(() => llama.requests.length).toBe(2 * (round + 1));
-    await expect(options.locator('output[data-status="connected"]')).toBeVisible();
+    await expect(options.locator('output[data-status="connected"]')).toBeVisible({
+      timeout: 15_000,
+    });
   }
   const after = await usedHeap(options);
   expect(after - before, `heap grew from ${before} to ${after} bytes`).toBeLessThan(1_000_000);

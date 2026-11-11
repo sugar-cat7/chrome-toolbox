@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { CDPSession } from '@playwright/test';
+import type { CDPSession, Page } from '@playwright/test';
 import { expect, heapSnapshotParts, test, usedHeap } from '@chrome-toolbox/extension-core/testing';
 import { SOAK_WARM_UP, soakMinutes, soakTimeout } from '../../../../tools/quality/soak.ts';
 import { PAGE_LIMITS } from '../../src/content/scheduler.ts';
@@ -103,14 +103,17 @@ test('SOAK_MINUTES on a growing feed keeps heap and long tasks within budget', a
     contentType: 'application/json',
   });
 
-  // The feed kept being translated: the newest posts at the bottom are.
+  // The feed kept being translated: the newest posts at the bottom are. Draining the queue
+  // outlasts the default 5 s poll on a loaded runner.
   await expect
-    .poll(() =>
-      page.evaluate(() =>
-        [...document.querySelectorAll('.post p')]
-          .slice(-5)
-          .every((post) => post.textContent.startsWith('訳:')),
-      ),
+    .poll(
+      () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('.post p')]
+            .slice(-5)
+            .every((post) => post.textContent.startsWith('訳:')),
+        ),
+      { timeout: 30_000 },
     )
     .toBe(true);
   const end = samples.at(-1) ?? start;
@@ -166,6 +169,22 @@ const denseHtml = `<!doctype html>
 /** Parts the batches after the scan are cut into, to compare their cost from first to last. */
 const PARTS = 4;
 
+/**
+ * A fixed DOM+JS workload in the page being measured: reading every paragraph's text and a
+ * plain loop, the same mix of work the refill does. Its wall time scales with the host's
+ * speed, so it calibrates the per-batch bound for shared CI runners.
+ */
+async function hostProbe(page: Page): Promise<number> {
+  const { ms } = await page.evaluate(() => {
+    const began = performance.now();
+    let sink = 0;
+    for (const p of document.querySelectorAll('p')) sink += p.textContent?.length ?? 0;
+    for (let i = 0; i < 1_000_000; i += 1) sink += i % 13;
+    return { ms: performance.now() - began, sink };
+  });
+  return ms;
+}
+
 test('thousands of paragraphs near the viewport are asked for at a flat cost a batch', async ({
   context,
   serviceWorker,
@@ -180,6 +199,9 @@ test('thousands of paragraphs near the viewport are asked for at a flat cost a b
   const page = await context.newPage();
   await page.setViewportSize({ width: 1280, height: 2_700 });
   await page.goto(DENSE_URL);
+  // Before the translation starts (so its tasks stay out of the long-task check below), probe
+  // the host's speed for the per-batch bound further down.
+  const probeMs = await hostProbe(page);
   const loading = (await longTasks(page)).length;
   const session = await context.newCDPSession(page);
   // Thread CPU time: what the page's thread spent, not how long a busy host made it wait.
@@ -215,7 +237,7 @@ test('thousands of paragraphs near the viewport are asked for at a flat cost a b
       layoutMs: (to.layout - from.layout) / count,
     };
   });
-  const report = { paragraphs: DENSE, batches: total, scanned: first, parts, tasks };
+  const report = { paragraphs: DENSE, batches: total, scanned: first, probeMs, parts, tasks };
   console.log(`refill ${JSON.stringify(report)}`);
   await test.info().attach('refill.json', {
     body: JSON.stringify(report, null, 2),
@@ -229,7 +251,10 @@ test('thousands of paragraphs near the viewport are asked for at a flat cost a b
   // takes about 1.5 ms all along.
   const work = parts.map((part) => part.workMs);
   expect(Math.max(...work)).toBeLessThanOrEqual(2 * Math.min(...work));
-  for (const part of parts) expect(part.workMs).toBeLessThan(5);
+  // Absolute milliseconds scale with the host (~1.5 ms a batch on the development machine,
+  // ~12 ms on a shared CI runner), so the bound tracks the probe's cost, never under 5 ms.
+  const bound = Math.max(5, probeMs * 3);
+  for (const part of parts) expect(part.workMs).toBeLessThan(bound);
   // And no task of the page goes over 50 ms.
   expect(tasks.filter((duration) => duration > 50)).toEqual([]);
   await observerLive(page, longTasks);

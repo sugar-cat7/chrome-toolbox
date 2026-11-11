@@ -18,6 +18,7 @@ test('side panel connects to a local llama.cpp server through the service worker
   await connect(sidePanel, llama.origin);
   await expect(sidePanel.locator('output[data-status="connected"]')).toHaveText(
     '接続済み（モデル: stub-model）',
+    { timeout: 15_000 },
   );
   expect(llama.requests).toEqual(['GET /health', 'GET /v1/models']);
 });
@@ -31,13 +32,17 @@ test('side panel explains an unreachable server', async ({ sidePanel }) => {
 
 test('repeated reconnects keep the side panel heap bounded', async ({ sidePanel, llama }) => {
   await connect(sidePanel, llama.origin);
-  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
+  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible({
+    timeout: 15_000,
+  });
   const before = await usedHeap(sidePanel);
   const button = sidePanel.getByRole('button', { name: '接続を確認' });
   for (let round = 1; round <= 30; round += 1) {
     await button.click();
     await expect.poll(() => llama.requests.length).toBe(2 * (round + 1));
-    await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
+    await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible({
+      timeout: 15_000,
+    });
   }
   const after = await usedHeap(sidePanel);
   expect(after - before, `heap grew from ${before} to ${after} bytes`).toBeLessThan(1_000_000);

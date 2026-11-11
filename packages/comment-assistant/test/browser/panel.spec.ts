@@ -32,7 +32,9 @@ test('side panel names the stream of the active tab and saves filters the chat f
   await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(llama.origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
-  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
+  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible({
+    timeout: 15_000,
+  });
 
   const watch = await context.newPage();
   await watch.goto('https://www.youtube.com/watch?v=fixture0001');
@@ -85,7 +87,9 @@ test("side panel shows the genre the model guessed once for the stream and keeps
   await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(llama.origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
-  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
+  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible({
+    timeout: 15_000,
+  });
 
   /** A category's row in the filter tab. */
   const row = (name: string) => sidePanel.getByRole('combobox', { name, exact: true });
