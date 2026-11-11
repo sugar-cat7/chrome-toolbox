@@ -31,7 +31,7 @@ const fileSchema = z.strictObject({
   size: z.int(),
   modifiedAt: z.int(),
 });
-const settingsSchema = z.strictObject({
+export const settingsSchema = z.strictObject({
   schemaVersion: z.literal(1),
   mode: z.enum(['managed', 'external']),
   baseUrl: z.string(),
@@ -46,6 +46,24 @@ const settingsSchema = z.strictObject({
   overlayToken: z.uuid(),
 });
 export type RelayStatus = z.infer<typeof relayStatusSchema>;
+export type Settings = z.infer<typeof settingsSchema>;
+export type SettingsUpdate = Readonly<{
+  mode: 'managed' | 'external';
+  baseUrl: string;
+  filterStrength: 'mild' | 'normal' | 'strict';
+  translate: boolean;
+  sourceLanguage: string;
+  targetLanguage: string;
+  display: 'translated' | 'original' | 'both';
+  maxItems: number;
+  overlayPort: number;
+}>;
+export const engineAttachmentSchema = z.strictObject({
+  status: relayStatusSchema,
+  generation: z.int(),
+  sourceSessionId: z.nullable(z.string()),
+});
+export type EngineAttachment = z.infer<typeof engineAttachmentSchema>;
 async function command<T>(
   name: string,
   schema: z.ZodMiniType<T>,
@@ -64,6 +82,13 @@ export const nativeRelay = {
   status: (): Promise<Result<RelayStatus, PublicError>> => command('get_status', relayStatusSchema),
   check: (): Promise<Result<z.infer<typeof connectionSchema>, PublicError>> =>
     command('check_connection', connectionSchema),
-  restore: (): Promise<Result<z.infer<typeof settingsSchema>, PublicError>> =>
+  restore: (): Promise<Result<Settings, PublicError>> =>
     command('save_settings', settingsSchema, { input: { resetCorrupt: true } }),
+  settings: (): Promise<Result<Settings, PublicError>> => command('get_settings', settingsSchema),
+  save: (update: SettingsUpdate): Promise<Result<Settings, PublicError>> =>
+    command('save_settings', settingsSchema, { input: { settings: update } }),
+  start: (url: string): Promise<Result<EngineAttachment, PublicError>> =>
+    command('start_source', engineAttachmentSchema, { input: { url } }),
+  stop: (): Promise<Result<RelayStatus, PublicError>> =>
+    command('stop_source', relayStatusSchema, { input: {} }),
 };

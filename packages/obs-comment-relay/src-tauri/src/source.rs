@@ -7,6 +7,9 @@ use tauri::{
     webview::NewWindowResponse,
 };
 use uuid::Uuid;
+
+/// Built by `pnpm build:reader` into `dist-reader/` and copied here by `build.rs`.
+const READER_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/reader.js"));
 #[derive(Clone, Debug)]
 pub struct SourceTarget {
     pub site: Site,
@@ -129,6 +132,11 @@ impl SourceSession {
         Ok(())
     }
 }
+/// The reader learns its session id from this prelude; the id is a UUID so quoting is safe.
+fn reader_script(session: &SourceSession) -> String {
+    let id = serde_json::to_string(&session.id).unwrap_or_else(|_| "\"\"".to_owned());
+    format!("window.__RELAY_SOURCE_SESSION__={id};\n{READER_JS}")
+}
 pub fn create(app: &tauri::AppHandle, session: &SourceSession) -> Result<(), AppError> {
     let allowed = session.target.url.clone();
     WebviewWindowBuilder::new(
@@ -143,7 +151,7 @@ pub fn create(app: &tauri::AppHandle, session: &SourceSession) -> Result<(), App
     .on_new_window(|_, _| NewWindowResponse::Deny)
     .on_download(|_, _| false)
     .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
-    // Reader IIFE injection is a later phase. No remote script gets local control state.
+    .initialization_script(&reader_script(session))
     .build()
     .map_err(|_| AppError::new(ErrorCode::StateUnavailable))?;
     Ok(())

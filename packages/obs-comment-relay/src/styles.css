@@ -35,3 +35,23 @@ button:disabled {
   padding: 1rem;
   border: 1px solid #b91c1c;
 }
+input[type='text'],
+input[type='number'],
+select {
+  padding: 0.45rem;
+  border: 1px solid #94a3b8;
+  border-radius: 0.3rem;
+  font: inherit;
+}
+.grid {
+  display: grid;
+  gap: 0.75rem 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  margin-bottom: 1rem;
+}
+.grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}

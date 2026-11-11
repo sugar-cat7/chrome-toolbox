@@ -7,18 +7,20 @@
   "exports": {},
   "scripts": {
     "dev": "tauri dev",
-    "dev:renderer": "vp dev --host 127.0.0.1 --strictPort",
-    "build:renderer": "vp build",
+    "dev:renderer": "pnpm build:reader && vp dev --host 127.0.0.1 --strictPort",
+    "build:renderer": "vp build && pnpm build:reader",
     "check": "vp check .",
     "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
     "test:rust": "node ../../tools/quality/native.ts rust",
     "test:native": "node ../../tools/quality/native.ts e2e",
     "test:release": "node ../../tools/quality/native.ts release",
     "build": "node ../../tools/quality/native.ts build",
-    "build:bundle": "tauri build"
+    "build:bundle": "tauri build",
+    "build:reader": "vp build --config vite.reader.config.ts"
   },
   "dependencies": {
     "@chrome-toolbox/contracts": "workspace:*",
+    "@chrome-toolbox/extension-core": "workspace:*",
     "@tauri-apps/api": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

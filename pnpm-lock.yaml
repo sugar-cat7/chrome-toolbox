@@ -466,6 +466,9 @@ importers:
       '@chrome-toolbox/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@chrome-toolbox/extension-core':
+        specifier: workspace:*
+        version: link:../extension-core
       '@tauri-apps/api':
         specifier: 'catalog:'
         version: 2.12.2
