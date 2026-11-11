@@ -104,18 +104,24 @@ test('SOAK_MINUTES on a growing feed keeps heap and long tasks within budget', a
   });
 
   // The feed kept being translated: the newest posts at the bottom are. Draining the queue
-  // outlasts the default 5 s poll on a loaded runner.
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() =>
-          [...document.querySelectorAll('.post p')]
-            .slice(-5)
-            .every((post) => post.textContent.startsWith('訳:')),
-        ),
-      { timeout: 30_000 },
-    )
-    .toBe(true);
+  // outlasts the default 5 s poll on a loaded runner; on timeout, report the tail's actual
+  // text and the scheduler's progress so the failure says what stalled.
+  const deadline = Date.now() + 30_000;
+  let tail: readonly string[] = [];
+  for (;;) {
+    tail = await page.evaluate(() =>
+      [...document.querySelectorAll('.post p')]
+        .slice(-5)
+        .map((post) => post.textContent?.slice(0, 80) ?? ''),
+    );
+    if (tail.every((text) => text.startsWith('訳:')) || Date.now() >= deadline) break;
+    await sleep(250);
+  }
+  const progress = await progressOf(serviceWorker, tabId);
+  expect(
+    tail.every((text) => text.startsWith('訳:')),
+    `tail posts: ${JSON.stringify(tail)}; progress: ${JSON.stringify(progress)}`,
+  ).toBe(true);
   const end = samples.at(-1) ?? start;
   expect(end.failed).toBe(0);
   expect(endParts.data, `heap data grew from ${startParts.data}`).toBeLessThanOrEqual(
