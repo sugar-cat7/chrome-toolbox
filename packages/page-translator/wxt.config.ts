@@ -25,10 +25,20 @@ export default defineConfig({
   manifest: {
     name: 'ページ翻訳',
     description: 'Webページをレイアウトを保ったままローカルLLMで翻訳します。',
-    permissions: ['storage', 'sidePanel'],
-    // Local llama.cpp is reachable without a prompt; LAN hosts are requested at runtime.
+    // The page script goes into a tab only when the viewer asks (the toolbar button, the context
+    // menu and the shortcut give `activeTab`); no site is granted at install.
+    permissions: ['storage', 'activeTab', 'scripting', 'contextMenus'],
+    // Local llama.cpp is reachable without a prompt; LAN hosts and "always translate" sites are
+    // requested at runtime.
     host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
     optional_host_permissions: ['http://*/*', 'https://*/*'],
+    // The popup (entrypoints/popup) is the action's default_popup.
     action: { default_title: 'ページ翻訳' },
+    commands: {
+      'translate-selection': {
+        suggested_key: { default: 'Alt+Shift+L' },
+        description: '選択範囲を翻訳',
+      },
+    },
   },
 });

@@ -21,7 +21,10 @@ export async function connect(sidePanel: Page, origin: string): Promise<void> {
   await sidePanel.getByRole('tab', { name: '設定', exact: true }).click();
   await sidePanel.getByLabel('llama.cpp の接続先').fill(origin);
   await sidePanel.getByRole('button', { name: '接続を確認' }).click();
-  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible();
+  // The service worker's round trip to the stub outlasts the default 5 s on a loaded runner.
+  await expect(sidePanel.locator('output[data-status="connected"]')).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 export type OpenedChat = Readonly<{

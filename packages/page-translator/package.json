@@ -18,15 +18,19 @@
     "@chrome-toolbox/extension-core": "workspace:*",
     "@chrome-toolbox/ui": "workspace:*",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",
@@ -34,6 +38,7 @@
     "wxt": "catalog:"
   },
   "starter": {
-    "runtime": "extension"
+    "runtime": "extension",
+    "soak": true
   }
 }

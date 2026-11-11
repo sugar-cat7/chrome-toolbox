@@ -1,14 +1,10 @@
-import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { launch } from '@chrome-toolbox/contracts';
 import { startBackground } from '../runtime.ts';
 
+// The toolbar action opens the popup (`action.default_popup`); the options page holds the
+// llama.cpp settings. The service worker also adds 「選択範囲を翻訳」 to the context menu on
+// install, answers it and the shortcut, and keeps the always sites' registration in line with the
+// page settings and Chrome's grants (startBackground).
 export default defineBackground(() => {
   startBackground();
-  // The toolbar action opens the side panel; there is no popup. A failure leaves
-  // the panel reachable from Chrome's side panel menu, so it needs no recovery.
-  launch(
-    () => browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }),
-    () => undefined,
-  );
 });
