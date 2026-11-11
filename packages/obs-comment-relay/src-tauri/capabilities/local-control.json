@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-control",
+  "description": "Bundled control window only; Rust owns windows, files, tray and HTTP",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "allow-attach-engine",
+    "allow-ack-chat-batch",
+    "allow-llama-request",
+    "allow-cancel-llama",
+    "allow-publish-comments",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-start-source",
+    "allow-stop-source",
+    "allow-get-status",
+    "allow-check-connection",
+    "allow-select-model-file",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

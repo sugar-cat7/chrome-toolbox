@@ -1,0 +1,19 @@
+html,
+body {
+  margin: 0;
+  background: transparent;
+  color: white;
+  font: 24px sans-serif;
+}
+ol {
+  padding: 0;
+  list-style: none;
+}
+li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 3px #000;
+}
+#attribution {
+  font-size: 14px;
+}

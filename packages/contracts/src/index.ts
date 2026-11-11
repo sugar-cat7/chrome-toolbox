@@ -1,6 +1,8 @@
 import { z } from 'zod/mini';
 import { publicErrorSchema } from './result.ts';
 export * from './result.ts';
+export * from './chat.ts';
+export * from './obs-relay.ts';
 export {
   PUBLIC_ERRORS,
   INTERNAL_ERRORS,

@@ -6,6 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./chat-dom": "./src/chat-dom/index.ts",
+    "./relay": "./src/relay.ts",
     "./testing": "./testing/playwright.ts"
   },
   "scripts": {
@@ -20,6 +22,7 @@
   "devDependencies": {
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

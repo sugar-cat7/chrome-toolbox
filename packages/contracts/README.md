@@ -14,6 +14,11 @@ Implemented; it comes from the project template and every package uses it.
 
 Expected failures are `Result` values; application code does not `throw` or `catch` them. [docs/errors.md](../../docs/errors.md) describes the contract.
 
+`src/chat.ts` exports `rawChatCommentSchema` and its `RawChatComment` type, author roles and
+field limits. It rejects unknown keys, empty ids/text, oversized UTF-16 fields and timestamps
+outside nonnegative safe integers. The comment extension extends this contract with its legacy
+code-point limits, empty text, numeric times and optional `held` metadata for compatibility.
+
 ## Use
 
 ```ts

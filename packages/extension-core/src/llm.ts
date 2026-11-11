@@ -1,16 +1,9 @@
 import { z } from 'zod/mini';
-import {
-  capture,
-  captureSync,
-  decode,
-  Err,
-  failure,
-  Ok,
-  type Result,
-} from '@chrome-toolbox/contracts';
+import { captureSync, decode, Err, failure, Ok, type Result } from '@chrome-toolbox/contracts';
 import { createQueue, type Queue } from './queue.ts';
+import { createFetchTransport, type FetchOptions } from './transport.ts';
 
-export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
+export type { Fetch, ResultFetch } from './transport.ts';
 export type ChatMessage = Readonly<{ role: 'system' | 'user' | 'assistant'; content: string }>;
 /** One part of a multi-part message (OpenAI `content` array); `data` is WAV as plain base64. */
 export type ChatContentPart =
@@ -151,17 +144,15 @@ export function hostPattern(baseUrl: string): Result<string> {
   return Ok(`${new URL(parsed.value).protocol}//${new URL(parsed.value).hostname}/*`);
 }
 
-export function createLlamaClient({
-  baseUrl,
-  fetch,
-  timeoutMs = 10_000,
-  queue = createQueue(),
-}: {
-  baseUrl: string;
-  fetch: Fetch;
-  timeoutMs?: number;
-  queue?: Queue;
-}): LlamaClient {
+export function createLlamaClient(
+  options: FetchOptions & {
+    baseUrl: string;
+    timeoutMs?: number;
+    queue?: Queue;
+  },
+): LlamaClient {
+  const { baseUrl, timeoutMs = 10_000, queue = createQueue() } = options;
+  const transport = createFetchTransport(options);
   async function request<T>(
     schema: z.ZodMiniType<T>,
     path: string,
@@ -172,20 +163,17 @@ export function createLlamaClient({
     const origin = parseBaseUrl(baseUrl);
     if (!origin.ok) return origin;
     const deadline = AbortSignal.timeout(timeoutMs);
-    const response = await capture(
-      () =>
-        fetch(`${origin.value}${path}`, {
-          ...init,
-          signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-        }),
-      'network_failed',
-    );
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    const response = await transport.request(`${origin.value}${path}`, {
+      ...init,
+      signal: requestSignal,
+    });
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!response.ok) return response;
     if (!response.value.ok) {
       // The body is read only to tell the no-projector 400; every other answer ignores it.
       if (response.value.status === 400) {
-        const text = await capture(() => response.value.text(), 'response_invalid');
+        const text = await transport.text(response.value, requestSignal);
         const parsed = text.ok
           ? captureSync((): unknown => JSON.parse(text.value), 'response_invalid')
           : text;
@@ -195,7 +183,7 @@ export function createLlamaClient({
       }
       return Err(failure(tellRefusal ? 'model_refused' : 'network_failed'));
     }
-    const body = await capture((): Promise<unknown> => response.value.json(), 'response_invalid');
+    const body = await transport.json(response.value, requestSignal);
     if (signal?.aborted) return Err(failure('operation_cancelled'));
     if (!body.ok) return body;
     return decode(schema, body.value);
