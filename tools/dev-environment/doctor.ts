@@ -72,6 +72,12 @@ export function doctor(
         ok: existsSync(path.join(cwd, '.cloudflare/types/index.d.ts')),
         detail: 'Local Worker types required (pnpm env:setup); no cloud credentials needed',
       });
+    if (pkg.runtime === 'extension')
+      checks.push({
+        id: `${pkg.name}/types`,
+        ok: existsSync(path.join(cwd, '.wxt/tsconfig.json')),
+        detail: 'WXT generated types required (pnpm env:setup)',
+      });
     if (pkg.runtime === 'desktop' && !javascript) {
       const rustVersion = exactPin(
         readFileSync(path.join(cwd, 'src-tauri/rust-toolchain.toml'), 'utf8'),

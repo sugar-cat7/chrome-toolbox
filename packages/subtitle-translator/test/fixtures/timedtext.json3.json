@@ -1,0 +1,52 @@
+{
+  "wireMagic": "pb3",
+  "pens": [{}],
+  "wsWinStyles": [{}, { "mhModeHint": 2, "juJustifCode": 0, "sdScrollDir": 3 }],
+  "wpWinPositions": [
+    {},
+    { "apPoint": 6, "ahHorPos": 20, "avVerPos": 100, "rcRows": 2, "ccCols": 40 }
+  ],
+  "events": [
+    { "tStartMs": 0, "dDurationMs": 12000, "id": 1, "wpWinPosId": 1, "wsWinStyleId": 1 },
+    {
+      "tStartMs": 120,
+      "dDurationMs": 2880,
+      "wWinId": 1,
+      "segs": [
+        { "utf8": "Okay", "acAsrConf": 0 },
+        { "utf8": " chat,", "tOffsetMs": 480, "acAsrConf": 0 }
+      ]
+    },
+    {
+      "tStartMs": 1500,
+      "dDurationMs": 1500,
+      "wWinId": 1,
+      "aAppend": 1,
+      "segs": [{ "utf8": "\n" }]
+    },
+    {
+      "tStartMs": 1510,
+      "dDurationMs": 3200,
+      "wWinId": 1,
+      "segs": [
+        { "utf8": "we're", "acAsrConf": 0 },
+        { "utf8": " going", "tOffsetMs": 300, "acAsrConf": 0 },
+        { "utf8": " in.", "tOffsetMs": 720, "acAsrConf": 0 }
+      ]
+    },
+    {
+      "tStartMs": 3000,
+      "dDurationMs": 1710,
+      "wWinId": 1,
+      "aAppend": 1,
+      "segs": [{ "utf8": "\n" }]
+    },
+    { "tStartMs": 4710, "dDurationMs": 2000, "segs": [{ "utf8": "  " }] },
+    { "tStartMs": 7000, "dDurationMs": 2500, "segs": [{ "utf8": "Fixturo found\nthe old gate." }] },
+    {
+      "tStartMs": 9600,
+      "dDurationMs": 1800,
+      "segs": [{ "utf8": " Let's cross " }, { "utf8": "the bridge!" }]
+    }
+  ]
+}

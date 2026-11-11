@@ -26,7 +26,7 @@ import {
   type Result,
   type AppError,
   type PublicError,
-} from '@starter/contracts';
+} from '@chrome-toolbox/contracts';
 
 export const OPERATIONS = [
   'notes.list',

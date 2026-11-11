@@ -29,6 +29,8 @@ const infrastructure = [
   'tsconfig.json',
   'vite.config.ts',
 ];
+/** The generated project's README; the source's own `README.md` is not copied into a project. */
+export const rootReadme = 'tools/generators/templates/root/README.md.template';
 export type TemplateState = {
   version: string;
   kind: 'reference' | 'project';
@@ -259,18 +261,15 @@ export function projectFiles(
   source: string,
   options: ProjectOptions,
   kind: TemplateState['kind'] = 'project',
+  format = true,
 ): Files {
   const files = infrastructureFiles(source);
-  if (files.has('README.md'))
-    files.set(
-      'README.md',
-      Buffer.from(
-        files
-          .get('README.md')!
-          .toString()
-          .replace(/^# .+\n/u, `# ${options.name}\n`),
-      ),
-    );
+  // The source's README describes the source project (a downstream project's own packages, for
+  // example); every generated project starts from the template's README blueprint instead.
+  files.set(
+    'README.md',
+    Buffer.from(expand(readFileSync(path.join(source, rootReadme), 'utf8'), options)),
+  );
   const root = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')) as {
     name: string;
     scripts: Record<string, string>;
@@ -282,15 +281,18 @@ export function projectFiles(
     if (command.startsWith('dev:')) delete root.scripts[command];
   const packages = selectedPackages(options);
   for (const app of packages) {
-    for (const [relative, contents] of appFiles(source, options, app))
+    for (const [relative, contents] of appFiles(source, options, app, app, format))
       files.set(relative, contents);
     if (['web', 'api', 'desktop'].includes(app))
       root.scripts[`dev:${app}`] = `node tools/dev-environment/dev.ts ${app}`;
   }
   files.set('package.json', Buffer.from(`${JSON.stringify(root, null, 2)}\n`));
-  formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
-    (contents, filename) => files.set(filename, contents),
-  );
+  // Each formatted non-script file costs a formatter process; the README blueprint is kept
+  // formatted instead (render.test.ts), and only its heading changes here.
+  if (format)
+    formatFiles(source, new Map([['package.json', files.get('package.json')!]])).forEach(
+      (contents, filename) => files.set(filename, contents),
+    );
   const state: TemplateState = {
     version: root.version as string,
     kind,
@@ -311,7 +313,8 @@ export function projectFiles(
       ),
     };
   }
-  const key = formatterKey(source);
+  // An unformatted render records no formatter key, so finalizing it formats the managed files.
+  const key = format ? formatterKey(source) : undefined;
   if (key) state.formatKey = key;
   files.set('.template.json', Buffer.from(`${JSON.stringify(state, null, 2)}\n`));
   return files;

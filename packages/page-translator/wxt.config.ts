@@ -1,0 +1,44 @@
+import { defineConfig } from 'wxt';
+import react from '@vitejs/plugin-react';
+import tailwind from '@tailwindcss/vite';
+
+// The root dev runner assigns a worktree-local port; WXT's own default applies otherwise.
+const port = Number(process.env.STARTER_PORT ?? 3000);
+
+export default defineConfig({
+  srcDir: 'src',
+  outDir: 'dist',
+  imports: false,
+  hooks: {
+    // `imports: false` still registers unimport's Vite plugin, which would inject wxt/*
+    // imports for free identifiers (e.g. a `storage` prop in packages/ui). Imports stay explicit.
+    'config:resolved': (wxt) => {
+      Object.assign(wxt.config.imports, { autoImport: false });
+    },
+  },
+  vite: () => ({ plugins: [react(), tailwind()] }),
+  // Agents and developers load dist/chrome-mv3-dev themselves (see the extension skill).
+  webExt: { disabled: true },
+  dev: {
+    server: { host: '127.0.0.1', port, origin: `http://127.0.0.1:${port}`, strictPort: true },
+  },
+  manifest: {
+    name: 'ページ翻訳',
+    description: 'Webページをレイアウトを保ったままローカルLLMで翻訳します。',
+    // The page script goes into a tab only when the viewer asks (the toolbar button, the context
+    // menu and the shortcut give `activeTab`); no site is granted at install.
+    permissions: ['storage', 'activeTab', 'scripting', 'contextMenus'],
+    // Local llama.cpp is reachable without a prompt; LAN hosts and "always translate" sites are
+    // requested at runtime.
+    host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
+    optional_host_permissions: ['http://*/*', 'https://*/*'],
+    // The popup (entrypoints/popup) is the action's default_popup.
+    action: { default_title: 'ページ翻訳' },
+    commands: {
+      'translate-selection': {
+        suggested_key: { default: 'Alt+Shift+L' },
+        description: '選択範囲を翻訳',
+      },
+    },
+  },
+});

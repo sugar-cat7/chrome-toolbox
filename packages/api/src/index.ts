@@ -1,7 +1,0 @@
-import { handleNotes } from './notes';
-
-export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return handleNotes(request, env);
-  },
-} satisfies ExportedHandler<Env>;

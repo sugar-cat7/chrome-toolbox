@@ -1,0 +1,41 @@
+{"text": "今のパズルどうやって解いたの？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "そこの箱、先に右に押してから上だよ", "genre": "puzzle_rta", "expected": "instruction"}
+{"text": "うまい！", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "最後のステージで重力が反転するギミック出てくるよ", "genre": "puzzle_rta", "expected": "spoiler"}
+{"text": "次の部屋どうするの？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "ぬいまるさんがさっき別の枠で自己ベ出してたよ", "genre": "puzzle_rta", "expected": "relay"}
+{"text": "さっきのリセット判断正しかったと思う", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "次の部屋はジャンプせずに壁沿いに走って", "genre": "puzzle_rta", "expected": "instruction"}
+{"text": "この面難しそう", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "どこの大学通ってるの？", "genre": "puzzle_rta", "expected": "privacy"}
+{"text": "最後のステージってどんな感じなんだろう", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "このあと隠しボス出てきて全部やり直しになる", "genre": "puzzle_rta", "expected": "spoiler"}
+{"text": "急げー！", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "自己ベまであと何秒？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "その面は鍵を最後に取るのが正解", "genre": "puzzle_rta", "expected": "instruction"}
+{"text": "今のショートカット神", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "RTAより選挙の話して、どの党に入れた？", "genre": "puzzle_rta", "expected": "sensitive"}
+{"text": "タイマー見てるだけで緊張する", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "ぺんたさんも今同じカテゴリ走ってる", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "このゲーム何年前の？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "the final level is the first level backwards lol", "genre": "puzzle_rta", "expected": "spoiler"}
+{"text": "gg that was clean", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "skip the cutscene glitch, just go through the door", "genre": "puzzle_rta", "expected": "instruction"}
+{"text": "what's the world record time?", "genre": "puzzle_rta", "expected": "question"}
+{"text": "手元カメラの指輪、結婚してるの？", "genre": "puzzle_rta", "expected": "privacy"}
+{"text": "手元めっちゃ速い", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "ルート何個あるの？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "エンディングで主人公の正体わかるんだよね", "genre": "puzzle_rta", "expected": "spoiler"}
+{"text": "ミスっても切り替え早いの尊敬", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "ギミック無視して左の抜け道使ったほうが速い", "genre": "puzzle_rta", "expected": "instruction"}
+{"text": "さっきの部屋、箱押す順番完璧だった", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "この布教活動に協力して、配信で宗教紹介して", "genre": "puzzle_rta", "expected": "sensitive"}
+{"text": "ラスボス絶対かっこいいやつでしょ", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "がんばれ！", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "BGMいい", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "区間ベスト出た？", "genre": "puzzle_rta", "expected": "question"}
+{"text": "初見ですがすごい", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "ふわりさんの方が速いよ、遅すぎ", "genre": "puzzle_rta", "expected": "sensitive"}
+{"text": "崩れた街を直すパズルって設定いいね", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "乱数来い！", "genre": "puzzle_rta", "expected": "chatter"}
+{"text": "もちこさんの枠で同じ面クリアできずに台パンしてた", "genre": "puzzle_rta", "expected": "relay"}

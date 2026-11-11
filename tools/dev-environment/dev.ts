@@ -32,6 +32,8 @@ process.once('SIGTERM', stop);
 try {
   for (const pkg of chosen) {
     if (pkg.runtime === 'worker') await servers.workers(pkg.name);
+    // WXT serves modules for the unpacked dev build; load the printed directory in Chromium.
+    else if (pkg.runtime === 'extension') await servers.start(pkg);
     else if (pkg.runtime === 'desktop') {
       // Tauri's own beforeDevCommand starts its renderer at the configured port.
       // Native launcher passes a worktree-local devUrl override; no other server is terminated.

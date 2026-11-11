@@ -1,0 +1,231 @@
+<style>
+  .br {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    overflow: hidden;
+    font-family: system-ui, sans-serif;
+    background: #fff;
+    color: #111;
+  }
+  .br .url {
+    background: #f1f3f4;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+  }
+  .br .pg {
+    padding: 14px 16px;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .br h1 {
+    font-size: 16px;
+    margin: 0 0 6px;
+  }
+  .orig {
+    color: #888;
+    font-size: 11px;
+  }
+  .tr {
+    border-left: 3px solid #3a7afe;
+    padding-left: 8px;
+    margin: 2px 0 10px;
+    color: #1a3a7a;
+  }
+  .hov {
+    background: #eef4ff;
+    border-radius: 3px;
+    position: relative;
+  }
+  .tip {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 4px;
+    background: #222;
+    color: #fff;
+    font-size: 10.5px;
+    padding: 4px 7px;
+    border-radius: 5px;
+    width: 240px;
+    z-index: 2;
+  }
+  .badge {
+    background: #3a7afe;
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+  }
+  .pop {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    width: 250px;
+    font-size: 12px;
+    font-family: system-ui, sans-serif;
+    background: #fff;
+    color: #111;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+  }
+  .pop .hd {
+    padding: 10px 12px;
+    font-weight: 700;
+    border-bottom: 1px solid #eee;
+  }
+  .pop .it {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f4f4f4;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .btn {
+    background: #3a7afe;
+    color: #fff;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    display: inline-block;
+  }
+  .btn.ghost {
+    background: #fff;
+    color: #3a7afe;
+    border: 1px solid #3a7afe;
+  }
+  .sel {
+    background: #ffe58a;
+  }
+  .bubble {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    padding: 8px 10px;
+    font-size: 11.5px;
+    width: 260px;
+    margin-top: 6px;
+  }
+  .muted {
+    color: #888;
+    font-size: 11px;
+  }
+  .seg {
+    display: inline-flex;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .seg span {
+    padding: 2px 7px;
+    font-size: 11px;
+  }
+  .seg .on {
+    background: #3a7afe;
+    color: #fff;
+  }
+</style>
+
+<h2>Webページ翻訳：ページの見え方</h2>
+<p class="subtitle">
+  海外のゲーム攻略Wikiや配信者のブログを読んでいる場面の例です。ページ全体を翻訳したとき、A と B
+  のどちらが読みやすいですか？
+</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>原文を日本語に置き換え（マウスを重ねると原文を表示）</h3>
+      <p>
+        レイアウトは元のページのままです。読む量が最も少なく、普通の日本語サイトのように読めます。
+      </p>
+      <div class="br" style="margin-top: 8px">
+        <div class="url">
+          <span>wiki.example.gg/elden-ring/bosses</span><span class="badge">JA</span>
+        </div>
+        <div class="pg">
+          <h1>ラスボス攻略：第2形態</h1>
+          <p>
+            第2形態は体力が50%を下回ると始まります。<span class="hov"
+              >広範囲の光の攻撃は、横ではなく後ろに転がると避けやすくなります。<span class="tip"
+                >原文：The wide light attack is easier to dodge by rolling backward rather than
+                sideways.</span
+              ></span
+            >
+          </p>
+          <p style="margin-top: 34px">推奨レベルは150以上です。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>段落ごとに原文と日本語訳を並べて表示</h3>
+      <p>原文の言い回しを確かめながら読めます。そのぶんページは縦に長くなります。</p>
+      <div class="br" style="margin-top: 8px">
+        <div class="url">
+          <span>wiki.example.gg/elden-ring/bosses</span><span class="badge">EN+JA</span>
+        </div>
+        <div class="pg">
+          <h1>Final Boss Guide: Phase 2 <span class="orig">／ ラスボス攻略：第2形態</span></h1>
+          <div>Phase 2 begins when its HP drops below 50%.</div>
+          <div class="tr">第2形態は体力が50%を下回ると始まります。</div>
+          <div>
+            The wide light attack is easier to dodge by rolling backward rather than sideways.
+          </div>
+          <div class="tr">広範囲の光の攻撃は、横ではなく後ろに転がると避けやすくなります。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="section"
+  style="display: flex; gap: 24px; align-items: flex-start; margin-top: 18px; flex-wrap: wrap"
+>
+  <div>
+    <div class="pop">
+      <div class="hd">ページ翻訳</div>
+      <div class="it">
+        <span class="btn">このページを翻訳</span><span class="btn ghost">原文に戻す</span>
+      </div>
+      <div class="it">
+        表示 <span class="seg"><span class="on">置き換え</span><span>併記</span></span>
+      </div>
+      <div class="it"><span>このサイトは常に翻訳</span><span class="muted">OFF</span></div>
+      <div class="it"><span>このサイトでは翻訳しない</span><span class="muted">OFF</span></div>
+      <div class="it"><span class="muted">翻訳済み 42/42 段落 · 画面外は後回し</span></div>
+    </div>
+    <div style="margin-top: 14px; font-size: 12px">
+      選択翻訳：<span class="sel">rolling backward rather than sideways</span>
+      <div class="bubble">
+        <b>横ではなく後ろに転がる</b>
+        <div class="muted" style="margin-top: 4px">コピー · 原文を読み上げ · 閉じる</div>
+      </div>
+    </div>
+  </div>
+  <div style="flex: 1; min-width: 260px">
+    <h3>軽量・高速にするための前提（どちらの案でも共通）</h3>
+    <ul>
+      <li>
+        <b>見えている範囲から順に翻訳</b
+        >：画面外の段落は、スクロールで近づいたときに翻訳します。長いページで一度に推論を投げません。
+      </li>
+      <li>
+        <b>DOMは書き換えすぎない</b
+        >：テキストのノードだけを差し替えるので、リンク・ボタン・レイアウトは元のままです。原文はメモリに保持しておき、すぐに元に戻せます。
+      </li>
+      <li>
+        <b>動的に増える部分</b
+        >：変化の監視は一つにまとめ、追加された部分だけを数百ミリ秒ごとにまとめて翻訳します。ページを離れたら監視とキャッシュを破棄します。
+      </li>
+      <li><b>キャッシュ</b>：同じ文は再翻訳しません。保存件数には上限を設けます。</li>
+      <li><b>翻訳しないサイト</b>：銀行や社内ツールなどは、設定で除外できます。</li>
+    </ul>
+  </div>
+</div>

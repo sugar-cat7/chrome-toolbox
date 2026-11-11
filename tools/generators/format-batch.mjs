@@ -22,7 +22,7 @@ async function main() {
   const simpleIgnore = (value) =>
     typeof value === 'string' &&
     (/^(?:\*\*\/node_modules\/\*\*|artifacts\/\*\*|\.template\.json)$/u.test(value) ||
-      /^packages\/[a-z0-9-]+\/(?:dist\/\*\*|\.cloudflare\/\*\*|\.wrangler\/\*\*|src\/routeTree\.gen\.ts|src-tauri\/(?:target|gen)\/\*\*)$/u.test(
+      /^packages\/[a-z0-9-]+\/(?:dist\/\*\*|\.cloudflare\/\*\*|\.wrangler\/\*\*|\.wxt\/\*\*|src\/routeTree\.gen\.ts|src-tauri\/(?:target|gen)\/\*\*)$/u.test(
         value,
       ));
   const compatible =

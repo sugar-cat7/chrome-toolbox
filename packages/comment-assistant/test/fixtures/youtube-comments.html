@@ -1,0 +1,370 @@
+<!doctype html>
+<!--
+  YouTube watch page comments. The path from ytd-app to the thread container and the thread's
+  inner structure (ytd-comment-view-model, yt-attributed-string#content-text, a#author-text,
+  #published-time-text a[href*="lc="]) were observed on 2026-10-28. So was the stream metadata:
+  ytd-watch-flexy's video-id attribute (set once the metadata below shows that video), the
+  title (ytd-watch-metadata #title h1) and the owner link (ytd-video-owner-renderer a, /@handle).
+  The creator's own comment (ytd-author-comment-badge-renderer[creator] in #author-comment-badge,
+  a#author-text hidden) was observed on 2026-10-29. The game card and the description were
+  observed on live streams on 2026-11-05: the card is a yt-video-attributes-section-view-model
+  whose footer links to /gaming, its yt-video-attribute-view-model links to the game's channel
+  with the game's name as aria-label (and in its h1; the name follows the page language); the
+  whole description, links as chips, is the snippet of the hidden structured description
+  engagement panel (target-id="engagement-panel-structured-description"), filled in with the
+  video's metadata, at most about 20 ms after video-id; the collapsed description under
+  ytd-watch-metadata (#attributed-snippet-text) shows its first lines, already for the new video
+  when video-id changes (both seen on 2026-11-05, whitespace aside). Every id, name and text
+  below is made up.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>comments fixture</title>
+  </head>
+  <body>
+    <ytd-app>
+      <div id="content">
+        <ytd-page-manager id="page-manager">
+          <ytd-watch-flexy video-id="fixture0001">
+            <div id="columns">
+              <div id="primary">
+                <div id="primary-inner">
+                  <div id="below">
+                    <div>
+                      <ytd-watch-metadata>
+                        <div id="above-the-fold">
+                          <div id="title-row">
+                            <div id="title">
+                              <h1>
+                                <yt-formatted-string
+                                  >Fixture Quest Part 3: the frozen bridge</yt-formatted-string
+                                >
+                              </h1>
+                            </div>
+                          </div>
+                          <div id="top-row">
+                            <div id="owner">
+                              <ytd-video-owner-renderer>
+                                <a class="yt-simple-endpoint" href="/@FixtureStreamer"></a>
+                                <div id="upload-info">
+                                  <ytd-channel-name id="channel-name">
+                                    <div id="container">
+                                      <div id="text-container">
+                                        <yt-formatted-string id="text"
+                                          ><a href="/@FixtureStreamer"
+                                            >Fixture Streamer</a
+                                          ></yt-formatted-string
+                                        >
+                                      </div>
+                                    </div>
+                                  </ytd-channel-name>
+                                </div>
+                              </ytd-video-owner-renderer>
+                            </div>
+                          </div>
+                          <div id="bottom-row">
+                            <div id="description">
+                              <div id="description-inner">
+                                <ytd-text-inline-expander id="description-inline-expander">
+                                  <div id="snippet">
+                                    <span id="snippet-text"
+                                      ><yt-attributed-string id="attributed-snippet-text"
+                                        ><span
+                                          >Fixture Questの続きをのんびり進めます。</span
+                                        ></yt-attributed-string
+                                      ></span
+                                    >
+                                  </div>
+                                  <div>
+                                    <ytd-structured-description-content-renderer
+                                      id="structured-description"
+                                      hidden
+                                    >
+                                      <div id="items">
+                                        <yt-video-attributes-section-view-model>
+                                          <div class="videoAttributesSectionViewModelHost">
+                                            <h3>ゲーム</h3>
+                                            <yt-video-attribute-view-model>
+                                              <div class="ytVideoAttributeViewModelHost">
+                                                <a
+                                                  href="/channel/UCfixturegame000000000001"
+                                                  role="group"
+                                                  aria-label="Fixture Quest"
+                                                >
+                                                  <div class="ytVideoAttributeViewModelMetadata">
+                                                    <h1 class="ytVideoAttributeViewModelTitle">
+                                                      Fixture Quest
+                                                    </h1>
+                                                    <h4>2026</h4>
+                                                  </div>
+                                                </a>
+                                              </div>
+                                            </yt-video-attribute-view-model>
+                                            <button-view-model>
+                                              <a href="/gaming" aria-label="ゲーム">ゲーム</a>
+                                            </button-view-model>
+                                          </div>
+                                        </yt-video-attributes-section-view-model>
+                                      </div>
+                                    </ytd-structured-description-content-renderer>
+                                  </div>
+                                </ytd-text-inline-expander>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </ytd-watch-metadata>
+                      <ytd-comments id="comments">
+                        <ytd-item-section-renderer id="sections">
+                          <div id="header"></div>
+                          <div id="contents">
+                            <ytd-comment-thread-renderer>
+                              <div id="comment-container">
+                                <ytd-comment-view-model id="comment"
+                                  ><div id="body">
+                                    <div id="main">
+                                      <div id="header">
+                                        <div id="header-author">
+                                          <h3>
+                                            <a id="author-text" href="/@fixture-commenter-one">
+                                              <span>@fixture-commenter-one</span>
+                                            </a>
+                                          </h3>
+                                          <span id="published-time-text"
+                                            ><a href="/watch?v=fixture0001&amp;lc=FixtureThread01"
+                                              >1 日前</a
+                                            ></span
+                                          >
+                                        </div>
+                                      </div>
+                                      <div id="expander">
+                                        <div id="content">
+                                          <yt-attributed-string id="content-text" slot="content"
+                                            ><span dir="auto" role="text"
+                                              >This walkthrough finally made the puzzle click for
+                                              me.</span
+                                            ></yt-attributed-string
+                                          >
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div></ytd-comment-view-model
+                                >
+                              </div>
+                              <div id="replies"></div>
+                            </ytd-comment-thread-renderer>
+                            <ytd-comment-thread-renderer>
+                              <div id="comment-container">
+                                <ytd-comment-view-model id="comment"
+                                  ><div id="body">
+                                    <div id="main">
+                                      <div id="header">
+                                        <div id="header-author">
+                                          <h3>
+                                            <a id="author-text" href="/@fixture-commenter-two">
+                                              <span>@fixture-commenter-two</span>
+                                            </a>
+                                          </h3>
+                                          <span id="published-time-text"
+                                            ><a href="/watch?v=fixture0001&amp;lc=FixtureThread02"
+                                              >2 日前</a
+                                            ></span
+                                          >
+                                        </div>
+                                      </div>
+                                      <div id="expander">
+                                        <div id="content">
+                                          <yt-attributed-string id="content-text" slot="content"
+                                            ><span dir="auto" role="text"
+                                              >The part at
+                                              <span
+                                                ><a href="/watch?v=fixture0001&amp;t=135s"
+                                                  >2:15</a
+                                                ></span
+                                              >
+                                              is my favorite <img alt="🎉" src="data:," /> so
+                                              good</span
+                                            ></yt-attributed-string
+                                          >
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div></ytd-comment-view-model
+                                >
+                              </div>
+                              <div id="replies">
+                                <ytd-comment-replies-renderer
+                                  ><div id="expanded-threads">
+                                    <ytd-comment-view-model
+                                      ><div id="body">
+                                        <div id="main">
+                                          <div id="header">
+                                            <div id="header-author">
+                                              <h3>
+                                                <a id="author-text" href="/@fixture-replier">
+                                                  <span>@fixture-replier</span>
+                                                </a>
+                                              </h3>
+                                              <span id="published-time-text"
+                                                ><a
+                                                  href="/watch?v=fixture0001&amp;lc=FixtureThread02.FixtureReply01"
+                                                  >1 日前</a
+                                                ></span
+                                              >
+                                            </div>
+                                          </div>
+                                          <div id="expander">
+                                            <div id="content">
+                                              <yt-attributed-string id="content-text" slot="content"
+                                                ><span dir="auto" role="text"
+                                                  >Same here, that moment was great.</span
+                                                ></yt-attributed-string
+                                              >
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div></ytd-comment-view-model
+                                    >
+                                  </div></ytd-comment-replies-renderer
+                                >
+                              </div>
+                            </ytd-comment-thread-renderer>
+                            <ytd-comment-thread-renderer>
+                              <div id="comment-container">
+                                <ytd-comment-view-model id="comment"
+                                  ><div id="body">
+                                    <div id="main">
+                                      <div id="header">
+                                        <div id="header-author">
+                                          <h3>
+                                            <a id="author-text" href="/@fixture-commenter-three">
+                                              <span>@fixture-commenter-three</span>
+                                            </a>
+                                          </h3>
+                                          <span id="published-time-text"
+                                            ><a href="/watch?v=fixture0001&amp;lc=FixtureThread03"
+                                              >3 日前</a
+                                            ></span
+                                          >
+                                        </div>
+                                      </div>
+                                      <div id="expander">
+                                        <div id="content">
+                                          <yt-attributed-string id="content-text" slot="content"
+                                            ><span dir="auto" role="text"
+                                              >次の動画も楽しみにしています</span
+                                            ></yt-attributed-string
+                                          >
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div></ytd-comment-view-model
+                                >
+                              </div>
+                              <div id="replies"></div>
+                            </ytd-comment-thread-renderer>
+                            <ytd-comment-thread-renderer>
+                              <div id="comment-container">
+                                <ytd-comment-view-model id="comment"
+                                  ><div id="body">
+                                    <div id="main">
+                                      <div id="header">
+                                        <div id="header-author">
+                                          <h3>
+                                            <a id="author-text" hidden href="/@FixtureStreamer">
+                                              <span class="channel-owner">@FixtureStreamer</span>
+                                            </a>
+                                          </h3>
+                                          <span id="author-comment-badge"
+                                            ><ytd-author-comment-badge-renderer
+                                              standardize-icon-size
+                                              creator="4287137928"
+                                              ><a id="name" href="/@FixtureStreamer">
+                                                <ytd-channel-name id="channel-name"
+                                                  ><div id="container">
+                                                    <div id="text-container">
+                                                      <yt-formatted-string
+                                                        id="text"
+                                                        title="@FixtureStreamer"
+                                                        >@FixtureStreamer</yt-formatted-string
+                                                      >
+                                                    </div>
+                                                  </div></ytd-channel-name
+                                                >
+                                              </a>
+                                              <yt-icon
+                                                id="icon"
+                                                size="12"
+                                              ></yt-icon></ytd-author-comment-badge-renderer
+                                          ></span>
+                                          <span id="published-time-text"
+                                            ><a href="/watch?v=fixture0001&amp;lc=FixtureThread04"
+                                              >4 日前</a
+                                            ></span
+                                          >
+                                        </div>
+                                      </div>
+                                      <div id="expander">
+                                        <div id="content">
+                                          <yt-attributed-string id="content-text" slot="content"
+                                            ><span dir="auto" role="text"
+                                              >Thanks for watching! Part two goes up next
+                                              week.</span
+                                            ></yt-attributed-string
+                                          >
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div></ytd-comment-view-model
+                                >
+                              </div>
+                              <div id="replies"></div>
+                            </ytd-comment-thread-renderer>
+                            <ytd-continuation-item-renderer></ytd-continuation-item-renderer>
+                          </div>
+                        </ytd-item-section-renderer>
+                      </ytd-comments>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div id="secondary">
+                <div id="secondary-inner">
+                  <div id="panels">
+                    <ytd-engagement-panel-section-list-renderer
+                      target-id="engagement-panel-structured-description"
+                      visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"
+                    >
+                      <div id="content">
+                        <ytd-structured-description-content-renderer>
+                          <div id="items">
+                            <ytd-expandable-video-description-body-renderer>
+                              <ytd-text-inline-expander id="inline-expander">
+                                <div id="snippet">
+                                  <span id="snippet-text"
+                                    ><yt-attributed-string
+                                      ><span
+                                        >Fixture
+                                        Questの続きをのんびり進めます。&#10;&#10;【お約束】&#10;・アドバイス歓迎です&#10;・他の配信者さんの話題は控えてね&#10;&#10;#FixtureQuest</span
+                                      ></yt-attributed-string
+                                    ></span
+                                  >
+                                </div>
+                                <div id="expanded"></div>
+                              </ytd-text-inline-expander>
+                            </ytd-expandable-video-description-body-renderer>
+                          </div>
+                        </ytd-structured-description-content-renderer>
+                      </div>
+                    </ytd-engagement-panel-section-list-renderer>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ytd-watch-flexy>
+        </ytd-page-manager>
+      </div>
+    </ytd-app>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -104,12 +104,27 @@ export class Servers {
     });
     const origin = `http://127.0.0.1:${port}`;
     const started = performance.now();
+    const launchedAt = Date.now();
     while (performance.now() - started < 90_000) {
       signal.throwIfAborted();
       if (exited) throw new Error(`${pkg.name} exited before ready\n${output}`);
       try {
         if (!stripVTControlCharacters(output).includes(origin)) {
           await pause(100, undefined, { signal });
+          continue;
+        }
+        if (pkg.runtime === 'extension') {
+          // WXT's module server has no page route; readiness is a manifest written by this run.
+          const unpacked = path.join(this.root, pkg.directory, 'dist/chrome-mv3-dev');
+          if (statSync(path.join(unpacked, 'manifest.json')).mtimeMs >= launchedAt - 1_000) {
+            signal.throwIfAborted();
+            this.origins.set(pkg.name, origin);
+            console.log(
+              `READY ${pkg.name} ${origin} ${Math.round(performance.now() - started)}ms; load unpacked ${unpacked}`,
+            );
+            return origin;
+          }
+          await pause(200, undefined, { signal });
           continue;
         }
         const response = await fetch(`${origin}${pkg.runtime === 'worker' ? '/health' : '/'}`, {

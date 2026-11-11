@@ -1,0 +1,405 @@
+<!doctype html>
+<!--
+  Twitch channel page chat. The path from #root to the message container (role="log"), the
+  wrapper divs around each .chat-line__message and the line's inner structure (display name,
+  chat-line-message-body with text-fragment spans) were observed on a live channel on
+  2026-10-28. The welcome notice, mention, link and emote markup follow Twitch's known classes
+  but were not all seen live (unverified). The stream information section
+  (section#live-channel-stream-information: links to the channel's own page /<login> and the
+  title p[data-a-target="stream-title"], its title attribute equal to its text) was seen live on
+  2026-10-28; on an in-app channel switch the same section is re-rendered in place. Its category
+  link (a[data-a-target="stream-game-link"], /directory/category/<slug>, its text in the page
+  language) and tags (a.tw-tag, /directory/all/tags/<tag>, aria-label "Tag, <tag>" translated
+  with the page) were seen live on 2026-11-05. Author badges
+  (img.chat-badge in button[data-a-target="chat-badge"] in .chat-line__username-container, src
+  the global badge image, alt translated with the page) were seen live on 2026-10-29 for
+  moderators, bots, verified accounts and subscribers; the broadcaster badge follows the same
+  shape (unverified on a chat line). The verified (Partner) badge is no trusted role. The
+  subscriber badge id is made up; the others are Twitch's global badges.
+  Every name and text below is made up.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>twitch chat fixture</title>
+  </head>
+  <body>
+    <div id="root" class="root">
+      <div class="channel-info-content">
+        <section id="live-channel-stream-information" class="skip-to-target">
+          <div>
+            <a href="/fixturechannel"><span>Fixture Channel</span></a>
+            <div>
+              <p data-a-target="stream-title" title="Fixture speedrun night: any% practice">
+                Fixture speedrun night: any% practice
+              </p>
+            </div>
+            <a data-a-target="stream-game-link" href="/directory/category/fixture-game"
+              ><span>Fixture Game</span></a
+            >
+            <div>
+              <a
+                aria-label="Tag, 日本語"
+                data-a-target="日本語"
+                class="tw-tag"
+                href="/directory/all/tags/%E6%97%A5%E6%9C%AC%E8%AA%9E"
+              ></a>
+              <a
+                aria-label="Tag, Speedrun"
+                data-a-target="Speedrun"
+                class="tw-tag"
+                href="/directory/all/tags/Speedrun"
+              ></a>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="chat-shell">
+        <div class="stream-chat">
+          <section class="chat-room" data-test-selector="chat-room-component-layout">
+            <div class="chat-room__content">
+              <div>
+                <div>
+                  <div class="scrollable-area" data-a-target="chat-scroller">
+                    <div
+                      class="chat-scrollable-area__message-container"
+                      data-test-selector="chat-scrollable-area__message-container"
+                      role="log"
+                    >
+                      <div>
+                        <div class="chat-line__status" data-a-target="chat-welcome-message">
+                          Welcome to the chat room!
+                        </div>
+                      </div>
+                      <div>
+                        <div>
+                          <div
+                            class="chat-line__message"
+                            role="group"
+                            tabindex="0"
+                            data-a-target="chat-line-message"
+                            data-a-user="fixture_user_one"
+                          >
+                            <div>
+                              <div class="chat-line__message-highlight"></div>
+                              <div class="chat-line__message-container">
+                                <div></div>
+                                <div>
+                                  <div class="chat-line__no-background">
+                                    <div>
+                                      <div class="chat-line__username-container">
+                                        <span
+                                          ><div>
+                                            <button data-a-target="chat-badge">
+                                              <img
+                                                alt="1-Month Subscriber badge"
+                                                class="chat-badge"
+                                                src="https://static-cdn.jtvnw.net/badges/v1/00000000-0000-4000-8000-00000000f1f1/1"
+                                                srcset="
+                                                  https://static-cdn.jtvnw.net/badges/v1/00000000-0000-4000-8000-00000000f1f1/1 1x
+                                                "
+                                              />
+                                            </button></div></span
+                                        ><span
+                                          class="chat-line__username"
+                                          role="button"
+                                          tabindex="0"
+                                          ><span
+                                            ><span
+                                              class="chat-author__display-name"
+                                              data-a-target="chat-message-username"
+                                              data-a-user="fixture_user_one"
+                                              data-test-selector="message-username"
+                                              >FixtureUserOne</span
+                                            ></span
+                                          ></span
+                                        >
+                                      </div>
+                                      <span aria-hidden="true">: </span
+                                      ><span data-a-target="chat-line-message-body" dir="auto"
+                                        ><span
+                                          class="text-fragment"
+                                          data-a-target="chat-message-text"
+                                          >is the boss fight next?</span
+                                        ></span
+                                      >
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div>
+                          <div
+                            class="chat-line__message"
+                            role="group"
+                            tabindex="0"
+                            data-a-target="chat-line-message"
+                            data-a-user="fixture_user_two"
+                          >
+                            <div>
+                              <div class="chat-line__message-highlight"></div>
+                              <div class="chat-line__message-container">
+                                <div></div>
+                                <div>
+                                  <div class="chat-line__no-background">
+                                    <div>
+                                      <div class="chat-line__username-container">
+                                        <span
+                                          ><div>
+                                            <button data-a-target="chat-badge">
+                                              <img
+                                                alt="Broadcaster badge"
+                                                class="chat-badge"
+                                                src="https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1"
+                                                srcset="
+                                                  https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1 1x
+                                                "
+                                              />
+                                            </button></div></span
+                                        ><span
+                                          class="chat-line__username"
+                                          role="button"
+                                          tabindex="0"
+                                          ><span
+                                            ><span
+                                              class="chat-author__display-name"
+                                              data-a-target="chat-message-username"
+                                              data-a-user="fixture_user_two"
+                                              data-test-selector="message-username"
+                                              >FixtureUserTwo</span
+                                            ></span
+                                          ></span
+                                        >
+                                      </div>
+                                      <span aria-hidden="true">: </span
+                                      ><span data-a-target="chat-line-message-body" dir="auto"
+                                        ><span
+                                          class="mention-fragment"
+                                          data-a-target="chat-message-mention"
+                                          >@FixtureUserOne</span
+                                        ><span
+                                          class="text-fragment"
+                                          data-a-target="chat-message-text"
+                                        >
+                                          yes, right after this
+                                        </span>
+                                        <div class="chat-line__message--emote-button">
+                                          <span
+                                            ><div class="chat-image__container">
+                                              <img
+                                                class="chat-image chat-line__message--emote"
+                                                alt="FixtureEmote"
+                                                src="data:,"
+                                              /></div
+                                          ></span></div
+                                      ></span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div>
+                          <div
+                            class="chat-line__message"
+                            role="group"
+                            tabindex="0"
+                            data-a-target="chat-line-message"
+                            data-a-user="fixture_user_three"
+                          >
+                            <div>
+                              <div class="chat-line__message-highlight"></div>
+                              <div class="chat-line__message-container">
+                                <div></div>
+                                <div>
+                                  <div class="chat-line__no-background">
+                                    <div>
+                                      <div class="chat-line__username-container">
+                                        <span
+                                          ><div>
+                                            <button data-a-target="chat-badge">
+                                              <img
+                                                alt="Moderator badge"
+                                                class="chat-badge"
+                                                src="https://static-cdn.jtvnw.net/badges/v1/3267646d-33f0-4b17-b3df-f923a41db1d0/1"
+                                                srcset="
+                                                  https://static-cdn.jtvnw.net/badges/v1/3267646d-33f0-4b17-b3df-f923a41db1d0/1 1x
+                                                "
+                                              />
+                                            </button>
+                                          </div>
+                                          <div>
+                                            <button data-a-target="chat-badge">
+                                              <img
+                                                alt="Chat Bot badge"
+                                                class="chat-badge"
+                                                src="https://static-cdn.jtvnw.net/badges/v1/3ffa9565-c35b-4cad-800b-041e60659cf2/1"
+                                                srcset="
+                                                  https://static-cdn.jtvnw.net/badges/v1/3ffa9565-c35b-4cad-800b-041e60659cf2/1 1x
+                                                "
+                                              />
+                                            </button></div></span
+                                        ><span
+                                          class="chat-line__username"
+                                          role="button"
+                                          tabindex="0"
+                                          ><span
+                                            ><span
+                                              class="chat-author__display-name"
+                                              data-a-target="chat-message-username"
+                                              data-a-user="fixture_user_three"
+                                              data-test-selector="message-username"
+                                              >FixtureUserThree</span
+                                            ></span
+                                          ></span
+                                        >
+                                      </div>
+                                      <span aria-hidden="true">: </span
+                                      ><span data-a-target="chat-line-message-body" dir="auto"
+                                        ><span
+                                          class="text-fragment"
+                                          data-a-target="chat-message-text"
+                                          >notes are here </span
+                                        ><a
+                                          class="link-fragment"
+                                          href="https://example.com/fixture-notes"
+                                          rel="noopener noreferrer"
+                                          target="_blank"
+                                          >https://example.com/fixture-notes</a
+                                        ></span
+                                      >
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div>
+                          <div
+                            class="chat-line__message"
+                            role="group"
+                            tabindex="0"
+                            data-a-target="chat-line-message"
+                            data-a-user="fixture_user_four"
+                          >
+                            <div>
+                              <div class="chat-line__message-highlight"></div>
+                              <div class="chat-line__message-container">
+                                <div></div>
+                                <div>
+                                  <div class="chat-line__no-background">
+                                    <div>
+                                      <div class="chat-line__username-container">
+                                        <span></span
+                                        ><span
+                                          class="chat-line__username"
+                                          role="button"
+                                          tabindex="0"
+                                          ><span
+                                            ><span
+                                              class="chat-author__display-name"
+                                              data-a-target="chat-message-username"
+                                              data-a-user="fixture_user_four"
+                                              data-test-selector="message-username"
+                                              >FixtureUserFour</span
+                                            ></span
+                                          ></span
+                                        >
+                                      </div>
+                                      <span aria-hidden="true">: </span
+                                      ><span data-a-target="chat-line-message-body" dir="auto"
+                                        ><span
+                                          class="text-fragment"
+                                          data-a-target="chat-message-text"
+                                          >こんばんは、今日も楽しみです</span
+                                        ></span
+                                      >
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div>
+                          <div
+                            class="chat-line__message"
+                            role="group"
+                            tabindex="0"
+                            data-a-target="chat-line-message"
+                            data-a-user="fixture_user_five"
+                          >
+                            <div>
+                              <div class="chat-line__message-highlight"></div>
+                              <div class="chat-line__message-container">
+                                <div></div>
+                                <div>
+                                  <div class="chat-line__no-background">
+                                    <div>
+                                      <div class="chat-line__username-container">
+                                        <span
+                                          ><div>
+                                            <button data-a-target="chat-badge">
+                                              <img
+                                                alt="Verified badge"
+                                                class="chat-badge"
+                                                src="https://static-cdn.jtvnw.net/badges/v1/d12a2e27-16f6-41d0-ab77-b780518f00a3/1"
+                                                srcset="
+                                                  https://static-cdn.jtvnw.net/badges/v1/d12a2e27-16f6-41d0-ab77-b780518f00a3/1 1x
+                                                "
+                                              />
+                                            </button></div></span
+                                        ><span
+                                          class="chat-line__username"
+                                          role="button"
+                                          tabindex="0"
+                                          ><span
+                                            ><span
+                                              class="chat-author__display-name"
+                                              data-a-target="chat-message-username"
+                                              data-a-user="fixture_user_five"
+                                              data-test-selector="message-username"
+                                              >FixtureUserFive</span
+                                            ></span
+                                          ></span
+                                        >
+                                      </div>
+                                      <span aria-hidden="true">: </span
+                                      ><span data-a-target="chat-line-message-body" dir="auto"
+                                        ><span
+                                          class="text-fragment"
+                                          data-a-target="chat-message-text"
+                                          >gg</span
+                                        ></span
+                                      >
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

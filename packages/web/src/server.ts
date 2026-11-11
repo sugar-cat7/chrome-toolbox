@@ -1,7 +1,8 @@
-import { observeHttp } from '@starter/observability';
-import { failure, publicFailure, errorStatus } from '@starter/contracts';
+import { observeHttp } from '@chrome-toolbox/observability';
+import { failure, publicFailure, errorStatus } from '@chrome-toolbox/contracts';
 import start from '@tanstack/react-start/server-entry';
 import { compressAsset } from './assets.ts';
+import { handleNotes } from './notes.ts';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -18,7 +19,7 @@ export default {
         const pathname = new URL(request.url).pathname;
         if (pathname.startsWith('/assets/'))
           return compressAsset(request, await env.ASSETS.fetch(request));
-        if (pathname === '/health') return Response.json({ ok: true, storage: 'service-binding' });
+        if (pathname === '/health') return Response.json({ ok: true, storage: 'volatile-sample' });
         if (pathname.startsWith('/api/') || pathname.startsWith('/extensions/')) {
           if (request.method !== 'GET' && env.WRITE_MODE !== 'allow') {
             const error = failure('write_forbidden');
@@ -33,7 +34,7 @@ export default {
               },
             );
           }
-          return env.API.fetch(request);
+          return handleNotes(request, env);
         }
         return start.fetch(request);
       },

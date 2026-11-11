@@ -1,0 +1,1521 @@
+{
+  "5": {
+    "input": {
+      "windowMinutes": 5,
+      "questions": [
+        {
+          "text": "訳:次はどのボスに行くの？",
+          "count": 2
+        },
+        {
+          "text": "訳:lets gooo",
+          "count": 2
+        },
+        {
+          "text": "訳:what game is this?",
+          "count": 1
+        },
+        {
+          "text": "buy cheap made-up coins now",
+          "count": 1
+        },
+        {
+          "text": "訳:lol",
+          "count": 1
+        },
+        {
+          "text": "訳:lets gooo 0",
+          "count": 1
+        },
+        {
+          "text": "which boss is next? 5",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "訳:¿qué juego es?",
+          "count": 1
+        },
+        {
+          "text": "訳:Which boss is next?",
+          "count": 1
+        },
+        {
+          "text": "訳:gg 8",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow 2",
+          "count": 1
+        },
+        {
+          "text": "訳:!!! 4",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow",
+          "count": 1
+        }
+      ],
+      "peaks": [
+        [
+          {
+            "text": "訳:今のは上手い",
+            "count": 3
+          },
+          {
+            "text": "THAT DODGE WAS CLEAN",
+            "count": 2
+          },
+          {
+            "text": "次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "stream starts at nine tomorrow 4",
+            "count": 1
+          },
+          {
+            "text": "which boss is next?",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "what game is this?",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "the ending is the twin, made-up spoiler",
+            "count": 3
+          },
+          {
+            "text": "Which boss is next?",
+            "count": 2
+          },
+          {
+            "text": "what game is this?",
+            "count": 2
+          },
+          {
+            "text": "stream starts at nine tomorrow",
+            "count": 2
+          },
+          {
+            "text": "you are a made-up insult",
+            "count": 2
+          },
+          {
+            "text": "お知らせ: 明日も配信",
+            "count": 1
+          },
+          {
+            "text": "🔥🔥 7",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es?",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "what game is this?",
+            "count": 3
+          },
+          {
+            "text": "訳:🔥🔥",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "初見です",
+            "count": 1
+          },
+          {
+            "text": "ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+            "count": 1
+          },
+          {
+            "text": "lets gooo",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es? 8",
+            "count": 1
+          }
+        ]
+      ],
+      "others": [
+        {
+          "text": "gg",
+          "count": 3
+        },
+        {
+          "text": "今のは上手い",
+          "count": 2
+        },
+        {
+          "text": "the ending is the twin, made-up spoiler 2",
+          "count": 2
+        },
+        {
+          "text": "gg 5",
+          "count": 1
+        },
+        {
+          "text": "lol",
+          "count": 1
+        },
+        {
+          "text": "訳:buy cheap made-up coins now",
+          "count": 1
+        },
+        {
+          "text": "訳:gg",
+          "count": 1
+        },
+        {
+          "text": "次はどのボスに行くの？ 7",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 8",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "初見です 3",
+          "count": 1
+        },
+        {
+          "text": "今のは上手い 6",
+          "count": 1
+        },
+        {
+          "text": "訳:lol 1",
+          "count": 1
+        },
+        {
+          "text": "初見です 5",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 5",
+          "count": 1
+        },
+        {
+          "text": "lol 8",
+          "count": 1
+        },
+        {
+          "text": "lets gooo 8",
+          "count": 1
+        }
+      ]
+    },
+    "answered": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 5,
+        "total": 189,
+        "languages": ["es", "ja", "en"],
+        "from": 1793361358556,
+        "generatedAt": 1793361630000,
+        "topics": ["ボス戦の話", "次の配信"],
+        "questions": [
+          {
+            "text": "ボスの順番",
+            "count": 4
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          },
+          {
+            "text": "buy cheap made-up coins now",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          },
+          {
+            "text": "訳:lets gooo 0",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34,
+            "label": "開幕"
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37,
+            "label": "撃破"
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 34
+      }
+    },
+    "failed": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 5,
+        "total": 189,
+        "languages": ["es", "ja", "en"],
+        "from": 1793361358556,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 2
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          },
+          {
+            "text": "buy cheap made-up coins now",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 34,
+        "modelFailed": true
+      }
+    },
+    "givenUp": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 5,
+        "total": 189,
+        "languages": ["es", "ja", "en"],
+        "from": 1793361358556,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 2
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          },
+          {
+            "text": "buy cheap made-up coins now",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 34
+      }
+    }
+  },
+  "15": {
+    "input": {
+      "windowMinutes": 15,
+      "questions": [
+        {
+          "text": "訳:次はどのボスに行くの？",
+          "count": 3
+        },
+        {
+          "text": "訳:Which boss is next?",
+          "count": 3
+        },
+        {
+          "text": "訳:lets gooo",
+          "count": 2
+        },
+        {
+          "text": "LETS GOOOOOO",
+          "count": 2
+        },
+        {
+          "text": "訳:what game is this?",
+          "count": 1
+        },
+        {
+          "text": "buy cheap made-up coins now",
+          "count": 1
+        },
+        {
+          "text": "訳:lol",
+          "count": 1
+        },
+        {
+          "text": "訳:lets gooo 0",
+          "count": 1
+        },
+        {
+          "text": "which boss is next? 5",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "訳:¿qué juego es?",
+          "count": 1
+        },
+        {
+          "text": "訳:gg 8",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow 2",
+          "count": 1
+        },
+        {
+          "text": "訳:!!! 4",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow",
+          "count": 1
+        },
+        {
+          "text": "訳:you are a made-up insult",
+          "count": 1
+        },
+        {
+          "text": "訳:gg",
+          "count": 1
+        },
+        {
+          "text": "訳:🔥🔥 0",
+          "count": 1
+        },
+        {
+          "text": "初見です 1",
+          "count": 1
+        }
+      ],
+      "peaks": [
+        [
+          {
+            "text": "訳:今のは上手い",
+            "count": 3
+          },
+          {
+            "text": "THAT DODGE WAS CLEAN",
+            "count": 2
+          },
+          {
+            "text": "次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "stream starts at nine tomorrow 4",
+            "count": 1
+          },
+          {
+            "text": "which boss is next?",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "what game is this?",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "the ending is the twin, made-up spoiler",
+            "count": 3
+          },
+          {
+            "text": "Which boss is next?",
+            "count": 2
+          },
+          {
+            "text": "what game is this?",
+            "count": 2
+          },
+          {
+            "text": "stream starts at nine tomorrow",
+            "count": 2
+          },
+          {
+            "text": "you are a made-up insult",
+            "count": 2
+          },
+          {
+            "text": "お知らせ: 明日も配信",
+            "count": 1
+          },
+          {
+            "text": "🔥🔥 7",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es?",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "what game is this?",
+            "count": 3
+          },
+          {
+            "text": "訳:🔥🔥",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "初見です",
+            "count": 1
+          },
+          {
+            "text": "ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+            "count": 1
+          },
+          {
+            "text": "lets gooo",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es? 8",
+            "count": 1
+          }
+        ]
+      ],
+      "others": [
+        {
+          "text": "gg",
+          "count": 4
+        },
+        {
+          "text": "今のは上手い",
+          "count": 3
+        },
+        {
+          "text": "lol",
+          "count": 2
+        },
+        {
+          "text": "訳:buy cheap made-up coins now",
+          "count": 2
+        },
+        {
+          "text": "the ending is the twin, made-up spoiler 2",
+          "count": 2
+        },
+        {
+          "text": "lol 8",
+          "count": 2
+        },
+        {
+          "text": "gg 5",
+          "count": 1
+        },
+        {
+          "text": "訳:gg",
+          "count": 1
+        },
+        {
+          "text": "次はどのボスに行くの？ 7",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 8",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "初見です 3",
+          "count": 1
+        },
+        {
+          "text": "今のは上手い 6",
+          "count": 1
+        },
+        {
+          "text": "訳:lol 1",
+          "count": 1
+        },
+        {
+          "text": "初見です 5",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 5",
+          "count": 1
+        },
+        {
+          "text": "lets gooo 8",
+          "count": 1
+        },
+        {
+          "text": "gg 2",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow 6",
+          "count": 1
+        },
+        {
+          "text": "訳:the ending is the twin, made-up spoiler",
+          "count": 1
+        },
+        {
+          "text": "訳:LETS GOOOOOO 1",
+          "count": 1
+        },
+        {
+          "text": "訳:LETS GOOOOOO",
+          "count": 1
+        }
+      ]
+    },
+    "answered": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 15,
+        "total": 265,
+        "languages": ["es", "ja", "en"],
+        "from": 1793360743268,
+        "generatedAt": 1793361630000,
+        "topics": ["ボス戦の話", "次の配信"],
+        "questions": [
+          {
+            "text": "ボスの順番",
+            "count": 6
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          },
+          {
+            "text": "buy cheap made-up coins now",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34,
+            "label": "開幕"
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37,
+            "label": "撃破"
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 43
+      }
+    },
+    "failed": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 15,
+        "total": 265,
+        "languages": ["es", "ja", "en"],
+        "from": 1793360743268,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 3
+          },
+          {
+            "text": "訳:Which boss is next?",
+            "count": 3
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 43,
+        "modelFailed": true
+      }
+    },
+    "givenUp": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 15,
+        "total": 265,
+        "languages": ["es", "ja", "en"],
+        "from": 1793360743268,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 3
+          },
+          {
+            "text": "訳:Which boss is next?",
+            "count": 3
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 43
+      }
+    }
+  },
+  "30": {
+    "input": {
+      "windowMinutes": 30,
+      "questions": [
+        {
+          "text": "訳:次はどのボスに行くの？",
+          "count": 3
+        },
+        {
+          "text": "訳:Which boss is next?",
+          "count": 3
+        },
+        {
+          "text": "訳:lets gooo",
+          "count": 2
+        },
+        {
+          "text": "LETS GOOOOOO",
+          "count": 2
+        },
+        {
+          "text": "訳:what game is this?",
+          "count": 1
+        },
+        {
+          "text": "buy cheap made-up coins now",
+          "count": 1
+        },
+        {
+          "text": "訳:lol",
+          "count": 1
+        },
+        {
+          "text": "訳:lets gooo 0",
+          "count": 1
+        },
+        {
+          "text": "which boss is next? 5",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "訳:¿qué juego es?",
+          "count": 1
+        },
+        {
+          "text": "訳:gg 8",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow 2",
+          "count": 1
+        },
+        {
+          "text": "訳:!!! 4",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow",
+          "count": 1
+        },
+        {
+          "text": "訳:you are a made-up insult",
+          "count": 1
+        },
+        {
+          "text": "訳:gg",
+          "count": 1
+        },
+        {
+          "text": "訳:🔥🔥 0",
+          "count": 1
+        },
+        {
+          "text": "初見です 1",
+          "count": 1
+        },
+        {
+          "text": "which boss is next?",
+          "count": 1
+        },
+        {
+          "text": "初見です",
+          "count": 1
+        },
+        {
+          "text": "gg",
+          "count": 1
+        },
+        {
+          "text": "you are a made-up insult",
+          "count": 1
+        },
+        {
+          "text": "THAT DODGE WAS CLEAN",
+          "count": 1
+        }
+      ],
+      "peaks": [
+        [
+          {
+            "text": "訳:今のは上手い",
+            "count": 3
+          },
+          {
+            "text": "THAT DODGE WAS CLEAN",
+            "count": 2
+          },
+          {
+            "text": "次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "stream starts at nine tomorrow 4",
+            "count": 1
+          },
+          {
+            "text": "which boss is next?",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "what game is this?",
+            "count": 1
+          },
+          {
+            "text": "訳:lol",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "the ending is the twin, made-up spoiler",
+            "count": 3
+          },
+          {
+            "text": "Which boss is next?",
+            "count": 2
+          },
+          {
+            "text": "what game is this?",
+            "count": 2
+          },
+          {
+            "text": "stream starts at nine tomorrow",
+            "count": 2
+          },
+          {
+            "text": "you are a made-up insult",
+            "count": 2
+          },
+          {
+            "text": "お知らせ: 明日も配信",
+            "count": 1
+          },
+          {
+            "text": "🔥🔥 7",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es?",
+            "count": 1
+          }
+        ],
+        [
+          {
+            "text": "what game is this?",
+            "count": 3
+          },
+          {
+            "text": "訳:🔥🔥",
+            "count": 1
+          },
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 1
+          },
+          {
+            "text": "初見です",
+            "count": 1
+          },
+          {
+            "text": "ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+            "count": 1
+          },
+          {
+            "text": "lets gooo",
+            "count": 1
+          },
+          {
+            "text": "¿qué juego es? 8",
+            "count": 1
+          }
+        ]
+      ],
+      "others": [
+        {
+          "text": "gg",
+          "count": 7
+        },
+        {
+          "text": "今のは上手い",
+          "count": 3
+        },
+        {
+          "text": "lol",
+          "count": 3
+        },
+        {
+          "text": "訳:buy cheap made-up coins now",
+          "count": 2
+        },
+        {
+          "text": "the ending is the twin, made-up spoiler 2",
+          "count": 2
+        },
+        {
+          "text": "初見です 5",
+          "count": 2
+        },
+        {
+          "text": "lol 8",
+          "count": 2
+        },
+        {
+          "text": "gg 5",
+          "count": 1
+        },
+        {
+          "text": "訳:gg",
+          "count": 1
+        },
+        {
+          "text": "次はどのボスに行くの？ 7",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 8",
+          "count": 1
+        },
+        {
+          "text": "訳:ｔｈａｔ ｄｏｄｇｅ ｗａｓ ｃｌｅａｎ",
+          "count": 1
+        },
+        {
+          "text": "初見です 3",
+          "count": 1
+        },
+        {
+          "text": "今のは上手い 6",
+          "count": 1
+        },
+        {
+          "text": "訳:lol 1",
+          "count": 1
+        },
+        {
+          "text": "🔥🔥 5",
+          "count": 1
+        },
+        {
+          "text": "lets gooo 8",
+          "count": 1
+        },
+        {
+          "text": "gg 2",
+          "count": 1
+        },
+        {
+          "text": "stream starts at nine tomorrow 6",
+          "count": 1
+        },
+        {
+          "text": "訳:the ending is the twin, made-up spoiler",
+          "count": 1
+        },
+        {
+          "text": "訳:LETS GOOOOOO 1",
+          "count": 1
+        },
+        {
+          "text": "訳:LETS GOOOOOO",
+          "count": 1
+        },
+        {
+          "text": "訳:lol 7",
+          "count": 1
+        },
+        {
+          "text": "お知らせ: 明日も配信 1",
+          "count": 1
+        },
+        {
+          "text": "what game is this? 6",
+          "count": 1
+        },
+        {
+          "text": "THAT DODGE WAS CLEAN 1",
+          "count": 1
+        },
+        {
+          "text": "初見です 4",
+          "count": 1
+        },
+        {
+          "text": "Which boss is next? 6",
+          "count": 1
+        },
+        {
+          "text": "lets gooo 7",
+          "count": 1
+        },
+        {
+          "text": "buy cheap made-up coins now",
+          "count": 1
+        },
+        {
+          "text": "次はどのボスに行くの？ 6",
+          "count": 1
+        }
+      ]
+    },
+    "answered": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 30,
+        "total": 369,
+        "languages": ["es", "ja", "en"],
+        "from": 1793359830029,
+        "generatedAt": 1793361630000,
+        "topics": ["ボス戦の話", "次の配信"],
+        "questions": [
+          {
+            "text": "ボスの順番",
+            "count": 6
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          },
+          {
+            "text": "buy cheap made-up coins now",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34,
+            "label": "開幕"
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37,
+            "label": "撃破"
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 59
+      }
+    },
+    "failed": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 30,
+        "total": 369,
+        "languages": ["es", "ja", "en"],
+        "from": 1793359830029,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 3
+          },
+          {
+            "text": "訳:Which boss is next?",
+            "count": 3
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 59,
+        "modelFailed": true
+      }
+    },
+    "givenUp": {
+      "ok": true,
+      "value": {
+        "windowMinutes": 30,
+        "total": 369,
+        "languages": ["es", "ja", "en"],
+        "from": 1793359830029,
+        "generatedAt": 1793361630000,
+        "topics": [],
+        "questions": [
+          {
+            "text": "訳:次はどのボスに行くの？",
+            "count": 3
+          },
+          {
+            "text": "訳:Which boss is next?",
+            "count": 3
+          },
+          {
+            "text": "訳:lets gooo",
+            "count": 2
+          },
+          {
+            "text": "LETS GOOOOOO",
+            "count": 2
+          },
+          {
+            "text": "訳:what game is this?",
+            "count": 1
+          }
+        ],
+        "peaks": [
+          {
+            "minute": 1793361480000,
+            "count": 34
+          },
+          {
+            "minute": 1793361540000,
+            "count": 37
+          },
+          {
+            "minute": 1793361600000,
+            "count": 27
+          }
+        ],
+        "important": [
+          {
+            "author": "@made-up-viewer-8",
+            "text": "訳:🔥🔥",
+            "at": 1793361628220
+          },
+          {
+            "author": "@made-up-viewer-5",
+            "text": "what game is this?",
+            "at": 1793361606419
+          },
+          {
+            "author": "@made-up-viewer-4",
+            "text": "¿qué juego es? 8",
+            "at": 1793361600342
+          },
+          {
+            "author": "@made-up-viewer-10",
+            "text": "¿qué juego es?",
+            "at": 1793361584929
+          },
+          {
+            "author": "@made-up-viewer-9",
+            "text": "the ending is the twin, made-up spoiler",
+            "at": 1793361563940
+          }
+        ],
+        "unprocessed": 59
+      }
+    }
+  }
+}

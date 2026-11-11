@@ -7,15 +7,15 @@ export default defineConfig(({ mode }) => {
     throw new Error(`Unknown environment: ${environment}`);
   return {
     worker: {
-      name: 'super-starter-web',
+      name: 'chrome-toolbox-web',
       entrypoint,
       compatibilityDate: '2026-10-09',
       compatibilityFlags: ['nodejs_compat'],
       workersDev: false,
       assets: { runWorkerFirst: ['/assets/*'] },
       env: {
-        OTEL_SERVICE_NAME: bindings.text('super-starter-web'),
-        OTEL_INSTANCE: bindings.text('super-starter'),
+        OTEL_SERVICE_NAME: bindings.text('chrome-toolbox-web'),
+        OTEL_INSTANCE: bindings.text('chrome-toolbox'),
         OTEL_RUN_ID: bindings.text(
           environment === 'local' ? (process.env.STARTER_OTEL_RUN_ID ?? 'local') : environment,
         ),
@@ -25,7 +25,6 @@ export default defineConfig(({ mode }) => {
         ),
         ASSETS: bindings.assets(),
         WRITE_MODE: bindings.text(environment === 'local' ? 'allow' : 'deny'),
-        API: bindings.worker({ worker: 'super-starter-api' }),
       },
     },
   };
