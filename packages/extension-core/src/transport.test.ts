@@ -5,7 +5,7 @@ import { createClefJudge } from './toxicity.ts';
 import { createQueue } from './queue.ts';
 import { normalizeFetch, readResponseText, type ResultFetch } from './transport.ts';
 
-const baseUrl = 'http://127.0.0.1:18083';
+const baseUrl = 'https://127.0.0.1:18083';
 
 describe('ResultFetch compatibility', () => {
   it('normalizes a rejected legacy fetch into AppError', async () => {
