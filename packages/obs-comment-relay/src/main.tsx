@@ -46,7 +46,7 @@ function Control() {
     setBusy(false);
   }, []);
 
-  const refresh = useCallback(async (): Promise<Result<void, PublicError>> => {
+  const refresh = useCallback(async (): Promise<Result<RelayStatus, PublicError>> => {
     const [s, set] = await Promise.all([nativeRelay.status(), nativeRelay.settings()]);
     if (s.ok) setStatus(s.value);
     else setError(s.error);
@@ -64,7 +64,7 @@ function Control() {
         overlayPort: set.value.overlayPort,
       });
     }
-    return s.ok ? { ok: true, value: undefined } : { ok: false, error: s.error };
+    return s.ok ? { ok: true, value: s.value } : { ok: false, error: s.error };
   }, []);
 
   useEffect(() => {
@@ -128,6 +128,22 @@ function Control() {
       (err) => fail(publicFailure(err)),
     );
 
+  const refreshStatus = () =>
+    launch(
+      async () => {
+        setBusy(true);
+        setError(undefined);
+        const result = await refresh();
+        setBusy(false);
+        if (!result.ok) {
+          fail(result.error);
+          return;
+        }
+        setMessage(`取得: ${result.value.source} / 推論: ${result.value.inference}`);
+      },
+      (err) => fail(publicFailure(err)),
+    );
+
   const counters = status?.counters;
   return (
     <main>
@@ -155,6 +171,9 @@ function Control() {
         </button>{' '}
         <button disabled={busy} onClick={() => run(() => nativeRelay.stop())}>
           切断
+        </button>{' '}
+        <button disabled={busy} onClick={refreshStatus}>
+          状態を取得
         </button>
         <p>
           取得: {status?.source ?? '—'} / 推論: {status?.inference ?? '—'}

@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "tauri dev",
     "dev:renderer": "pnpm build:reader && vp dev --host 127.0.0.1 --strictPort",
-    "build:renderer": "vp build && pnpm build:reader",
+    "build:renderer": "pnpm build:reader && vp build",
     "check": "vp check .",
     "test": "node ../../tools/quality/vitest.ts --config vitest.config.ts",
     "test:rust": "node ../../tools/quality/native.ts rust",
@@ -49,6 +49,12 @@
     "webdriverio": "catalog:"
   },
   "starter": {
-    "runtime": "desktop"
+    "runtime": "desktop",
+    "nativeE2E": {
+      "scenarios": [
+        "smoke"
+      ],
+      "telemetry": false
+    }
   }
 }

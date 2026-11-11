@@ -76,7 +76,13 @@ if (operation === 'rust') {
   );
   const owned = path.join(root, 'artifacts', `native-${process.platform}`);
   mkdirSync(owned, { recursive: true });
-  for (const scenario of ['save', 'cancel', 'error']) {
+  const manifest = JSON.parse(readFileSync(path.join(cwd, 'package.json'), 'utf8')) as {
+    starter?: { nativeE2E?: { scenarios?: string[]; telemetry?: boolean } };
+  };
+  const e2eConfig = manifest.starter?.nativeE2E ?? {};
+  const scenarios = e2eConfig.scenarios ?? ['save', 'cancel', 'error'];
+  const telemetryEnabled = e2eConfig.telemetry !== false;
+  for (const scenario of scenarios) {
     const reportDirectory = path.join(owned, scenario);
     rmSync(reportDirectory, { recursive: true, force: true });
     mkdirSync(reportDirectory, { recursive: true });
@@ -112,29 +118,34 @@ if (operation === 'rust') {
             JSON.parse(readFileSync(path.join(reportDirectory, filename), 'utf8')) as unknown,
         ),
     );
-    const telemetry = Object.fromEntries(
-      ['traces', 'logs', 'metrics'].map((signal) => {
-        const lines = readFileSync(path.join(telemetryDirectory, `native.${signal}.jsonl`), 'utf8')
-          .trim()
-          .split('\n');
-        if (!lines.length) throw new Error(`Native ${signal} were not emitted`);
-        const payloads = lines.map((line) => JSON.parse(line) as unknown);
-        const text = JSON.stringify(payloads);
-        if (
-          !text.includes(runId) ||
-          !text.includes('notes.add') ||
-          !text.includes('notes.export') ||
-          text.includes('Native note') ||
-          text.includes('notes.json')
+    const telemetry = telemetryEnabled
+      ? Object.fromEntries(
+          ['traces', 'logs', 'metrics'].map((signal) => {
+            const lines = readFileSync(
+              path.join(telemetryDirectory, `native.${signal}.jsonl`),
+              'utf8',
+            )
+              .trim()
+              .split('\n');
+            if (!lines.length) throw new Error(`Native ${signal} were not emitted`);
+            const payloads = lines.map((line) => JSON.parse(line) as unknown);
+            const text = JSON.stringify(payloads);
+            if (
+              !text.includes(runId) ||
+              !text.includes('notes.add') ||
+              !text.includes('notes.export') ||
+              text.includes('Native note') ||
+              text.includes('notes.json')
+            )
+              throw new Error(
+                `Native ${signal} are missing correlation or contain private application data`,
+              );
+            if (signal !== 'metrics' && !text.includes('app.diagnostic.id'))
+              throw new Error(`Native ${signal} did not record the expected input failure`);
+            return [signal, { records: lines.length }];
+          }),
         )
-          throw new Error(
-            `Native ${signal} are missing correlation or contain private application data`,
-          );
-        if (signal !== 'metrics' && !text.includes('app.diagnostic.id'))
-          throw new Error(`Native ${signal} did not record the expected input failure`);
-        return [signal, { records: lines.length }];
-      }),
-    );
+      : null;
     writeFileSync(
       path.join(reportDirectory, 'verified.json'),
       `${JSON.stringify({ scenario, cases, os: process.platform, binary, runId, sha: headSha(root), contentId: contentId(root), telemetry }, null, 2)}\n`,
