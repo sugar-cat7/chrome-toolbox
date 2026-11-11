@@ -151,7 +151,7 @@ pub fn create(app: &tauri::AppHandle, session: &SourceSession) -> Result<(), App
     .on_new_window(|_, _| NewWindowResponse::Deny)
     .on_download(|_, _| false)
     .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
-    .initialization_script(&reader_script(session))
+    .initialization_script(reader_script(session))
     .build()
     .map_err(|_| AppError::new(ErrorCode::StateUnavailable))?;
     Ok(())

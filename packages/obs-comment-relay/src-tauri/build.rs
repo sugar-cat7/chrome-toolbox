@@ -23,9 +23,19 @@ fn main() {
         std::process::exit(1);
     }
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist-reader/reader.js");
-    let target = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("reader.js");
+    let out_dir = match env::var("OUT_DIR") {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("OUT_DIR is not set: {error}");
+            std::process::exit(1);
+        }
+    };
+    let target = Path::new(&out_dir).join("reader.js");
     let script = fs::read_to_string(&source)
         .unwrap_or_else(|_| "/* reader bundle was not built */\n".to_owned());
-    fs::write(&target, script).expect("write embedded reader");
+    if let Err(error) = fs::write(&target, script) {
+        eprintln!("failed to write embedded reader: {error}");
+        std::process::exit(1);
+    }
     println!("cargo:rerun-if-changed={}", source.display());
 }
